@@ -389,6 +389,17 @@ test('official login: warns before switching, Enter means No, y applies, and the
   assert.equal(JSON.parse(j.stdout).officialLogin, true);
 });
 
+test('run from the home folder through a symlinked HOME: no trust question', { skip: WIN }, async () => {
+  // macOS temp folders (/var -> /private/var) and some servers' /home are symlinks; cwd comes back resolved.
+  const real = tmpHome();
+  const link = `${real}-link`;
+  fs.symlinkSync(real, link);
+  const r = await runCli(['setup', '--no-install', '--no-test'], { home: link, env: { EVOLINK_API_KEY: KEY }, input: '\n\n' });
+  assert.equal(r.code, 0, r.all);
+  assert.doesNotMatch(r.stdout, /Mark the current folder as trusted/);
+  assert.equal(settingsOf(real).env.ANTHROPIC_AUTH_TOKEN, KEY);
+});
+
 test('test home: announced as test mode, and every command shown carries the same HOME', { skip: WIN }, async () => {
   const home = tmpHome();
   const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });

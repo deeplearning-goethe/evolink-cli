@@ -14,7 +14,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
 const LOW_BALANCE_CREDITS = 50;
@@ -1523,7 +1523,7 @@ async function decideTrust(opts, interactive, paths) {
     dirs.push(realpathOr(opts.trust));
   }
   const cwd = process.cwd();
-  if (!opts.trust && interactive && process.platform !== 'win32' && path.resolve(cwd) !== os.homedir() && opts.onboarding !== false) {
+  if (!opts.trust && interactive && process.platform !== 'win32' && realpathOr(cwd) !== realpathOr(os.homedir()) && opts.onboarding !== false) {
     const g = readJson(paths.globalConfig);
     if (g.data?.projects?.[cwd]?.hasTrustDialogAccepted !== true) {
       ui.print('');

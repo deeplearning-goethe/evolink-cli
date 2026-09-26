@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.1
+# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.2
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
@@ -12,8 +12,8 @@
 set -u
 
 evolink_main() {
-  local version="0.1.1"
-  local expected_sha="a3a77156264a6ef6aaa423d6e86d411ca384318a581ff559268230efb1991e4a"
+  local version="0.1.2"
+  local expected_sha="f697a1667a8e0026d20712f178b0c149f1948e833ac863e677cd1b960f00c647"
   local home_dir="${EVOLINK_HOME:-$HOME/.evolink}"
   local zh=0
   case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in zh* | *_CN* | *_TW* | *_HK*) zh=1 ;; esac
@@ -73,7 +73,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.1';
+export const VERSION = '0.1.2';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
 const LOW_BALANCE_CREDITS = 50;
@@ -1582,7 +1582,7 @@ async function decideTrust(opts, interactive, paths) {
     dirs.push(realpathOr(opts.trust));
   }
   const cwd = process.cwd();
-  if (!opts.trust && interactive && process.platform !== 'win32' && path.resolve(cwd) !== os.homedir() && opts.onboarding !== false) {
+  if (!opts.trust && interactive && process.platform !== 'win32' && realpathOr(cwd) !== realpathOr(os.homedir()) && opts.onboarding !== false) {
     const g = readJson(paths.globalConfig);
     if (g.data?.projects?.[cwd]?.hasTrustDialogAccepted !== true) {
       ui.print('');
