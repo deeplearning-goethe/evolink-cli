@@ -72,9 +72,9 @@ GitHub Actions 在每次推送到 main、每个 PR，以及每天 09:00（北京
 
 | 平台 | 已验证 |
 |---|---|
-| Ubuntu 24.04（Node 22） | 自动化测试 39/39；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 读取配置并请求模拟网关；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常 |
+| Ubuntu 24.04（Node 22） | 自动化测试 40/40；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 读取配置并请求模拟网关；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常 |
 | macOS 26（Node 24） | 上一版：自动化测试、伪终端交互、真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
-| Windows 10 / 11 | 还没有实测，`setup.ps1` 只做了静态检查（纯 ASCII、CRLF、内嵌 base64 与 SHA-256） |
+| Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | 自动化测试 36 项（另 3 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
 
 ## 开发
 
