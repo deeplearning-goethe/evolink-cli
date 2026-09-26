@@ -7,7 +7,10 @@ mock gateway, and reports the screens it lands on:
   B. same settings but a fresh ~/.claude.json (no onboarding flag)
   C. evolink setup --trust <project>
 
-    python3 test/real_claude_firstrun.py [path-to-claude]
+    python3 test/real_claude_firstrun.py [path-to-claude] [--check] [--dump]
+
+--check exits non-zero unless A shows the trust dialog, B the theme picker and C the main prompt,
+with no login or API-key screen anywhere (used by CI).
 """
 import json
 import os
@@ -23,7 +26,8 @@ import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE = shutil.which("node")
-CLAUDE = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser("~/.local/bin/claude")
+POSITIONAL = [a for a in sys.argv[1:] if not a.startswith("--")]
+CLAUDE = POSITIONAL[0] if POSITIONAL else os.path.expanduser("~/.local/bin/claude")
 KEY = "sk-" + "Fr5tRun0" * 6
 PORT = 18767
 
@@ -123,6 +127,17 @@ def main():
             print(f"\n===== screen text {label} =====\n{t[-2500:]}")
     for h in (home, home_b, home_c):
         shutil.rmtree(h, ignore_errors=True)
+    if "--check" in sys.argv:
+        # Each case must land on its own screen, and none may ask for a login or an API-key approval.
+        expect = {"A.": ("trust dialog", {"theme picker"}), "B.": ("theme picker", set()), "C.": ("main prompt", {"trust dialog", "theme picker"})}
+        never = {"login method", "api key approval", "connect error"}
+        bad = []
+        for name, screens in results.items():
+            want, not_here = expect[name[:2]]
+            if want not in screens or (never | not_here) & set(screens):
+                bad.append(name)
+        print("PASS first-run screens" if not bad else "FAIL first-run screens: " + ", ".join(bad))
+        sys.exit(1 if bad else 0)
 
 
 if __name__ == "__main__":

@@ -18,7 +18,8 @@
   "scripts": {
     "test": "node --test test/unit.test.mjs test/cli.test.mjs",
     "test:interactive": "python3 test/interactive_pty.py && python3 test/interactive_pty.py --via-bootstrap",
-    "test:claude": "node test/real_claude_check.mjs && python3 test/real_claude_firstrun.py && node test/real_claude_control.mjs",
-    "build": "node scripts/build.mjs"
+    "test:claude": "node test/real_claude_check.mjs && python3 test/real_claude_firstrun.py --check && node test/real_claude_control.mjs",
+    "build": "node scripts/build.mjs",
+    "test:windows": "node test/bootstrap_windows.mjs"
   }
 }

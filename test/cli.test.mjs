@@ -30,13 +30,34 @@ function tmpHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'evolink-cli-test-'));
 }
 
+const WIN = process.platform === 'win32';
+
+// A throwaway home. Windows reads USERPROFILE / APPDATA instead of HOME, and its programs (reg, tasklist,
+// even Node's own sockets) need SystemRoot and System32 on PATH.
+function homeEnv(home) {
+  if (!WIN) return { HOME: home, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin` };
+  const root = process.env.SystemRoot || 'C:\\Windows';
+  return {
+    HOME: home,
+    USERPROFILE: home,
+    APPDATA: path.join(home, 'AppData', 'Roaming'),
+    LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    SystemRoot: root,
+    windir: root,
+    ComSpec: process.env.ComSpec || path.join(root, 'System32', 'cmd.exe'),
+    PATHEXT: process.env.PATHEXT || '.COM;.EXE;.BAT;.CMD',
+    TEMP: os.tmpdir(),
+    TMP: os.tmpdir(),
+    PATH: [path.dirname(process.execPath), path.join(root, 'System32'), root, path.join(root, 'System32', 'WindowsPowerShell', 'v1.0')].join(';'),
+  };
+}
+
 function runCli(args, { home, env = {}, input, cwd } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd: cwd || home,
       env: {
-        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
-        HOME: home,
+        ...homeEnv(home),
         LANG: 'en_US.UTF-8',
         NO_COLOR: '1',
         EVOLINK_BASE_URL: gw.url,
@@ -73,7 +94,7 @@ test('fresh setup writes settings, onboarding flag and state, then test request 
   assert.equal(readJson(path.join(home, '.claude.json')).hasCompletedOnboarding, true);
   const state = readJson(path.join(home, '.evolink', 'state.json'));
   assert.ok(!JSON.stringify(state).includes(KEY.slice(3)), 'state file does not hold the key');
-  assert.equal((fs.statSync(path.join(home, '.claude', 'settings.json')).mode & 0o777).toString(8), '600');
+  if (!WIN) assert.equal((fs.statSync(path.join(home, '.claude', 'settings.json')).mode & 0o777).toString(8), '600');
   const calls = gw.requests.slice(before).map((q) => `${q.method} ${q.path}`);
   assert.deepEqual(calls, ['GET /v1/models', 'GET /v1/credits', 'POST /v1/messages']);
   const msg = gw.requests.at(-1);
@@ -141,10 +162,14 @@ test('existing config from another vendor is fixed and reset restores it exactly
 
 test('stale shell exports are neutralised in settings and reported with file:line', async () => {
   const home = tmpHome();
-  fs.writeFileSync(
-    path.join(home, '.zshrc'),
-    ['export PATH="$HOME/bin:$PATH"', 'export ANTHROPIC_API_KEY="sk-old-kimi-key-123456"', 'export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3', 'export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic'].join('\n'),
-  );
+  // Windows keeps them in the PowerShell profile instead of ~/.zshrc.
+  const profile = WIN ? path.join(home, 'Documents', 'PowerShell', 'Microsoft.PowerShell_profile.ps1') : path.join(home, '.zshrc');
+  const lines = WIN
+    ? ['$env:PATH = "C:\\bin;$env:PATH"', '$env:ANTHROPIC_API_KEY = "sk-old-kimi-key-123456"', '$env:ANTHROPIC_DEFAULT_SONNET_MODEL = "kimi-k3"', '$env:ANTHROPIC_BASE_URL = "https://api.moonshot.cn/anthropic"']
+    : ['export PATH="$HOME/bin:$PATH"', 'export ANTHROPIC_API_KEY="sk-old-kimi-key-123456"', 'export ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3', 'export ANTHROPIC_BASE_URL=https://api.moonshot.cn/anthropic'];
+  fs.mkdirSync(path.dirname(profile), { recursive: true });
+  fs.writeFileSync(profile, lines.join('\n'));
+  const shown = `~${path.sep}${path.relative(home, profile)}`;
   const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], {
     home,
     env: { EVOLINK_API_KEY: KEY, ANTHROPIC_DEFAULT_SONNET_MODEL: 'kimi-k3', CLAUDE_CODE_USE_VERTEX: '1' },
@@ -154,8 +179,8 @@ test('stale shell exports are neutralised in settings and reported with file:lin
   assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, '', 'unusable shell model neutralised');
   assert.equal(s.env.CLAUDE_CODE_USE_VERTEX, '', 'shell provider switch neutralised');
   assert.equal(s.env.ANTHROPIC_API_KEY, '');
-  assert.match(r.stdout, /~\/\.zshrc:2 · ANTHROPIC_API_KEY=sk-old-…3456/);
-  assert.match(r.stdout, /~\/\.zshrc:3 · ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3/);
+  assert.ok(r.stdout.includes(`${shown}:2 · ANTHROPIC_API_KEY=sk-old-…3456`), r.stdout);
+  assert.ok(r.stdout.includes(`${shown}:3 · ANTHROPIC_DEFAULT_SONNET_MODEL=kimi-k3`), r.stdout);
   assert.ok(!r.all.includes('sk-old-kimi-key-123456'), 'old key masked too');
 });
 
@@ -249,7 +274,11 @@ test('network failure exits with the network code and a hint', async () => {
 test('editor extension: login prompt disabled with comments kept, and undone by reset', async () => {
   const home = tmpHome();
   fs.mkdirSync(path.join(home, '.vscode', 'extensions', 'anthropic.claude-code-2.1.280-darwin-arm64'), { recursive: true });
-  const userDir = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Code', 'User') : path.join(home, '.config', 'Code', 'User');
+  const userDir = WIN
+    ? path.join(home, 'AppData', 'Roaming', 'Code', 'User')
+    : process.platform === 'darwin'
+      ? path.join(home, 'Library', 'Application Support', 'Code', 'User')
+      : path.join(home, '.config', 'Code', 'User');
   fs.mkdirSync(userDir, { recursive: true });
   const vs = path.join(userDir, 'settings.json');
   const original = '{\n  // keep me\n  "editor.fontSize": 13,\n}\n';
@@ -270,6 +299,12 @@ test('trust flag pre-trusts a folder and reset removes it', async () => {
   fs.mkdirSync(proj);
   const r = await runCli(['setup', '--yes', '--no-install', '--no-test', '--trust', proj], { home, env: { EVOLINK_API_KEY: KEY } });
   assert.equal(r.code, 0, r.all);
+  if (WIN) {
+    // Not supported on Windows yet: a warning, and nothing is written.
+    assert.match(r.stdout, /not supported on Windows yet/);
+    assert.equal(readJson(path.join(home, '.claude.json')).projects, undefined);
+    return;
+  }
   const real = fs.realpathSync(proj);
   assert.equal(readJson(path.join(home, '.claude.json')).projects[real].hasTrustDialogAccepted, true, 'keyed by the physical path');
   assert.doesNotMatch(r.stdout, /Yes, I trust this folder/);
@@ -354,7 +389,7 @@ test('official login: warns before switching, Enter means No, y applies, and the
   assert.equal(JSON.parse(j.stdout).officialLogin, true);
 });
 
-test('test home: announced as test mode, and every command shown carries the same HOME', async () => {
+test('test home: announced as test mode, and every command shown carries the same HOME', { skip: WIN }, async () => {
   const home = tmpHome();
   const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });
   assert.equal(r.code, 0, r.all);

@@ -1,0 +1,4 @@
+# Keep bytes exactly as committed on every OS: setup.ps1 is CRLF on purpose, and dist/ is checked byte for byte.
+* text=auto eol=lf
+*.ps1 -text
+dist/** -text
