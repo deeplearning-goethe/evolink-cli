@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    # Every day at 01:00 UTC (09:00 Beijing): catches breakage from new Claude Code releases.
+    - cron: '0 1 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unix:
+    name: ${{ matrix.os }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, node: 22, claude: true }
+          - { os: ubuntu-latest, node: 18, claude: false }
+          - { os: macos-latest, node: 22, claude: true }
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and end-to-end tests (throwaway HOME, local mock gateway)
+        run: npm test
+      - name: Interactive tests in a pseudo-terminal, direct and through setup.sh
+        run: npm run test:interactive
+      - name: dist/ is up to date with the source
+        if: matrix.os == 'ubuntu-latest' && matrix.node == 22
+        run: |
+          npm run build
+          git diff --exit-code -- dist
+      - name: Install the latest Claude Code into a private prefix
+        if: matrix.claude
+        run: |
+          npm install --prefix "$RUNNER_TEMP/cc" @anthropic-ai/claude-code@latest --no-fund --no-audit
+          "$RUNNER_TEMP/cc/node_modules/.bin/claude" --version
+      - name: Real Claude Code uses the written settings
+        if: matrix.claude
+        run: node test/real_claude_check.mjs "$RUNNER_TEMP/cc/node_modules/.bin/claude"
+      - name: Real Claude Code first-run screens
+        if: matrix.claude
+        run: python3 test/real_claude_firstrun.py "$RUNNER_TEMP/cc/node_modules/.bin/claude" --check
+
+  windows:
+    name: windows-latest · Node 22
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Unit and end-to-end tests (throwaway USERPROFILE, local mock gateway)
+        run: npm test
+      - name: setup.ps1 in Windows PowerShell 5.1 and PowerShell 7
+        run: node test/bootstrap_windows.mjs
