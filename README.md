@@ -2,7 +2,7 @@
 
 一条命令把 Claude Code 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.1.0，目前只支持 Claude Code，还没有发布到 npm。
+> **测试阶段**：v0.1.1，目前只支持 Claude Code，还没有发布到 npm。
 
 ## 用法
 

@@ -284,7 +284,7 @@ test('doctor: healthy setup passes, both-keys conflict is a problem, output is r
   assert.equal(d.code, 1, 'claude is not installed in the test PATH, so doctor reports one problem');
   noFullKey(d);
   assert.match(d.stdout, /Key valid/);
-  assert.match(d.stdout, /evolink-doctor 0\.1\.0/);
+  assert.match(d.stdout, /evolink-doctor \d+\.\d+\.\d+/);
   assert.match(d.stdout, /Claude Code is not installed/);
 
   const s = settingsOf(home);
@@ -362,6 +362,30 @@ test('test home: announced as test mode, and every command shown carries the sam
   assert.ok(r.stdout.includes(`HOME=${JSON.stringify(home)} claude`), r.stdout);
   assert.ok(r.stdout.includes(`HOME=${JSON.stringify(home)} node `), 'reset and doctor hints too');
   assert.doesNotMatch(r.stdout, /Open a new terminal/);
+
+  // setup.sh passes EVOLINK_CMD="~/…"; after HOME="…" on the same line, ~ would still be the real home.
+  const r2 = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY, EVOLINK_CMD: '~/.evolink/bin/evolink' } });
+  assert.ok(r2.stdout.includes(`HOME=${JSON.stringify(home)} ${home}/.evolink/bin/evolink reset`), r2.stdout);
+  assert.ok(!r2.stdout.includes(`HOME=${JSON.stringify(home)} ~`), 'no ~ after HOME=');
+});
+
+test('run through the installed launcher, hints name the launcher', { skip: process.platform === 'win32' }, async () => {
+  const home = tmpHome();
+  const cliDir = path.join(home, '.evolink', 'cli');
+  const binDir = path.join(home, '.evolink', 'bin');
+  fs.mkdirSync(cliDir, { recursive: true });
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.copyFileSync(CLI, path.join(cliDir, 'evolink.mjs'));
+  const launcher = path.join(binDir, 'evolink');
+  fs.writeFileSync(launcher, `#!/bin/sh\nexec "${process.execPath}" "${path.join(cliDir, 'evolink.mjs')}" "$@"\n`, { mode: 0o755 });
+  await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });
+  const d = await new Promise((resolve) => {
+    const child = spawn(launcher, ['doctor'], { cwd: home, env: { PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, HOME: home, LANG: 'en_US.UTF-8', NO_COLOR: '1', EVOLINK_BASE_URL: gw.url } });
+    let out = '';
+    child.stdout.on('data', (b) => (out += b));
+    child.on('close', () => resolve(out));
+  });
+  assert.ok(d.includes(`HOME=${JSON.stringify(home)} ${launcher} setup`), d);
 });
 
 test('an outdated Claude Code gets an update hint in setup and doctor', { skip: process.platform === 'win32' }, async () => {

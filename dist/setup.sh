@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.0
+# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.1
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
@@ -12,8 +12,8 @@
 set -u
 
 evolink_main() {
-  local version="0.1.0"
-  local expected_sha="fe1464eb071dd001ea8a1b8a568dad0a91846361c2a3ce7145d2cdc1820690f5"
+  local version="0.1.1"
+  local expected_sha="a3a77156264a6ef6aaa423d6e86d411ca384318a581ff559268230efb1991e4a"
   local home_dir="${EVOLINK_HOME:-$HOME/.evolink}"
   local zh=0
   case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in zh* | *_CN* | *_TW* | *_HK*) zh=1 ;; esac
@@ -73,7 +73,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.0';
+export const VERSION = '0.1.1';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
 const LOW_BALANCE_CREDITS = 50;
@@ -1176,12 +1176,19 @@ async function askSecret(question) {
 // ---------------------------------------------------------------------------
 // Command hint shown in "next steps" (how the user can run doctor / reset later)
 
-function commandHint() {
-  if (process.env.EVOLINK_CMD) return process.env.EVOLINK_CMD;
+// In a test home the hint follows HOME="…" on the same line, where ~ still means the real home: spell paths out.
+function commandHint(sandbox) {
+  const untilde = (s) => (sandbox && /^~(?=\/|$)/.test(s) ? os.homedir() + s.slice(1) : s);
+  if (process.env.EVOLINK_CMD) return untilde(process.env.EVOLINK_CMD);
   const self = process.argv[1] || '';
   if (/[\\/]_npx[\\/]/.test(self)) return 'npx -y @evolinkai/cli';
   if (which('evolink').length) return 'evolink';
-  return `node ${quoteWin(tildify(self))}`;
+  // Started through the launcher that setup.sh installed: point at the launcher, not the file behind it.
+  const launcher = path.join(evolinkHome(), 'bin', 'evolink');
+  if (process.platform !== 'win32' && realpathOr(self) === realpathOr(path.join(evolinkHome(), 'cli', 'evolink.mjs')) && isFile(launcher)) {
+    return sandbox ? launcher : tildify(launcher);
+  }
+  return `node ${quoteWin(sandbox ? self : tildify(self))}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1331,7 +1338,7 @@ async function cmdSetup(opts) {
 }
 
 function printOfficialWarning(official, sandbox) {
-  const cmd = sandboxPrefix(sandbox) + commandHint();
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
   ui.print('');
   ui.warn(
     L(
@@ -1803,7 +1810,7 @@ async function fixExecutionPolicy(interactive) {
 }
 
 function printNextSteps({ plan, claude, editors, trusted, sandbox }) {
-  const cmd = sandboxPrefix(sandbox) + commandHint();
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
   ui.print('');
   ui.title(`${ui.mark('ok')} ${L('配置完成', 'All set')}`);
   const n = [];
@@ -1816,8 +1823,7 @@ function printNextSteps({ plan, claude, editors, trusted, sandbox }) {
     );
   }
   if (sandbox) {
-    n.push(L('测试模式：在这个终端里启动 Claude Code 也要带上同一个 HOME，不带就会用你真实的配置：', 'Test mode: start Claude Code with the same HOME in this terminal, or it uses your real settings:'));
-    n.push(`${sandboxPrefix(sandbox)}claude`);
+    n.push(L(`测试模式：在这个终端里用 ${sandboxPrefix(sandbox)}claude 启动（不带 HOME 就会用你真实的配置）`, `Test mode: start it with ${sandboxPrefix(sandbox)}claude in this terminal (without HOME it uses your real settings)`));
   } else {
     n.push(L('打开一个新的终端窗口，进入你的项目文件夹：cd 你的项目路径', 'Open a new terminal and go to your project: cd <your project>'));
     n.push(L('运行：claude', 'Run: claude'));
@@ -1852,7 +1858,8 @@ function finish(result, opts, code = EXIT.OK) {
 
 async function cmdDoctor(opts) {
   const report = { command: 'doctor', version: VERSION, problems: [], warnings: [], summary: [] };
-  const cmd = sandboxPrefix(sandboxHome()) + commandHint();
+  const sandbox = sandboxHome();
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
   const problem = (s) => {
     report.problems.push(s);
     ui.err(s);

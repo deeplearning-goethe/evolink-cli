@@ -1,6 +1,6 @@
 {
   "name": "@evolinkai/cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "One-command setup for Claude Code on EvoLink: checks the key and balance, writes the config safely, and can undo it.",
   "private": true,
   "license": "UNLICENSED",
