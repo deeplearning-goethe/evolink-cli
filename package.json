@@ -1,0 +1,24 @@
+{
+  "name": "@evolinkai/cli",
+  "version": "0.1.0",
+  "description": "One-command setup for Claude Code on EvoLink: checks the key and balance, writes the config safely, and can undo it.",
+  "private": true,
+  "license": "UNLICENSED",
+  "type": "module",
+  "bin": {
+    "evolink": "bin/evolink.mjs"
+  },
+  "files": [
+    "bin/evolink.mjs",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node --test test/unit.test.mjs test/cli.test.mjs",
+    "test:interactive": "python3 test/interactive_pty.py && python3 test/interactive_pty.py --via-bootstrap",
+    "test:claude": "node test/real_claude_check.mjs && python3 test/real_claude_firstrun.py && node test/real_claude_control.mjs",
+    "build": "node scripts/build.mjs"
+  }
+}
