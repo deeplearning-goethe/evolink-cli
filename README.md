@@ -4,7 +4,7 @@
 
 一条命令把 Claude Code 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.1.2，目前只支持 Claude Code，还没有发布到 npm。
+> **测试阶段**：v0.1.3，目前只支持 Claude Code，还没有发布到 npm。
 
 ## 用法
 
@@ -32,8 +32,9 @@
 |---|---|---|
 | `~/.claude/settings.json` 的 `env` | `ANTHROPIC_BASE_URL=https://direct.evolink.ai`、`ANTHROPIC_AUTH_TOKEN=<Key>` | 官方推荐的位置，优先级高于 shell 变量；Windows 和 macOS 通用，关掉终端也不失效 |
 | 同上 | `ANTHROPIC_API_KEY=""` | 压住 shell 或注册表里残留的旧 Key。不压的话，旧 Key 会被优先使用，导致 401 并不停重试 |
-| 同上 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000` | Opus 5.5 单次预扣从约 $2.5 降到约 $0.7，避免"余额不足" |
-| 同上 | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | 减少非必要请求。**副作用是关掉自动更新**，加 `--no-disable-nonessential-traffic` 可以不设 |
+| 同上（仅加 `--max-output-tokens 32000` 时） | `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000` | 默认不设，跟随 Claude Code 自己的输出上限（Sonnet 5 为 64K，Opus 5.5 为 128K）。余额少时加这个参数，Opus 5.5 单次预扣从约 $2.5 降到约 $0.7 |
+| 同上（仅加 `--disable-nonessential-traffic` 时） | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | 默认不设。设了会减少非必要请求，**副作用是关掉自动更新** |
+| `~/.claude/settings.json` 顶层 | `"disableAutoMode": "disable"` | 先关掉 Claude Code 2.1.283 起默认开启的 auto mode。EvoLink 网关暂不支持它的审核请求：开着的话需要审核的命令会被拦下，而且每条命令会白白计费 4 次审核请求（09-28 线上实测）。加 `--auto-mode` 可以不关；网关修好后重跑 `setup --auto-mode` 即可恢复，`reset` 也会还原 |
 | 同上（仅在需要时） | 删除这把 Key 用不了的模型覆盖项（`ANTHROPIC_DEFAULT_*_MODEL`、`model` 等）以及 `CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY` | 从其他平台切换过来时常见的残留；不处理会报"模型不存在"，或者根本不走 EvoLink |
 | 同上（仅在需要时） | shell / 注册表里的上述残留变量，在这里置为 `""` | 配置文件里的值优先于 shell，写空值就能压住 |
 | `~/.claude.json` | `hasCompletedOnboarding: true`（只改这一个键；文件读不了就跳过，不覆盖） | 跳过首次启动的主题页和引导页 |
@@ -72,7 +73,7 @@ GitHub Actions 在每次推送到 main、每个 PR，以及每天 09:00（北京
 
 | 平台 | 已验证 |
 |---|---|
-| Ubuntu 24.04（Node 22） | 自动化测试 40/40；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 读取配置并请求模拟网关；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常 |
+| Ubuntu 24.04（Node 22） | 自动化测试 40/40；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 读取配置并请求模拟网关；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行 |
 | macOS 26（Node 24） | 上一版：自动化测试、伪终端交互、真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
 | Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | 自动化测试 36 项（另 3 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
 

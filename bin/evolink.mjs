@@ -14,9 +14,9 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.2';
+export const VERSION = '0.1.3';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
-export const DEFAULT_MAX_OUTPUT_TOKENS = 32000;
+export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
 const CLAUDE_PKG = '@anthropic-ai/claude-code';
 const REGISTRIES = { npmjs: 'https://registry.npmjs.org', npmmirror: 'https://registry.npmmirror.com' };
@@ -994,8 +994,8 @@ function printBalance(balance) {
     ui.sub(
       ui.dim(
         L(
-          '余额偏低：Opus 等高价模型每次请求会先按输出上限预留额度，不够就会报"余额不足"。本工具会把输出上限设为 32000，单次预留约降到原来的四分之一。',
-          'Low balance: pricey models such as Opus hold credits per request based on the output limit and fail with "insufficient credits" when the hold does not fit. This tool caps output at 32000, cutting the hold to about a quarter.',
+          '余额偏低：Opus 等高价模型每次请求会先按输出上限预留额度，不够就会报"余额不足"。加 --max-output-tokens 32000 可把单次预留降到约原来的四分之一。',
+          'Low balance: pricey models such as Opus hold credits per request based on the output limit and fail with "insufficient credits" when the hold does not fit. Add --max-output-tokens 32000 to cut the hold to about a quarter.',
         ),
       ),
     );
@@ -1544,7 +1544,7 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
   const set = { ANTHROPIC_BASE_URL: base, ANTHROPIC_AUTH_TOKEN: key, ANTHROPIC_API_KEY: '' };
   const maxOut = Number(opts.maxOutputTokens);
   if (maxOut > 0) set.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(maxOut);
-  if (opts.disableNonessentialTraffic !== false) set.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+  if (opts.disableNonessentialTraffic === true) set.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
   const remove = [];
   if (decision.action === 'set') set.ANTHROPIC_MODEL = decision.model;
   if (decision.action === 'default') remove.push('ANTHROPIC_MODEL');
@@ -1564,6 +1564,11 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
   const topChanges = [];
   if (hasOwn(settings, 'model') && known && !modelAvailable(settings.model, ids)) {
     topChanges.push({ key: 'model', before: settings.model, after: undefined, changed: true });
+  }
+  // Claude Code 2.1.283+ starts in auto mode, whose review requests EvoLink cannot serve yet (09-28 live test:
+  // every reviewed action is blocked after 4 billed retries). Keep users in the classic prompt mode until the gateway is fixed.
+  if (opts.autoMode !== true && settings.disableAutoMode !== 'disable') {
+    topChanges.push({ key: 'disableAutoMode', before: settings.disableAutoMode, after: 'disable', changed: true });
   }
 
   const globalRead = readJson(paths.globalConfig);
@@ -1610,7 +1615,7 @@ function summarizePlan(plan) {
   for (const c of plan.settings.envChanges) {
     if (c.changed) out.push({ file: plan.settings.file, key: `env.${c.key}`, before: displayValue(c.key, c.before), after: c.after === undefined ? null : displayValue(c.key, c.after) });
   }
-  for (const c of plan.settings.topChanges) out.push({ file: plan.settings.file, key: c.key, before: String(c.before), after: null });
+  for (const c of plan.settings.topChanges) out.push({ file: plan.settings.file, key: c.key, before: c.before === undefined ? null : String(c.before), after: c.after === undefined ? null : c.after });
   for (const c of plan.global.changes) out.push({ file: plan.global.file, key: c.kind === 'trust' ? `projects["${c.key}"].hasTrustDialogAccepted` : c.key, after: true });
   for (const v of plan.vscode) out.push({ file: v.settings, key: DLP_KEY, after: v.action === 'manual' ? 'manual' : true });
   return out;
@@ -1623,6 +1628,7 @@ const WHY = {
   CLAUDE_CODE_MAX_OUTPUT_TOKENS: ['降低单次预扣，避免"余额不足"', 'lowers the per-request hold'],
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: ['减少非必要请求（与文档一致；也会关掉自动更新）', 'fewer background requests (also turns off auto-update)'],
   ANTHROPIC_MODEL: ['默认模型', 'default model'],
+  disableAutoMode: ['先关掉 auto mode：EvoLink 暂不支持它的审核请求，开着会被拦并计费；网关修好后重跑 setup --auto-mode 即可恢复', 'auto mode off for now: EvoLink cannot serve its review requests yet (actions get blocked and billed); re-run setup --auto-mode once the gateway supports it'],
 };
 
 function printPlan(plan) {
@@ -1637,7 +1643,10 @@ function printPlan(plan) {
     const after = c.after === undefined ? L('（删除：这把 Key 用不了）', '(removed: not usable with this key)') : displayValue(c.key, c.after);
     ui.print(`    ${c.key.padEnd(width)}  ${displayValue(c.key, c.before)} → ${after}${why}`);
   }
-  for (const c of s.topChanges) ui.print(`    model  ${c.before} → ${L('（删除：这把 Key 用不了）', '(removed: not usable with this key)')}`);
+  for (const c of s.topChanges) {
+    if (c.key === 'model') ui.print(`    model  ${c.before} → ${L('（删除：这把 Key 用不了）', '(removed: not usable with this key)')}`);
+    else ui.print(`    ${c.key}  ${displayValue('', c.before)} → ${displayValue('', c.after)}${WHY[c.key] ? ui.dim(`  ${L(...WHY[c.key])}`) : ''}`);
+  }
   if (changed.length) ui.print(ui.dim(`    ${L('其余配置保持不变', 'everything else is kept')}`));
   if (plan.global.changes.length || plan.global.skipped) {
     ui.print(`  ${tildify(plan.global.file)}`);
@@ -1684,7 +1693,10 @@ function applyPlan(plan) {
     const fresh = readJson(s.file);
     if (fresh.exists && !fresh.data && !s.replaceInvalid) throw new CliError(L(`${tildify(s.file)} 刚刚被改坏了，已停止。`, `${tildify(s.file)} changed and is now invalid; stopped.`), EXIT.CONFIG);
     let next = applyEnvChanges(fresh.data || {}, s.envChanges);
-    for (const c of s.topChanges) delete next[c.key];
+    for (const c of s.topChanges) {
+      if (c.after === undefined) delete next[c.key];
+      else next[c.key] = c.after;
+    }
     writeAtomic(s.file, toJsonText(next));
     recordChanges(cc.env, s.envChanges);
     recordChanges(cc.top, s.topChanges);
@@ -1858,11 +1870,14 @@ async function cmdDoctor(opts) {
   else if (apiKey && !token) warn(L('用的是 ANTHROPIC_API_KEY：交互模式第一次要手动批准；建议改用 ANTHROPIC_AUTH_TOKEN（重新运行 setup 即可）', 'Using ANTHROPIC_API_KEY, which needs a one-time approval; ANTHROPIC_AUTH_TOKEN is recommended (re-run setup)'));
   else if (!token) problem(L('没有设置 Key（ANTHROPIC_AUTH_TOKEN）', 'No key set (ANTHROPIC_AUTH_TOKEN)'));
   if (env.CLAUDE_CODE_MAX_OUTPUT_TOKENS) ui.ok(`CLAUDE_CODE_MAX_OUTPUT_TOKENS = ${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS}`);
-  else ui.info(L('没设 CLAUDE_CODE_MAX_OUTPUT_TOKENS：Opus 等模型单次预扣较高，余额少时容易报"余额不足"', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS not set; pricey models hold more credits per request'));
+  else ui.info(L('没设 CLAUDE_CODE_MAX_OUTPUT_TOKENS（默认不设）：Opus 等模型单次预扣较高，余额少时可重新运行 setup --max-output-tokens 32000', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS not set (the default); pricey models hold more credits per request, re-run setup --max-output-tokens 32000 if credits are low'));
   if (env.ANTHROPIC_MODEL) ui.info(`ANTHROPIC_MODEL = ${env.ANTHROPIC_MODEL}`);
+  const autoModeOff = sr.data?.disableAutoMode === 'disable';
+  if (autoModeOff) ui.ok(L('auto mode 已关闭（EvoLink 暂不支持它的审核请求）', 'auto mode is off (EvoLink cannot serve its review requests yet)'));
+  else warn(L('auto mode 没有关闭：Claude Code 2.1.283 起默认开启，走 EvoLink 时需要审核的命令会被拦下并计费；重新运行 setup 可关闭', 'auto mode is not turned off: Claude Code 2.1.283+ starts in auto mode, and through EvoLink reviewed commands get blocked and billed; re-run setup to turn it off'));
   for (const v of PROVIDER_VARS) if (truthy(env[v])) problem(L(`settings.json 里 ${v}=${env[v]}：Claude Code 会改走其他云，EvoLink 不生效`, `settings.json sets ${v}=${env[v]}; EvoLink is bypassed`));
   const credential = token || apiKey || null;
-  report.summary.push(`settings: base=${baseUrl || '-'} token=${token ? maskKey(token) : '-'} api_key=${apiKey === '' ? '""' : apiKey ? maskKey(apiKey) : '-'} maxout=${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '-'} model=${env.ANTHROPIC_MODEL || '-'}`);
+  report.summary.push(`settings: base=${baseUrl || '-'} token=${token ? maskKey(token) : '-'} api_key=${apiKey === '' ? '""' : apiKey ? maskKey(apiKey) : '-'} maxout=${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '-'} model=${env.ANTHROPIC_MODEL || '-'} automode=${autoModeOff ? 'off' : 'on'}`);
 
   ui.step(3, 5, L('连接与 Key', 'Connection and key'));
   let ids = new Set();
@@ -2035,7 +2050,7 @@ async function cmdReset(opts) {
 // ---------------------------------------------------------------------------
 // CLI entry
 
-const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic']);
+const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode']);
 const VALUE_FLAGS = new Set(['model', 'max-output-tokens', 'base-url', 'registry', 'trust', 'lang']);
 const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -2086,8 +2101,9 @@ function helpText() {
   --key-stdin          从标准输入读取 Key
   --dry-run            只预览改动，不写文件
   --trust <文件夹>      预先信任这个文件夹，首次启动不再询问（macOS / Linux）
-  --max-output-tokens <n>  单次输出上限，默认 32000（0 表示不设置）
-  --no-disable-nonessential-traffic  不关闭自动更新等非必要请求
+  --max-output-tokens <n>  单次输出上限，默认不设置（跟随 Claude Code）；余额少时建议 32000，可降低单次预扣
+  --disable-nonessential-traffic  关闭自动更新、遥测等非必要请求（默认不关）
+  --auto-mode          不关闭 Claude Code 的 auto mode（默认关闭：EvoLink 暂不支持它的审核请求）
   --no-install         没装 Claude Code 时不自动安装
   --no-onboarding      不修改 ~/.claude.json
   --no-vscode          不修改编辑器里 Claude Code 扩展的设置
@@ -2114,8 +2130,9 @@ Options:
   --key-stdin          read the key from stdin
   --dry-run            preview only
   --trust <folder>     pre-trust a folder (macOS / Linux)
-  --max-output-tokens <n>  output cap, default 32000 (0 = leave unset)
-  --no-disable-nonessential-traffic  keep auto-update and other background traffic on
+  --max-output-tokens <n>  output cap, unset by default (Claude Code's own); 32000 lowers the per-request hold when credits are low
+  --disable-nonessential-traffic  turn off auto-update, telemetry and other background traffic (on by default)
+  --auto-mode          keep Claude Code's auto mode on (off by default: EvoLink cannot serve its review requests yet)
   --no-install         do not install Claude Code when missing
   --no-onboarding      do not touch ~/.claude.json
   --no-vscode          do not touch editor settings for the Claude Code extension

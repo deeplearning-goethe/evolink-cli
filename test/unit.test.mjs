@@ -210,7 +210,12 @@ test('argument parsing', () => {
   assert.equal(o.trust, '.');
   assert.throws(() => parseArgs(['--nope']));
   assert.throws(() => parseArgs(['--max-output-tokens', 'abc']));
-  assert.equal(parseArgs([]).maxOutputTokens, 32000);
+  assert.equal(parseArgs([]).maxOutputTokens, 0);
+  assert.equal(parseArgs(['--max-output-tokens', '32000']).maxOutputTokens, 32000);
+  assert.equal(parseArgs(['--disable-nonessential-traffic']).disableNonessentialTraffic, true);
+  assert.equal(parseArgs([]).disableNonessentialTraffic, undefined);
+  assert.equal(parseArgs(['--auto-mode']).autoMode, true);
+  assert.equal(parseArgs([]).autoMode, undefined);
 });
 
 test('failure description maps gateway errors', () => {

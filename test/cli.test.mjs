@@ -88,9 +88,8 @@ test('fresh setup writes settings, onboarding flag and state, then test request 
     ANTHROPIC_BASE_URL: gw.url,
     ANTHROPIC_AUTH_TOKEN: KEY,
     ANTHROPIC_API_KEY: '',
-    CLAUDE_CODE_MAX_OUTPUT_TOKENS: '32000',
-    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
   });
+  assert.equal(s.disableAutoMode, 'disable', 'auto mode is turned off until the gateway can serve its review requests');
   assert.equal(readJson(path.join(home, '.claude.json')).hasCompletedOnboarding, true);
   const state = readJson(path.join(home, '.evolink', 'state.json'));
   assert.ok(!JSON.stringify(state).includes(KEY.slice(3)), 'state file does not hold the key');
@@ -219,6 +218,21 @@ test('broken settings.json is kept unless --replace-invalid', async () => {
   assert.equal(fs.readFileSync(path.join(home, '.evolink', 'backups', dir, 'settings.json'), 'utf8'), broken);
 });
 
+test('--auto-mode keeps auto mode on; --max-output-tokens and --disable-nonessential-traffic are opt-in', async () => {
+  const home = tmpHome();
+  const r = await runCli(['setup', '--yes', '--no-install', '--no-test', '--auto-mode', '--max-output-tokens', '32000', '--disable-nonessential-traffic'], { home, env: { EVOLINK_API_KEY: KEY } });
+  assert.equal(r.code, 0, r.all);
+  const s = settingsOf(home);
+  assert.equal(s.disableAutoMode, undefined);
+  assert.equal(s.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '32000');
+  assert.equal(s.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1');
+  const d = await runCli(['doctor'], { home });
+  assert.match(d.stdout, /auto mode is not turned off/);
+  const rr = await runCli(['reset', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.equal(settingsOf(home).env?.CLAUDE_CODE_MAX_OUTPUT_TOKENS, undefined);
+});
+
 test('dry run writes nothing', async () => {
   const home = tmpHome();
   const r = await runCli(['setup', '--yes', '--no-install', '--dry-run'], { home, env: { EVOLINK_API_KEY: KEY } });
@@ -321,6 +335,7 @@ test('doctor: healthy setup passes, both-keys conflict is a problem, output is r
   assert.match(d.stdout, /Key valid/);
   assert.match(d.stdout, /evolink-doctor \d+\.\d+\.\d+/);
   assert.match(d.stdout, /Claude Code is not installed/);
+  assert.match(d.stdout, /auto mode is off/);
 
   const s = settingsOf(home);
   s.env.ANTHROPIC_API_KEY = 'sk-some-old-key-999999';

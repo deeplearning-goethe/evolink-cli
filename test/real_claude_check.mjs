@@ -58,13 +58,14 @@ for (const q of reqs) {
   console.log(`  ${q.method} ${q.path}${q.query}  model=${q.body?.model ?? '-'} max_tokens=${q.body?.max_tokens ?? '-'} stream=${q.body?.stream ?? '-'} auth=${auth} x-api-key=${xkey}`);
 }
 const msgs = reqs.filter((q) => q.path === '/v1/messages');
+const writtenEnv = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).env || {};
 const checks = {
   'setup succeeded': setup.code === 0,
   'claude reached the gateway': msgs.length > 0,
   'Bearer carries the EvoLink key': msgs.length > 0 && msgs.every((q) => q.headers.authorization === `Bearer ${KEY}`),
   'stale shell ANTHROPIC_API_KEY never sent': reqs.every((q) => !String(q.headers['x-api-key'] || '').includes('stale')),
   'main request uses the chosen model': msgs.some((q) => q.body?.model === 'claude-sonnet-5'),
-  'output cap 32000 applied': msgs.some((q) => q.body?.max_tokens === 32000),
+  'no output cap written by default (Claude Code picks max_tokens)': writtenEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined && msgs.every((q) => typeof q.body?.max_tokens === 'number'),
   'claude printed OK': /OK/.test(claude.out),
 };
 console.log('');

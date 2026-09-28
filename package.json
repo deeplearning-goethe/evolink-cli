@@ -1,9 +1,28 @@
 {
   "name": "@evolinkai/cli",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "One-command setup for Claude Code on EvoLink: checks the key and balance, writes the config safely, and can undo it.",
   "private": true,
   "license": "UNLICENSED",
+  "author": "EvoLink AI <support@evolink.ai>",
+  "homepage": "https://github.com/deeplearning-goethe/evolink-cli#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deeplearning-goethe/evolink-cli.git"
+  },
+  "bugs": {
+    "url": "https://github.com/deeplearning-goethe/evolink-cli/issues"
+  },
+  "keywords": [
+    "evolink",
+    "claude-code",
+    "anthropic",
+    "setup",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "bin": {
     "evolink": "bin/evolink.mjs"
