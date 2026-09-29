@@ -9,6 +9,7 @@ import {
   modelAvailable,
   suggestModel,
   pickTestModel,
+  pickSonnetPin,
   planEnvChanges,
   applyEnvChanges,
   recordChanges,
@@ -248,4 +249,15 @@ test('official login is detected, and only counts when settings.json does not al
   assert.equal(overridesLogin({ env: { ANTHROPIC_AUTH_TOKEN: 'x' } }), true);
   assert.equal(overridesLogin({ apiKeyHelper: '~/bin/key.sh' }), true);
   assert.equal(overridesLogin(null), false);
+});
+
+test('sonnet pin picks the newest Sonnet the key can use', () => {
+  // Claude Code 2.1.284 sends claude-sonnet-5-5 for the "sonnet" alias; the pin must follow what the key can use.
+  assert.equal(pickSonnetPin(new Set(['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'gpt-6-luna'])), 'claude-sonnet-5');
+  assert.equal(pickSonnetPin(new Set(['claude-sonnet-5', 'claude-sonnet-5-5'])), 'claude-sonnet-5-5');
+  assert.equal(pickSonnetPin(new Set(['claude-sonnet-4-5-20250929', 'claude-sonnet-4-6', 'claude-sonnet-4-20250514'])), 'claude-sonnet-4-6');
+  assert.equal(pickSonnetPin(new Set(['claude-sonnet-4-5-20250929', 'claude-sonnet-4-5'])), 'claude-sonnet-4-5', 'a dated id loses to the plain id of the same version');
+  assert.equal(pickSonnetPin(new Set(['claude-sonnet-4-20250514', 'claude-sonnet-4-0'])), 'claude-sonnet-4-0');
+  assert.equal(pickSonnetPin(new Set(['claude-opus-5-5', 'gpt-6-luna'])), null);
+  assert.equal(pickSonnetPin(new Set()), null);
 });

@@ -13,6 +13,8 @@ const CLI = fileURLToPath(new URL('../bin/evolink.mjs', import.meta.url));
 const KEY = `sk-${'Zq9Xw8Vu'.repeat(6)}`;
 const LOW_KEY = `sk-${'Lo7Wb6Al'.repeat(6)}`;
 const NO_CLAUDE_KEY = `sk-${'Nc5Cl4De'.repeat(6)}`;
+const OLD_SONNET_KEY = `sk-${'Os4Sn6Et'.repeat(6)}`;
+const NEW_SONNET_KEY = `sk-${'Ns5Sn5Et'.repeat(6)}`;
 let gw;
 
 before(async () => {
@@ -21,6 +23,8 @@ before(async () => {
       [KEY.slice(3)]: {},
       [LOW_KEY.slice(3)]: { balance: { user: 0.5, token: 0.5, unlimited: false } },
       [NO_CLAUDE_KEY.slice(3)]: { models: ['gpt-6-luna'] },
+      [OLD_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'] },
+      [NEW_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
     },
   });
 });
@@ -88,6 +92,7 @@ test('fresh setup writes settings, onboarding flag and state, then test request 
     ANTHROPIC_BASE_URL: gw.url,
     ANTHROPIC_AUTH_TOKEN: KEY,
     ANTHROPIC_API_KEY: '',
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5', // Claude Code 2.1.284 sends claude-sonnet-5-5 for "sonnet"; EvoLink does not serve it
   });
   assert.equal(s.disableAutoMode, 'disable', 'auto mode is turned off until the gateway can serve its review requests');
   assert.equal(readJson(path.join(home, '.claude.json')).hasCompletedOnboarding, true);
@@ -139,6 +144,7 @@ test('existing config from another vendor is fixed and reset restores it exactly
   assert.equal(s.env.ANTHROPIC_AUTH_TOKEN, KEY);
   assert.equal(s.env.ANTHROPIC_DEFAULT_OPUS_MODEL, undefined, 'unusable model override removed');
   assert.equal(s.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku-4-5-20251001', 'usable override kept');
+  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5', 'Sonnet alias pinned to the newest usable Sonnet');
   assert.equal(s.env.CLAUDE_CODE_USE_BEDROCK, undefined, 'provider switch removed');
   assert.equal(s.env.API_TIMEOUT_MS, '3000000', 'unrelated env kept');
   assert.equal(s.model, undefined, 'unusable top-level model removed');
@@ -175,7 +181,7 @@ test('stale shell exports are neutralised in settings and reported with file:lin
   });
   assert.equal(r.code, 0, r.all);
   const s = settingsOf(home);
-  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, '', 'unusable shell model neutralised');
+  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5', 'unusable shell model overridden by the Sonnet pin (settings beat the shell)');
   assert.equal(s.env.CLAUDE_CODE_USE_VERTEX, '', 'shell provider switch neutralised');
   assert.equal(s.env.ANTHROPIC_API_KEY, '');
   assert.ok(r.stdout.includes(`${shown}:2 · ANTHROPIC_API_KEY=sk-old-…3456`), r.stdout);
@@ -466,4 +472,41 @@ test('an outdated Claude Code gets an update hint in setup and doctor', { skip: 
   const r2 = await runCli(['setup', '--yes', '--no-test', '--registry', gw.url], { home, env });
   assert.equal(r2.code, 0, r2.all);
   assert.doesNotMatch(r2.stdout, /is available/);
+});
+
+test('Sonnet alias pin: newest usable Sonnet, user pin kept, --no-pin-sonnet, doctor hint, reset', async () => {
+  // Claude Code 2.1.284 resolves "sonnet" to claude-sonnet-5-5 (09-29 live test); a key without it needs the pin.
+  const home = tmpHome();
+  const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: OLD_SONNET_KEY } });
+  assert.equal(r.code, 0, r.all);
+  assert.equal(settingsOf(home).env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-4-6', 'dated ids lose to plain ids of the same version');
+  assert.match(r.stdout, /ANTHROPIC_DEFAULT_SONNET_MODEL\s+\(none\) → claude-sonnet-4-6/);
+  const d1 = await runCli(['doctor'], { home });
+  assert.match(d1.stdout, /ANTHROPIC_DEFAULT_SONNET_MODEL = claude-sonnet-4-6 \(used for the Sonnet alias\)/);
+  assert.match(d1.stdout, /sonnet=claude-sonnet-4-6/);
+
+  // A key that already has claude-sonnet-5-5 gets pinned to it (same as the alias, harmless).
+  const home2 = tmpHome();
+  await runCli(['setup', '--yes', '--no-install', '--no-test'], { home: home2, env: { EVOLINK_API_KEY: NEW_SONNET_KEY } });
+  assert.equal(settingsOf(home2).env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5-5');
+
+  // The user's own usable pin is kept.
+  const home3 = tmpHome();
+  fs.mkdirSync(path.join(home3, '.claude'));
+  fs.writeFileSync(path.join(home3, '.claude', 'settings.json'), JSON.stringify({ env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-4-5-20250929' } }));
+  await runCli(['setup', '--yes', '--no-install', '--no-test'], { home: home3, env: { EVOLINK_API_KEY: OLD_SONNET_KEY } });
+  assert.equal(settingsOf(home3).env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-4-5-20250929', 'usable user pin kept');
+
+  // --no-pin-sonnet writes nothing; doctor then explains what the alias would do.
+  const home4 = tmpHome();
+  await runCli(['setup', '--yes', '--no-install', '--no-test', '--no-pin-sonnet'], { home: home4, env: { EVOLINK_API_KEY: OLD_SONNET_KEY } });
+  assert.equal(settingsOf(home4).env.ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
+  const d4 = await runCli(['doctor'], { home: home4 });
+  assert.match(d4.stdout, /ANTHROPIC_DEFAULT_SONNET_MODEL is not set: Claude Code 2\.1\.284\+ resolves the Sonnet alias to claude-sonnet-5-5, which this key cannot use; re-run setup to pin it to claude-sonnet-4-6/);
+  assert.match(d4.stdout, /sonnet=-/);
+
+  // reset removes the pin it wrote.
+  const rr = await runCli(['reset', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.equal(settingsOf(home).env?.ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
 });

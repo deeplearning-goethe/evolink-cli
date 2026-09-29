@@ -57,6 +57,13 @@ for (const q of reqs) {
   const xkey = q.headers['x-api-key'] === undefined ? '(absent)' : q.headers['x-api-key'] === '' ? '(empty)' : q.headers['x-api-key'].replace(KEY, '<evolink key>');
   console.log(`  ${q.method} ${q.path}${q.query}  model=${q.body?.model ?? '-'} max_tokens=${q.body?.max_tokens ?? '-'} stream=${q.body?.stream ?? '-'} auth=${auth} x-api-key=${xkey}`);
 }
+// The "sonnet" alias: Claude Code 2.1.284 sends claude-sonnet-5-5 for it (09-29 live test), which EvoLink does not
+// serve; the ANTHROPIC_DEFAULT_SONNET_MODEL pin written by setup must win.
+const before2 = gw.requests.length;
+const alias = await run(CLAUDE, ['-p', 'Reply with exactly: OK', '--model', 'sonnet', '--output-format', 'json'], { ...baseEnv, DISABLE_AUTOUPDATER: '1' });
+const aliasMsgs = gw.requests.slice(before2).filter((q) => q.path === '/v1/messages');
+console.log(`claude -p --model sonnet exit=${alias.code}; model(s) sent: ${aliasMsgs.map((q) => q.body?.model).join(', ') || '-'}`);
+
 const msgs = reqs.filter((q) => q.path === '/v1/messages');
 const writtenEnv = JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf8')).env || {};
 const checks = {
@@ -67,6 +74,7 @@ const checks = {
   'main request uses the chosen model': msgs.some((q) => q.body?.model === 'claude-sonnet-5'),
   'no output cap written by default (Claude Code picks max_tokens)': writtenEnv.CLAUDE_CODE_MAX_OUTPUT_TOKENS === undefined && msgs.every((q) => typeof q.body?.max_tokens === 'number'),
   'claude printed OK': /OK/.test(claude.out),
+  'the sonnet alias follows the pin written by setup': writtenEnv.ANTHROPIC_DEFAULT_SONNET_MODEL === 'claude-sonnet-5' && aliasMsgs.length > 0 && aliasMsgs.every((q) => q.body?.model === 'claude-sonnet-5'),
 };
 console.log('');
 for (const [k, v] of Object.entries(checks)) console.log(`${v ? 'PASS' : 'FAIL'} ${k}`);

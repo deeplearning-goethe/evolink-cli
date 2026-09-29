@@ -1,9 +1,8 @@
 {
   "name": "@evolinkai/cli",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "One-command setup for Claude Code on EvoLink: checks the key and balance, writes the config safely, and can undo it.",
-  "private": true,
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "EvoLink AI <support@evolink.ai>",
   "homepage": "https://github.com/deeplearning-goethe/evolink-cli#readme",
   "repository": {
@@ -29,7 +28,8 @@
   },
   "files": [
     "bin/evolink.mjs",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=18"

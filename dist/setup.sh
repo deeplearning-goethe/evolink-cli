@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.3
+# EvoLink one-command setup for Claude Code (macOS / Linux), version 0.1.4
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
@@ -12,8 +12,8 @@
 set -u
 
 evolink_main() {
-  local version="0.1.3"
-  local expected_sha="2a874bb8a8156f07933030388422efb94bd68ec2c1393a658cbc78457e00be30"
+  local version="0.1.4"
+  local expected_sha="07fedc266ed0786c005ae9d93060d0010629b426e28cc49d5887ce1a4361657e"
   local home_dir="${EVOLINK_HOME:-$HOME/.evolink}"
   local zh=0
   case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in zh* | *_CN* | *_TW* | *_HK*) zh=1 ;; esac
@@ -73,7 +73,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.3';
+export const VERSION = '0.1.4';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
@@ -112,6 +112,9 @@ export const WATCH_VARS = [
 ];
 const SECRET_VARS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS']);
 const MODEL_ALIASES = new Set(['default', 'best', 'opus', 'sonnet', 'haiku', 'opusplan']);
+// What Claude Code 2.1.284 sends for the "sonnet" alias (09-29 live test). EvoLink does not serve it yet, so setup pins
+// ANTHROPIC_DEFAULT_SONNET_MODEL to the newest Sonnet the key can use; doctor warns when the alias would fail.
+const CLAUDE_CODE_SONNET_ALIAS = 'claude-sonnet-5-5';
 const RESTRICTIVE_POLICIES = new Set(['Restricted', 'AllSigned', 'Undefined']);
 const DLP_KEY = 'claudeCode.disableLoginPrompt';
 
@@ -314,6 +317,21 @@ export function pickTestModel(preferred, ids) {
   if (preferred && ids.has(preferred)) return preferred;
   const claude = [...ids].filter((i) => i.startsWith('claude-'));
   return claude.find((i) => i.includes('haiku')) || claude.find((i) => i.includes('sonnet')) || claude[0] || null;
+}
+
+// Newest "claude-sonnet-*" the key can use: 5-5 > 5 > 4-6 > 4-5-20250929 > 4-20250514; null when there is none.
+export function pickSonnetPin(ids) {
+  let best = null;
+  for (const id of ids) {
+    const m = /^claude-sonnet-(\d+)((?:-\d+)*)$/.exec(id);
+    if (!m) continue;
+    const rest = m[2].split('-').filter(Boolean);
+    const minor = rest.length && rest[0].length <= 2 ? Number(rest[0]) : 0; // a 6+ digit segment is a date, not a minor version
+    const rank = [Number(m[1]), minor, rest.some((seg) => seg.length >= 6) ? 0 : 1];
+    const newer = !best || rank.reduce((acc, v, i) => (acc !== 0 ? acc : Math.sign(v - best.rank[i])), 0) > 0;
+    if (newer) best = { id, rank };
+  }
+  return best ? best.id : null;
 }
 
 // Numeric compare of dotted versions ("2.1.260" < "2.1.283"); pre-release suffixes are ignored.
@@ -1611,6 +1629,14 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
     if (v === 'ANTHROPIC_MODEL') continue;
     if (hasOwn(env, v) && env[v] !== '' && known && !modelAvailable(env[v], ids)) remove.push(v);
   }
+  // Claude Code 2.1.284 sends claude-sonnet-5-5 for the "sonnet" alias, which EvoLink does not serve yet (09-29 live test):
+  // pin the alias to the newest Sonnet this key can use, unless the user already has a usable pin of their own.
+  if (opts.pinSonnet !== false && known) {
+    const own = hasOwn(env, 'ANTHROPIC_DEFAULT_SONNET_MODEL') ? env.ANTHROPIC_DEFAULT_SONNET_MODEL : undefined;
+    const ownOk = own !== undefined && own !== '' && !MODEL_ALIASES.has(String(own).toLowerCase()) && modelAvailable(own, ids);
+    const pin = pickSonnetPin(ids);
+    if (pin && !ownOk) set.ANTHROPIC_DEFAULT_SONNET_MODEL = pin;
+  }
   for (const v of PROVIDER_VARS) if (hasOwn(env, v) && truthy(env[v])) remove.push(v);
   // Values from the shell, profiles or the registry lose to settings.json, so an empty string neutralises them.
   for (const c of conflicts) {
@@ -1687,6 +1713,7 @@ const WHY = {
   CLAUDE_CODE_MAX_OUTPUT_TOKENS: ['降低单次预扣，避免"余额不足"', 'lowers the per-request hold'],
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: ['减少非必要请求（与文档一致；也会关掉自动更新）', 'fewer background requests (also turns off auto-update)'],
   ANTHROPIC_MODEL: ['默认模型', 'default model'],
+  ANTHROPIC_DEFAULT_SONNET_MODEL: ['/model 里的 Sonnet 用它：Claude Code 2.1.284 起默认指向 claude-sonnet-5-5，EvoLink 暂无', 'used for the Sonnet alias: Claude Code 2.1.284+ defaults it to claude-sonnet-5-5, which EvoLink does not serve yet'],
   disableAutoMode: ['先关掉 auto mode：EvoLink 暂不支持它的审核请求，开着会被拦并计费；网关修好后重跑 setup --auto-mode 即可恢复', 'auto mode off for now: EvoLink cannot serve its review requests yet (actions get blocked and billed); re-run setup --auto-mode once the gateway supports it'],
 };
 
@@ -1936,7 +1963,7 @@ async function cmdDoctor(opts) {
   else warn(L('auto mode 没有关闭：Claude Code 2.1.283 起默认开启，走 EvoLink 时需要审核的命令会被拦下并计费；重新运行 setup 可关闭', 'auto mode is not turned off: Claude Code 2.1.283+ starts in auto mode, and through EvoLink reviewed commands get blocked and billed; re-run setup to turn it off'));
   for (const v of PROVIDER_VARS) if (truthy(env[v])) problem(L(`settings.json 里 ${v}=${env[v]}：Claude Code 会改走其他云，EvoLink 不生效`, `settings.json sets ${v}=${env[v]}; EvoLink is bypassed`));
   const credential = token || apiKey || null;
-  report.summary.push(`settings: base=${baseUrl || '-'} token=${token ? maskKey(token) : '-'} api_key=${apiKey === '' ? '""' : apiKey ? maskKey(apiKey) : '-'} maxout=${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '-'} model=${env.ANTHROPIC_MODEL || '-'} automode=${autoModeOff ? 'off' : 'on'}`);
+  report.summary.push(`settings: base=${baseUrl || '-'} token=${token ? maskKey(token) : '-'} api_key=${apiKey === '' ? '""' : apiKey ? maskKey(apiKey) : '-'} maxout=${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '-'} model=${env.ANTHROPIC_MODEL || '-'} sonnet=${env.ANTHROPIC_DEFAULT_SONNET_MODEL || '-'} automode=${autoModeOff ? 'off' : 'on'}`);
 
   ui.step(3, 5, L('连接与 Key', 'Connection and key'));
   let ids = new Set();
@@ -1963,6 +1990,12 @@ async function cmdDoctor(opts) {
     }
     for (const v of MODEL_OVERRIDE_VARS) {
       if (env[v] && ids.size && !modelAvailable(env[v], ids)) problem(L(`${v}=${env[v]}：这把 Key 用不了这个模型`, `${v}=${env[v]} is not available for this key`));
+    }
+    if (ids.size) {
+      const sonnetPin = env.ANTHROPIC_DEFAULT_SONNET_MODEL;
+      const best = pickSonnetPin(ids);
+      if (sonnetPin && modelAvailable(sonnetPin, ids)) ui.ok(L(`ANTHROPIC_DEFAULT_SONNET_MODEL = ${sonnetPin}（/model 里的 Sonnet 用它）`, `ANTHROPIC_DEFAULT_SONNET_MODEL = ${sonnetPin} (used for the Sonnet alias)`));
+      else if (!sonnetPin && best && !ids.has(CLAUDE_CODE_SONNET_ALIAS)) warn(L(`没设 ANTHROPIC_DEFAULT_SONNET_MODEL：Claude Code 2.1.284 起 /model 里的 Sonnet 指向 ${CLAUDE_CODE_SONNET_ALIAS}，这把 Key 用不了；重新运行 setup 会把它钉到 ${best}`, `ANTHROPIC_DEFAULT_SONNET_MODEL is not set: Claude Code 2.1.284+ resolves the Sonnet alias to ${CLAUDE_CODE_SONNET_ALIAS}, which this key cannot use; re-run setup to pin it to ${best}`));
     }
     if (sr.data?.model && ids.size && !modelAvailable(sr.data.model, ids)) problem(L(`settings.json 的 model=${sr.data.model}：这把 Key 用不了`, `settings.json model=${sr.data.model} is not available for this key`));
   } else ui.info(L('没有可用的 EvoLink 配置，跳过联网检查', 'No EvoLink configuration; skipping online checks'));
@@ -2109,7 +2142,7 @@ async function cmdReset(opts) {
 // ---------------------------------------------------------------------------
 // CLI entry
 
-const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode']);
+const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode', 'pin-sonnet']);
 const VALUE_FLAGS = new Set(['model', 'max-output-tokens', 'base-url', 'registry', 'trust', 'lang']);
 const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -2163,6 +2196,7 @@ function helpText() {
   --max-output-tokens <n>  单次输出上限，默认不设置（跟随 Claude Code）；余额少时建议 32000，可降低单次预扣
   --disable-nonessential-traffic  关闭自动更新、遥测等非必要请求（默认不关）
   --auto-mode          不关闭 Claude Code 的 auto mode（默认关闭：EvoLink 暂不支持它的审核请求）
+  --no-pin-sonnet      不把 /model 里的 Sonnet 钉到这把 Key 能用的最新 Sonnet（默认钉住：Claude Code 2.1.284 起它指向 EvoLink 暂无的 claude-sonnet-5-5）
   --no-install         没装 Claude Code 时不自动安装
   --no-onboarding      不修改 ~/.claude.json
   --no-vscode          不修改编辑器里 Claude Code 扩展的设置
@@ -2192,6 +2226,7 @@ Options:
   --max-output-tokens <n>  output cap, unset by default (Claude Code's own); 32000 lowers the per-request hold when credits are low
   --disable-nonessential-traffic  turn off auto-update, telemetry and other background traffic (on by default)
   --auto-mode          keep Claude Code's auto mode on (off by default: EvoLink cannot serve its review requests yet)
+  --no-pin-sonnet      do not pin the Sonnet alias to the newest Sonnet this key can use (pinned by default: Claude Code 2.1.284+ sends claude-sonnet-5-5, which EvoLink does not serve yet)
   --no-install         do not install Claude Code when missing
   --no-onboarding      do not touch ~/.claude.json
   --no-vscode          do not touch editor settings for the Claude Code extension

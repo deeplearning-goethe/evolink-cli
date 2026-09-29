@@ -4,7 +4,7 @@
 
 一条命令把 Claude Code 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.1.3，目前只支持 Claude Code，还没有发布到 npm。
+> **测试阶段**：v0.1.4，目前只支持 Claude Code。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
 
 ## 用法
 
@@ -32,6 +32,7 @@
 |---|---|---|
 | `~/.claude/settings.json` 的 `env` | `ANTHROPIC_BASE_URL=https://direct.evolink.ai`、`ANTHROPIC_AUTH_TOKEN=<Key>` | 官方推荐的位置，优先级高于 shell 变量；Windows 和 macOS 通用，关掉终端也不失效 |
 | 同上 | `ANTHROPIC_API_KEY=""` | 压住 shell 或注册表里残留的旧 Key。不压的话，旧 Key 会被优先使用，导致 401 并不停重试 |
+| 同上 | `ANTHROPIC_DEFAULT_SONNET_MODEL=<这把 Key 能用的最新 Sonnet>`（现在是 `claude-sonnet-5`） | Claude Code 2.1.284 起，`/model` 里的 Sonnet 和 `--model sonnet` 都指向 `claude-sonnet-5-5`，EvoLink 暂无这个模型，选了就报"模型不存在"（09-29 实测）。钉住后 `sonnet` / `sonnet[1m]` 都走这把 Key 能用的最新 Sonnet；你自己设过可用的值就不动；加 `--no-pin-sonnet` 不写；`reset` 会还原 |
 | 同上（仅加 `--max-output-tokens 32000` 时） | `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000` | 默认不设，跟随 Claude Code 自己的输出上限（Sonnet 5 为 64K，Opus 5.5 为 128K）。余额少时加这个参数，Opus 5.5 单次预扣从约 $2.5 降到约 $0.7 |
 | 同上（仅加 `--disable-nonessential-traffic` 时） | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | 默认不设。设了会减少非必要请求，**副作用是关掉自动更新** |
 | `~/.claude/settings.json` 顶层 | `"disableAutoMode": "disable"` | 先关掉 Claude Code 2.1.283 起默认开启的 auto mode。EvoLink 网关暂不支持它的审核请求：开着的话需要审核的命令会被拦下，而且每条命令会白白计费 4 次审核请求（09-28 线上实测）。加 `--auto-mode` 可以不关；网关修好后重跑 `setup --auto-mode` 即可恢复，`reset` 也会还原 |
@@ -73,8 +74,8 @@ GitHub Actions 在每次推送到 main、每个 PR，以及每天 09:00（北京
 
 | 平台 | 已验证 |
 |---|---|
-| Ubuntu 24.04（Node 22） | 自动化测试 40/40；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 读取配置并请求模拟网关；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行 |
-| macOS 26（Node 24） | 上一版：自动化测试、伪终端交互、真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
+| Ubuntu 24.04（Node 22） | 自动化测试 43/43；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 / 2.1.284 读取配置并请求模拟网关（含 `--model sonnet` 跟随钉档）；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行；**Sonnet 钉档线上实测（09-29，v0.1.4）**：Claude Code 2.1.284 的 `--model sonnet` / `sonnet[1m]` 经真实网关都返回 OK，删掉钉档后同一命令报 "There's an issue with the selected model (claude-sonnet-5-5)" |
+| macOS 26（Node 24） | v0.1.4：自动化测试 43/43、伪终端交互 14/14（临时目录 + 模拟网关）；更早的版本：真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
 | Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | 自动化测试 36 项（另 3 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
 
 ## 开发
@@ -87,7 +88,7 @@ npm run build             # 生成 dist/setup.sh、dist/setup.ps1、dist/evolink
 ```
 
 - **不要在自己的工作电脑上用真实家目录跑 `setup`**：它会立刻接管这台电脑上所有的 Claude Code，包括编辑器里已经打开的会话。手动试用请用临时家目录（工具会标明"测试模式"，并给出带 `HOME=…` 的命令），或者用单独的测试机。
-- 改版本号：改 `bin/evolink.mjs` 里的 `VERSION` 和 `package.json`，然后重新 build。
+- 改版本号：改 `bin/evolink.mjs` 里的 `VERSION`、`package.json`，以及本文开头"测试阶段"那一行，然后重新 build。
 - 推荐模型列表：在 `bin/evolink.mjs` 的 `RECOMMENDED_MODELS` 里维护，会按 Key 实际可用的模型过滤。
 - 模拟网关：`node test/mock-server.mjs <端口> <Key>`，返回格式与 EvoLink 网关一致。
 - 发布脚本：`npm run build` 之后，把 `dist/setup.sh`、`dist/setup.ps1`、`dist/SHA256SUMS` 上传到 `cdn.evolink.ai/cli/`。
