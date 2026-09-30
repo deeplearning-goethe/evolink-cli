@@ -1,7 +1,8 @@
-# EvoLink one-command setup for Claude Code (Windows PowerShell 5.1+ / PowerShell 7), version __EVOLINK_VERSION__
+# EvoLink one-command setup for Claude Code and Codex (Windows PowerShell 5.1+ / PowerShell 7), version __EVOLINK_VERSION__
 #
 #   irm https://cdn.evolink.ai/cli/setup.ps1 | iex
 #   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5
+#   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex
 #   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) doctor
 #
 # What it does: finds Node.js (18+; offers winget if missing), saves the EvoLink CLI to

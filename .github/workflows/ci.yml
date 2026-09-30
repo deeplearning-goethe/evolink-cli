@@ -6,7 +6,7 @@ on:
   pull_request:
   workflow_dispatch:
   schedule:
-    # Every day at 01:00 UTC (09:00 Beijing): catches breakage from new Claude Code releases.
+    # Every day at 01:00 UTC (09:00 Beijing): catches breakage from new Claude Code and Codex releases.
     - cron: '0 1 * * *'
 
 permissions:
@@ -53,6 +53,14 @@ jobs:
       - name: Real Claude Code first-run screens
         if: matrix.claude
         run: python3 test/real_claude_firstrun.py "$RUNNER_TEMP/cc/node_modules/.bin/claude" --check
+      - name: Install the latest Codex into a private prefix
+        if: matrix.claude
+        run: |
+          npm install --prefix "$RUNNER_TEMP/codex" @openai/codex@latest --no-fund --no-audit
+          "$RUNNER_TEMP/codex/node_modules/.bin/codex" --version
+      - name: Real Codex uses the written profile
+        if: matrix.claude
+        run: node test/real_codex_check.mjs "$RUNNER_TEMP/codex/node_modules/.bin/codex"
 
   windows:
     name: windows-latest · Node 22

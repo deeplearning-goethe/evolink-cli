@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code (macOS / Linux), version __EVOLINK_VERSION__
+# EvoLink one-command setup for Claude Code and Codex (macOS / Linux), version __EVOLINK_VERSION__
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
+#   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- codex
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- doctor
 #
 # What it does: finds Node.js (18+), saves the EvoLink CLI to ~/.evolink/cli, adds a launcher at

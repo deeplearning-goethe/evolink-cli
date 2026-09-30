@@ -15,6 +15,7 @@ const LOW_KEY = `sk-${'Lo7Wb6Al'.repeat(6)}`;
 const NO_CLAUDE_KEY = `sk-${'Nc5Cl4De'.repeat(6)}`;
 const OLD_SONNET_KEY = `sk-${'Os4Sn6Et'.repeat(6)}`;
 const NEW_SONNET_KEY = `sk-${'Ns5Sn5Et'.repeat(6)}`;
+const CODEX_KEY = `sk-${'Cx7Gp6Td'.repeat(6)}`;
 let gw;
 
 before(async () => {
@@ -25,6 +26,7 @@ before(async () => {
       [NO_CLAUDE_KEY.slice(3)]: { models: ['gpt-6-luna'] },
       [OLD_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'] },
       [NEW_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
+      [CODEX_KEY.slice(3)]: { models: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-5.5', 'gpt-6-luna', 'gpt-image-2', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
     },
   });
 });
@@ -246,6 +248,67 @@ test('dry run writes nothing', async () => {
   assert.match(r.stdout, /Preview only/);
   assert.ok(!fs.existsSync(path.join(home, '.claude')));
   assert.ok(!fs.existsSync(path.join(home, '.evolink')));
+});
+
+test('dry run does not install Claude Code (it only shows the npm command)', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const bin = path.join(home, 'fakebin');
+  const mark = path.join(home, 'npm-called');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\necho "$@" >> "${mark}"\nexit 1\n`, { mode: 0o755 });
+  const env = { EVOLINK_API_KEY: KEY, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
+  const r = await runCli(['setup', '--yes', '--dry-run', '--registry', gw.url], { home, env });
+  assert.equal(r.code, 0, r.all);
+  assert.match(r.stdout, /would install Claude Code/);
+  assert.match(r.stdout, /Preview only/);
+  assert.ok(!fs.existsSync(mark), 'npm must not run in a dry run');
+  // Control: a real run does call npm (the fake one fails, and setup still writes the settings).
+  const r2 = await runCli(['setup', '--yes', '--no-test', '--registry', gw.url], { home, env });
+  assert.equal(r2.code, 0, r2.all);
+  assert.match(fs.readFileSync(mark, 'utf8'), /install -g @anthropic-ai\/claude-code/);
+});
+
+test('--install-extension installs the Claude Code extension with the editor CLI; without it setup only shows the link', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const bin = path.join(home, 'fakebin');
+  const calls = path.join(home, 'code-calls');
+  fs.mkdirSync(bin);
+  // A fake `code`: lists nothing until it has "installed" the extension into ~/.vscode/extensions.
+  fs.writeFileSync(
+    path.join(bin, 'code'),
+    `#!/bin/sh
+echo "$@" >> "${calls}"
+if [ "$1" = "--list-extensions" ]; then ls "$HOME/.vscode/extensions" 2>/dev/null | sed 's/-[0-9.]*$//'; exit 0; fi
+if [ "$1" = "--install-extension" ]; then mkdir -p "$HOME/.vscode/extensions/$2-9.9.9"; echo "Extension '$2' v9.9.9 was successfully installed."; exit 0; fi
+exit 1
+`,
+    { mode: 0o755 },
+  );
+  // VS Code has been opened once (its settings folder exists) but has no Claude Code extension.
+  const settingsDir = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Code', 'User') : path.join(home, '.config', 'Code', 'User');
+  fs.mkdirSync(settingsDir, { recursive: true });
+  const env = { EVOLINK_API_KEY: KEY, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
+
+  const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env });
+  assert.equal(r.code, 0, r.all);
+  assert.match(r.stdout, /open vscode:extension\/anthropic\.claude-code in the editor/);
+  assert.ok(!fs.existsSync(calls), 'without --install-extension the editor CLI is not run');
+
+  const dry = await runCli(['setup', '--yes', '--no-install', '--no-test', '--install-extension', '--dry-run'], { home, env });
+  assert.equal(dry.code, 0, dry.all);
+  assert.match(dry.stdout, /would run .*code --install-extension anthropic\.claude-code/);
+  assert.doesNotMatch(fs.readFileSync(calls, 'utf8'), /--install-extension/);
+
+  const r2 = await runCli(['setup', '--yes', '--no-install', '--no-test', '--install-extension'], { home, env });
+  assert.equal(r2.code, 0, r2.all);
+  assert.match(r2.stdout, /VS Code: anthropic\.claude-code installed/);
+  assert.match(fs.readFileSync(calls, 'utf8'), /--install-extension anthropic\.claude-code/);
+  // The freshly installed extension also gets its login prompt turned off, and the link is no longer shown.
+  assert.match(fs.readFileSync(path.join(settingsDir, 'settings.json'), 'utf8'), /"claudeCode\.disableLoginPrompt": true/);
+  assert.doesNotMatch(r2.stdout, /open vscode:extension/);
+
+  const r3 = await runCli(['setup', '--yes', '--no-install', '--no-test', '--install-extension'], { home, env });
+  assert.match(r3.stdout, /VS Code already has anthropic\.claude-code/);
 });
 
 test('model typo gets a suggestion; a valid --model is written', async () => {
@@ -510,3 +573,215 @@ test('Sonnet alias pin: newest usable Sonnet, user pin kept, --no-pin-sonnet, do
   assert.equal(rr.code, 0, rr.all);
   assert.equal(settingsOf(home).env?.ANTHROPIC_DEFAULT_SONNET_MODEL, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// Codex
+
+const codexDir = (home) => path.join(home, '.codex');
+const codexProfile = (home) => path.join(codexDir(home), 'evolink.config.toml');
+// A fake `codex` on PATH (reports a version, like the real one).
+function fakeCodex(home, version = '0.159.2') {
+  const bin = path.join(home, 'fakebin');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(path.join(bin, 'codex'), `#!/bin/sh\necho "codex-cli ${version}"\n`, { mode: 0o755 });
+  return `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
+}
+
+test('setup codex writes only the evolink profile, leaves config.toml alone, and reset removes it', async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  const mainToml = '# my own Codex config\nmodel = "gpt-5.5"\n\n[profiles.work]\nmodel = "o3"\n';
+  fs.writeFileSync(path.join(codexDir(home), 'config.toml'), mainToml);
+  const before = gw.requests.length;
+  const r = await runCli(['setup', 'codex', '--yes', '--no-install'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r.code, 0, r.all);
+  noFullKey(r, CODEX_KEY);
+  assert.match(r.stdout, /Key is valid \(sk-Cx7G…p6Td\) · 7 models, 4 GPT/);
+  const prof = fs.readFileSync(codexProfile(home), 'utf8');
+  assert.match(prof, /^model = "gpt-6\.1-sol"$/m, "Codex's own default model, which the key has");
+  assert.match(prof, /^model_provider = "evolink-cli"$/m);
+  assert.match(prof, /^base_url = "http:\/\/127\.0\.0\.1:\d+\/v1"$/m);
+  assert.match(prof, /^wire_api = "responses"$/m);
+  assert.ok(prof.includes(`experimental_bearer_token = "${CODEX_KEY}"`));
+  assert.equal(fs.readFileSync(path.join(codexDir(home), 'config.toml'), 'utf8'), mainToml, 'the main config.toml is untouched');
+  if (!WIN) assert.equal(fs.statSync(codexProfile(home)).mode & 0o777, 0o600, 'the profile holds the key: owner-only');
+  const resp = gw.requests.slice(before).filter((q) => q.path === '/v1/responses');
+  assert.equal(resp.length, 1, 'one test request on the Responses API');
+  assert.equal(resp[0].body.model, 'gpt-6.1-sol');
+  assert.equal(resp[0].headers.authorization, `Bearer ${CODEX_KEY}`);
+  assert.match(r.stdout, /Run: codex -p evolink|codex -p evolink/);
+  assert.match(r.stdout, /reset codex/);
+
+  const r2 = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r2.code, 0, r2.all);
+  assert.match(r2.stdout, /Keeping model: gpt-6\.1-sol/);
+  assert.match(r2.stdout, /Already up to date/);
+
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.ok(!fs.existsSync(codexProfile(home)));
+  assert.equal(fs.readFileSync(path.join(codexDir(home), 'config.toml'), 'utf8'), mainToml);
+});
+
+test('setup codex: reuses the Claude Code key; --model must be a GPT model of this key; a key without GPT stops', async () => {
+  const home = tmpHome();
+  await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  const r = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test', '--model', 'gpt-5.5'], { home });
+  assert.equal(r.code, 0, r.all);
+  assert.match(fs.readFileSync(codexProfile(home), 'utf8'), /^model = "gpt-5\.5"$/m);
+  assert.ok(fs.readFileSync(codexProfile(home), 'utf8').includes(CODEX_KEY), 'the key came from the Claude Code settings');
+
+  const claudeModel = await runCli(['setup', 'codex', '--yes', '--no-install', '--model', 'claude-sonnet-5'], { home });
+  assert.equal(claudeModel.code, 2, claudeModel.all);
+  assert.match(claudeModel.all, /This key cannot use model claude-sonnet-5 in Codex/);
+  const cased = await runCli(['setup', 'codex', '--yes', '--no-install', '--model', 'GPT-6-SOL'], { home });
+  assert.equal(cased.code, 2, cased.all);
+  assert.match(cased.all, /did you mean gpt-6-sol\?/);
+
+  const noGpt = tmpHome();
+  const ng = await runCli(['setup', 'codex', '--yes', '--no-install'], { home: noGpt, env: { EVOLINK_API_KEY: OLD_SONNET_KEY } });
+  assert.equal(ng.code, 2, ng.all);
+  assert.match(ng.all, /no GPT models/);
+  assert.ok(!fs.existsSync(codexProfile(noGpt)));
+});
+
+test('setup codex --dry-run writes nothing and does not install Codex', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const bin = path.join(home, 'fakebin');
+  const mark = path.join(home, 'npm-called');
+  fs.mkdirSync(bin);
+  fs.writeFileSync(path.join(bin, 'npm'), `#!/bin/sh\necho "$@" >> "${mark}"\nexit 1\n`, { mode: 0o755 });
+  const env = { EVOLINK_API_KEY: CODEX_KEY, PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin` };
+  const r = await runCli(['setup', 'codex', '--yes', '--dry-run', '--registry', gw.url], { home, env });
+  assert.equal(r.code, 0, r.all);
+  assert.match(r.stdout, /would install Codex from/);
+  assert.match(r.stdout, /npm install -g @openai\/codex/);
+  assert.match(r.stdout, /Preview only/);
+  assert.ok(!fs.existsSync(mark), 'npm must not run in a dry run');
+  assert.ok(!fs.existsSync(codexDir(home)));
+  assert.ok(!fs.existsSync(path.join(home, '.evolink')));
+});
+
+test('reset codex puts back a profile that existed before setup, and leaves a replaced one alone', async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  const mine = '# written by hand\nmodel = "o3"\n';
+  fs.writeFileSync(codexProfile(home), mine);
+  const r = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r.code, 0, r.all);
+  assert.match(r.stdout, /replaced; the old file is backed up first/);
+  // A second setup must not mistake its own file for the user's original.
+  await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test', '--model', 'gpt-5.5'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /restored to what it was before setup/);
+  assert.equal(fs.readFileSync(codexProfile(home), 'utf8'), mine);
+
+  // A file the user has since replaced with something else is not setup's to delete.
+  const home2 = tmpHome();
+  await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home: home2, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  fs.writeFileSync(codexProfile(home2), 'model = "o3"\nmodel_provider = "mine"\n\n[model_providers.mine]\nname = "Mine"\n');
+  const rr2 = await runCli(['reset', 'codex', '--yes'], { home: home2 });
+  assert.equal(rr2.code, 0, rr2.all);
+  assert.match(rr2.stdout, /No longer the file setup wrote, left as is/);
+  assert.ok(fs.existsSync(codexProfile(home2)));
+});
+
+test('reset without a target undoes Claude Code and Codex together (one JSON document)', async () => {
+  const home = tmpHome();
+  await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  const j = await runCli(['reset', '--yes', '--json'], { home });
+  assert.equal(j.code, 0, j.all);
+  const out = JSON.parse(j.stdout);
+  assert.equal(out.command, 'reset');
+  assert.equal(out.ok, true);
+  assert.ok(out.claudeCode && out.codex, 'both parts reported');
+  assert.ok(!fs.existsSync(codexProfile(home)));
+  assert.equal(settingsOf(home).env?.ANTHROPIC_AUTH_TOKEN, undefined);
+  // Only Codex set up: a plain reset undoes it without complaining about Claude Code.
+  const home2 = tmpHome();
+  await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home: home2, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  const r2 = await runCli(['reset', '--yes'], { home: home2 });
+  assert.equal(r2.code, 0, r2.all);
+  assert.doesNotMatch(r2.stdout, /No changes recorded by evolink setup;/);
+  assert.ok(!fs.existsSync(codexProfile(home2)));
+});
+
+test('doctor codex: a healthy profile passes; an unset env_key or a missing profile is a problem', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const PATHV = fakeCodex(home);
+  const s = await runCli(['setup', 'codex', '--yes', '--no-test', '--registry', gw.url], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: PATHV } });
+  assert.equal(s.code, 0, s.all);
+  assert.match(s.stdout, /Codex 0\.159\.2/);
+  const d = await runCli(['doctor', 'codex', '--test', '--registry', gw.url], { home, env: { PATH: PATHV } });
+  assert.equal(d.code, 0, d.all);
+  noFullKey(d, CODEX_KEY);
+  assert.match(d.stdout, /key = sk-Cx7G…p6Td/);
+  assert.match(d.stdout, /Test request passed: gpt-6\.1-sol/);
+  assert.match(d.stdout, /evolink-doctor [\d.]+ codex \| .* \| codex 0\.159\.2 \(latest 0\.159\.2\)$/m);
+  assert.match(d.stdout, /^profile: yes provider=evolink-cli base=http:\/\/127\.0\.0\.1:\d+\/v1 key=sk-Cx7G…p6Td model=gpt-6\.1-sol wire=responses web_search=disabled/m);
+  assert.match(d.stdout, /^config\.toml: no /m);
+  assert.match(d.stdout, /^api: models=7 gpt=4 /m);
+
+  const prof = fs.readFileSync(codexProfile(home), 'utf8');
+  fs.writeFileSync(codexProfile(home), prof.replace(/^experimental_bearer_token = .*$/m, 'env_key = "EVOLINK_API_KEY"'));
+  const d2 = await runCli(['doctor', 'codex', '--registry', gw.url], { home, env: { PATH: PATHV } });
+  assert.equal(d2.code, 1, d2.all);
+  assert.match(d2.stdout, /The key comes from EVOLINK_API_KEY, which is not set/);
+
+  const d3 = await runCli(['doctor', 'codex', '--registry', gw.url], { home: tmpHome(), env: { PATH: PATHV } });
+  assert.equal(d3.code, 1, d3.all);
+  assert.match(d3.stdout, /evolink\.config\.toml does not exist; run .*setup codex/);
+});
+
+test('setup codex and config.toml: an old evolink provider is left alone, blockers are named, auto review is turned off', async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  // What our docs used to teach, plus two settings that break or hurt `codex -p evolink`.
+  const mainToml = `approvals_reviewer = "auto_review"
+model_provider = "evolink"
+
+[model_providers.evolink]
+name = "EvoLink"
+base_url = "https://direct.evolink.ai/v1"
+env_key = "OPENAI_API_KEY"
+
+[profiles.evolink]
+model = "gpt-5.2"
+`;
+  fs.writeFileSync(path.join(codexDir(home), 'config.toml'), mainToml);
+  const r = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r.code, 0, r.all);
+  assert.match(r.stdout, /older \[model_providers\.evolink\] setup \(key from OPENAI_API_KEY\): plain codex still uses it/);
+  assert.match(r.stdout, /has a \[profiles\.evolink\] table: current Codex refuses to start codex -p evolink/);
+  assert.match(r.stdout, /approvals_reviewer → user/);
+  const prof = fs.readFileSync(codexProfile(home), 'utf8');
+  assert.match(prof, /^approvals_reviewer = "user"$/m);
+  assert.match(prof, /^\[model_providers\.evolink-cli\]$/m, 'a provider id of its own, so the old env_key cannot merge in');
+  assert.equal(fs.readFileSync(path.join(codexDir(home), 'config.toml'), 'utf8'), mainToml, 'config.toml untouched');
+  const d = await runCli(['doctor', 'codex'], { home });
+  assert.equal(d.code, 1, d.all);
+  assert.match(d.stdout, /refuses to start codex -p evolink/);
+  assert.match(d.stdout, /^config\.toml: yes profiles_table=yes legacy_profile=no auto_review=yes old_evolink_provider=yes$/m);
+});
+
+test('trust entries Codex writes into the profile survive a re-run and do not block reset', async () => {
+  const home = tmpHome();
+  await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  // What Codex 0.159.2 appends in a `codex -p evolink` session: [tui] on the first launch, then trusted folders.
+  fs.appendFileSync(codexProfile(home), '\n[tui]\nscreen_reader_detection_done = true\n\n[projects."/work/app"]\ntrust_level = "trusted"\n');
+  const r = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.match(r.stdout, /Already up to date/);
+  const r2 = await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test', '--model', 'gpt-6-luna'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r2.code, 0, r2.all);
+  const prof = fs.readFileSync(codexProfile(home), 'utf8');
+  assert.match(prof, /^model = "gpt-6-luna"$/m);
+  assert.match(prof, /\[projects\."\/work\/app"\]\ntrust_level = "trusted"/, 'the trust entry is kept');
+  assert.match(prof, /\[tui\]\nscreen_reader_detection_done = true/);
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /settings added to it later \(such as trusted folders\) go too/);
+  assert.ok(!fs.existsSync(codexProfile(home)));
+});
+

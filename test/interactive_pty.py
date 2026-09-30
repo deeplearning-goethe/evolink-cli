@@ -4,13 +4,16 @@
 Checks what the node:test suite cannot: hidden key input in raw mode, the numbered
 model picker, yes/no prompts and the trust question, all in a throwaway HOME.
 
-    python3 test/interactive_pty.py
+    python3 test/interactive_pty.py [--via-bootstrap] [--codex]
+
+--codex drives `evolink setup codex` instead (key, GPT model picker, the evolink profile).
 """
 import json
 import os
 import pty
 import re
 import select
+import socket
 import shutil
 import subprocess
 import sys
@@ -20,7 +23,16 @@ import time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 NODE = shutil.which("node")
 KEY = "sk-" + "Pt7yIn4t" * 6
-PORT = 18765
+
+
+def free_port():
+    # A fixed port can be taken by something else on a developer machine.
+    with socket.socket() as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]
+
+
+PORT = free_port()
 
 
 def read_until(fd, pattern, buf, timeout=20):
@@ -54,13 +66,16 @@ def main():
         "NO_COLOR": "1",
         "EVOLINK_BASE_URL": f"http://127.0.0.1:{PORT}",
     }
+    codex = "--codex" in sys.argv
+    target = ["codex"] if codex else []
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(project)
         if "--via-bootstrap" in sys.argv:
             # Same as `curl -fsSL .../setup.sh | bash`: the script arrives on stdin, prompts must use /dev/tty.
-            os.execve("/bin/bash", ["/bin/bash", "-c", f"cat '{os.path.join(ROOT, 'dist', 'setup.sh')}' | bash -s -- --no-install"], env)
-        os.execve(NODE, [NODE, os.path.join(ROOT, "bin", "evolink.mjs"), "setup", "--no-install"], env)
+            args = " ".join(target + ["--no-install"])
+            os.execve("/bin/bash", ["/bin/bash", "-c", f"cat '{os.path.join(ROOT, 'dist', 'setup.sh')}' | bash -s -- {args}"], env)
+        os.execve(NODE, [NODE, os.path.join(ROOT, "bin", "evolink.mjs"), "setup"] + target + ["--no-install"], env)
     buf = [""]
     try:
         read_until(fd, r"粘贴 API Key", buf)
@@ -70,9 +85,12 @@ def main():
         read_until(fd, r"输入序号", buf)
         assert KEY[3:] not in buf[0], "the key was echoed"
         assert "*" * 10 in buf[0], "no masked echo"
-        os.write(fd, b"2\r")  # claude-sonnet-5
-        read_until(fd, r"已信任", buf)
-        os.write(fd, b"y\r")
+        if codex:
+            os.write(fd, b"1\r")  # gpt-6-luna, the only GPT model of the mock's default list
+        else:
+            os.write(fd, b"2\r")  # claude-sonnet-5
+            read_until(fd, r"已信任", buf)
+            os.write(fd, b"y\r")
         read_until(fd, r"确认写入", buf)
         os.write(fd, b"\r")
         read_until(fd, r"发一条测试消息", buf)
@@ -92,6 +110,24 @@ def main():
     _, status = os.waitpid(pid, 0)
     mock.terminate()
     out = buf[0]
+    if codex:
+        profile = open(os.path.join(home, ".codex", "evolink.config.toml")).read()
+        checks = {
+            "exit code 0": os.waitstatus_to_exitcode(status) == 0,
+            "key hidden in terminal": KEY[3:] not in out,
+            "model chosen from picker": 'model = "gpt-6-luna"' in profile,
+            "key written to the profile": f'experimental_bearer_token = "{KEY}"' in profile,
+            "main config.toml untouched": not os.path.exists(os.path.join(home, ".codex", "config.toml")),
+            "Claude Code settings untouched": not os.path.exists(os.path.join(home, ".claude")),
+            "test request passed": "测试通过" in out,
+            "start command shown": "codex -p evolink" in out,
+        }
+        print(out)
+        print("-" * 60)
+        for name, ok in checks.items():
+            print(("PASS " if ok else "FAIL ") + name)
+        shutil.rmtree(home, ignore_errors=True)
+        sys.exit(0 if all(checks.values()) else 1)
     settings = json.load(open(os.path.join(home, ".claude", "settings.json")))
     claude_json = json.load(open(os.path.join(home, ".claude.json")))
     real_project = os.path.realpath(project)

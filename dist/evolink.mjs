@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// EvoLink CLI: one-command setup for Claude Code on EvoLink.
+// EvoLink CLI: one-command setup for Claude Code and Codex on EvoLink.
 // Zero dependencies. Requires Node.js >= 18. macOS / Linux / Windows.
 //
-//   evolink setup    configure Claude Code (default command)
-//   evolink doctor   read-only diagnostics plus a redacted report for support
-//   evolink reset    undo the changes made by `evolink setup`
+//   evolink setup [codex]    configure Claude Code (default) or the Codex CLI
+//   evolink doctor [codex]   read-only diagnostics plus a redacted report for support
+//   evolink reset [codex]    undo the changes made by `evolink setup`
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +14,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.1.4';
+export const VERSION = '0.2.0';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
@@ -53,11 +53,13 @@ export const WATCH_VARS = [
 ];
 const SECRET_VARS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_CUSTOM_HEADERS']);
 const MODEL_ALIASES = new Set(['default', 'best', 'opus', 'sonnet', 'haiku', 'opusplan']);
-// What Claude Code 2.1.284 sends for the "sonnet" alias (09-29 live test). EvoLink does not serve it yet, so setup pins
-// ANTHROPIC_DEFAULT_SONNET_MODEL to the newest Sonnet the key can use; doctor warns when the alias would fail.
+// What Claude Code 2.1.284+ sends for the "sonnet" alias (09-29 live test); EvoLink only served it from 09-30. Setup pins
+// ANTHROPIC_DEFAULT_SONNET_MODEL to the newest Sonnet the key can use so the next switch cannot break the alias either;
+// doctor warns when an unpinned alias would fail.
 const CLAUDE_CODE_SONNET_ALIAS = 'claude-sonnet-5-5';
 const RESTRICTIVE_POLICIES = new Set(['Restricted', 'AllSigned', 'Undefined']);
 const DLP_KEY = 'claudeCode.disableLoginPrompt';
+const CLAUDE_EXTENSION = 'anthropic.claude-code';
 
 const EXIT = { OK: 0, ERROR: 1, USAGE: 2, AUTH: 2, NOT_INSTALLED: 3, CONFIG: 4, NETWORK: 5, CANCELLED: 130 };
 
@@ -709,19 +711,96 @@ function editorSettingsPath(app) {
   return path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), app, 'User', 'settings.json');
 }
 
-// Editors that have the Claude Code extension installed and have been opened at least once.
-export function detectEditors() {
+function hasExtension(ed, extId) {
+  try {
+    const prefix = `${extId.toLowerCase()}-`;
+    return fs.readdirSync(path.join(os.homedir(), ed.ext, 'extensions')).some((n) => n.toLowerCase().startsWith(prefix));
+  } catch {
+    return false;
+  }
+}
+
+// Editors that have the Claude Code extension installed and have been opened at least once
+// (or whose extension setup has just installed: `also` lists them by name).
+export function detectEditors({ also = [] } = {}) {
   const out = [];
   for (const ed of EDITORS) {
-    let has = false;
-    try {
-      has = fs.readdirSync(path.join(os.homedir(), ed.ext, 'extensions')).some((n) => /^anthropic\.claude-code-/i.test(n));
-    } catch {}
-    if (!has) continue;
+    if (!hasExtension(ed, CLAUDE_EXTENSION)) continue;
     const settings = editorSettingsPath(ed.app);
-    if (isDir(path.dirname(settings))) out.push({ name: ed.name, settings });
+    if (isDir(path.dirname(settings)) || also.includes(ed.name)) out.push({ name: ed.name, settings });
   }
   return out;
+}
+
+// Editors opened at least once that lack an extension: setup names the install link at the end.
+export function editorsMissing(extId) {
+  return EDITORS.filter((ed) => EXTENSION_LINKS[ed.name] && isDir(path.dirname(editorSettingsPath(ed.app))) && !hasExtension(ed, extId)).map((ed) => ed.name);
+}
+
+// Install links documented by Anthropic and OpenAI for their extensions.
+const EXTENSION_LINKS = { 'VS Code': 'vscode', 'VS Code Insiders': 'vscode-insiders', Cursor: 'cursor' };
+export const extensionLink = (editor, extId) => `${EXTENSION_LINKS[editor] || 'vscode'}:extension/${extId}`;
+
+// Command-line launchers that can install extensions. macOS keeps `code` inside the app bundle until
+// "Shell Command: Install 'code' command in PATH" is run, so look there too. In a VS Code Remote-SSH
+// terminal, `code` on PATH is the remote CLI and installs into the remote server.
+const EDITOR_CLIS = [
+  { name: 'VS Code', cmd: 'code', mac: 'Visual Studio Code.app', win: 'Microsoft VS Code' },
+  { name: 'VS Code Insiders', cmd: 'code-insiders', mac: 'Visual Studio Code - Insiders.app', win: 'Microsoft VS Code Insiders' },
+  { name: 'Cursor', cmd: 'cursor', mac: 'Cursor.app', win: 'cursor' },
+  { name: 'Windsurf', cmd: 'windsurf', mac: 'Windsurf.app', win: 'Windsurf' },
+  { name: 'VSCodium', cmd: 'codium', mac: 'VSCodium.app', win: 'VSCodium' },
+];
+
+export function findEditorClis() {
+  const out = [];
+  for (const ed of EDITOR_CLIS) {
+    const candidates = which(ed.cmd).filter((p) => !/\.ps1$/i.test(p));
+    // A test home must not reach the real editors in /Applications (tests put fake CLIs on PATH instead).
+    if (process.platform === 'darwin' && !sandboxHome()) {
+      for (const root of ['/Applications', path.join(os.homedir(), 'Applications')]) candidates.push(path.join(root, ed.mac, 'Contents', 'Resources', 'app', 'bin', ed.cmd));
+    } else if (process.platform === 'win32') {
+      const roots = [path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'), 'Programs'), process.env.ProgramFiles].filter(Boolean);
+      for (const root of roots) candidates.push(path.join(root, ed.win, 'bin', `${ed.cmd}.cmd`));
+    }
+    const cli = candidates.find((p) => isFile(p));
+    if (cli) out.push({ name: ed.name, cli });
+  }
+  return out;
+}
+
+// Install an editor extension with each editor's own CLI (`code --install-extension <id>`); skips editors that have it.
+async function installExtension(extId, opts) {
+  const results = [];
+  const clis = findEditorClis();
+  if (!clis.length) {
+    ui.warn(L(`没有找到 VS Code 等编辑器的命令行（code），装不了扩展。可以在编辑器里打开 ${extensionLink('VS Code', extId)} 安装。`, `No editor command line (code) found, so the extension cannot be installed here. Open ${extensionLink('VS Code', extId)} in the editor instead.`));
+    return results;
+  }
+  for (const { name, cli } of clis) {
+    const listed = run(cli, ['--list-extensions'], { timeout: 60000 });
+    if (listed.code === 0 && listed.stdout.split(/\r?\n/).some((l) => l.trim().toLowerCase() === extId.toLowerCase())) {
+      ui.ok(L(`${name} 已装 ${extId}`, `${name} already has ${extId}`));
+      results.push({ editor: name, action: 'already' });
+      continue;
+    }
+    if (opts.dryRun) {
+      ui.info(L(`预览（--dry-run）：会运行 ${tildify(cli)} --install-extension ${extId}`, `Preview (--dry-run): would run ${tildify(cli)} --install-extension ${extId}`));
+      results.push({ editor: name, action: 'would_install' });
+      continue;
+    }
+    ui.info(L(`正在给 ${name} 安装扩展 ${extId}…`, `Installing ${extId} into ${name}…`));
+    const r = run(cli, ['--install-extension', extId], { timeout: 300000 });
+    if (r.code === 0) {
+      ui.ok(L(`${name}：扩展 ${extId} 安装完成`, `${name}: ${extId} installed`));
+      results.push({ editor: name, action: 'installed' });
+    } else {
+      const why = `${r.stderr || r.stdout || r.error?.message || ''}`.trim().split(/\r?\n/).pop();
+      ui.warn(L(`${name}：扩展安装失败（${why || `退出码 ${r.code}`}）。可以在编辑器里打开 ${extensionLink(name, extId)} 手动安装。`, `${name}: install failed (${why || `exit ${r.code}`}). Open ${extensionLink(name, extId)} in the editor to install it.`));
+      results.push({ editor: name, action: 'failed', error: why || `exit ${r.code}` });
+    }
+  }
+  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -1157,8 +1236,9 @@ async function cmdSetup(opts) {
   const interactive = !opts.yes && !opts.json;
   if (opts.json && !opts.yes) throw new CliError(L('--json 需要和 --yes 一起用（不能交互）。', '--json requires --yes (no prompts).'), EXIT.USAGE);
   const target = opts._[1] || 'claude-code';
+  if (CODEX_TARGETS.includes(target)) return cmdSetupCodex(opts);
   if (!['claude-code', 'claude'].includes(target)) {
-    throw new CliError(L(`暂不支持 ${target}，目前只支持 claude-code。`, `${target} is not supported yet; only claude-code is.`), EXIT.USAGE);
+    throw new CliError(L(`暂不支持 ${target}，目前支持 claude-code 和 codex。`, `${target} is not supported yet; claude-code and codex are.`), EXIT.USAGE);
   }
   const result = { command: 'setup', version: VERSION, ok: false, warnings: [] };
   const baseNorm = normalizeBaseUrl(opts.baseUrl || process.env.EVOLINK_BASE_URL || DEFAULT_BASE_URL);
@@ -1190,8 +1270,11 @@ async function cmdSetup(opts) {
     claude = await maybeInstallClaude(opts, interactive);
   }
   result.claudeCode = { installed: claude.installed, version: claude.version || null, path: claude.path || null };
+  // The terminal CLI works without the editor extension, so it is installed only on request (--install-extension).
+  const extensions = opts.installExtension ? await installExtension(CLAUDE_EXTENSION, opts) : [];
+  if (extensions.length) result.extensions = extensions;
   if (claude.installed && claude.version && !opts.skipChecks) {
-    const latest = await latestClaudeVersion(opts);
+    const latest = await latestNpmVersion(opts);
     if (latest && compareVersions(claude.version, latest) < 0) {
       ui.warn(updateHint(claude.version, latest));
       result.claudeCode.latest = latest;
@@ -1219,7 +1302,7 @@ async function cmdSetup(opts) {
   ui.step(4, 5, L('确认改动', 'Review changes'));
   if (settingsRead.exists && !settingsRead.data) settingsRead = await handleInvalidSettings(settingsRead, opts, interactive);
   const trustDirs = await decideTrust(opts, interactive, paths);
-  const editors = opts.vscode === false ? [] : detectEditors();
+  const editors = opts.vscode === false ? [] : detectEditors({ also: extensions.filter((e) => e.action === 'installed').map((e) => e.editor) });
   const plan = buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, paths, trustDirs, editors });
   printConflicts(conflicts, ids);
   printPlan(plan);
@@ -1329,6 +1412,11 @@ async function maybeInstallClaude(opts, interactive) {
     ui.sub(L('            Windows PowerShell 运行 irm https://claude.ai/install.ps1 | iex', '            on Windows PowerShell run irm https://claude.ai/install.ps1 | iex'));
     ui.sub(L('配置可以先写好，装好 Claude Code 后直接生效。', 'The configuration can be written now and takes effect once Claude Code is installed.'));
   };
+  return installWithNpm({ pkg: CLAUDE_PKG, label: 'Claude Code', bin: 'claude', nodeMin: 22, detect: detectClaude, guide }, opts, interactive);
+}
+
+// Installs a CLI with `npm install -g` from whichever registry answers (npmjs or npmmirror); never in a dry run.
+async function installWithNpm({ pkg, label, bin, nodeMin = 0, detect, guide }, opts, interactive) {
   if (opts.install === false) {
     ui.info(L('按 --no-install 跳过安装；配置照常写入。', 'Skipping install (--no-install); the configuration is still written.'));
     return { installed: false };
@@ -1340,17 +1428,23 @@ async function maybeInstallClaude(opts, interactive) {
     return { installed: false };
   }
   const nodeMajor = Number(process.versions.node.split('.')[0]);
-  if (nodeMajor < 22) {
-    ui.warn(L(`当前 Node.js ${process.versions.node}，Claude Code 要求 22 或更高（旧版本通常也能装上，但会有警告）。`, `Node.js ${process.versions.node} is older than the 22 Claude Code asks for; install usually works with a warning.`));
+  if (nodeMajor < nodeMin) {
+    ui.warn(L(`当前 Node.js ${process.versions.node}，${label} 要求 ${nodeMin} 或更高（旧版本通常也能装上，但会有警告）。`, `Node.js ${process.versions.node} is older than the ${nodeMin} ${label} asks for; install usually works with a warning.`));
   }
-  const reg = await pickRegistry(opts);
+  const reg = await pickRegistry(opts, pkg);
   if (!reg) {
     ui.err(L('npm 官方源和 npmmirror 都连不上。', 'Neither npmjs nor npmmirror is reachable.'));
     guide();
     return { installed: false };
   }
-  const args = ['install', '-g', CLAUDE_PKG, `--registry=${reg.url}`];
-  ui.info(L(`将从 ${reg.name} 安装 Claude Code${reg.version ? ` ${reg.version}` : ''}：`, `Installing Claude Code${reg.version ? ` ${reg.version}` : ''} from ${reg.name}:`));
+  const args = ['install', '-g', pkg, `--registry=${reg.url}`];
+  const ver = reg.version ? ` ${reg.version}` : '';
+  if (opts.dryRun) {
+    ui.info(L(`预览（--dry-run）：会从 ${reg.name} 安装 ${label}${ver}，这次不安装：`, `Preview (--dry-run): would install ${label}${ver} from ${reg.name}; not installing now:`));
+    ui.sub(`npm ${args.join(' ')}`);
+    return { installed: false };
+  }
+  ui.info(L(`将从 ${reg.name} 安装 ${label}${ver}：`, `Installing ${label}${ver} from ${reg.name}:`));
   ui.sub(`npm ${args.join(' ')}`);
   if (interactive && !(await confirm(L('现在安装？', 'Install now?'), true))) {
     ui.info(L('先不安装，继续写配置。', 'Not installing; continuing with the configuration.'));
@@ -1366,20 +1460,20 @@ async function maybeInstallClaude(opts, interactive) {
     guide();
     return { installed: false };
   }
-  const c = detectClaude();
-  if (c.installed) ui.ok(L(`Claude Code ${c.version || ''} 安装完成`, `Claude Code ${c.version || ''} installed`));
+  const c = detect();
+  if (c.installed) ui.ok(L(`${label} ${c.version || ''} 安装完成`, `${label} ${c.version || ''} installed`));
   else {
     const prefix = run(npm, ['prefix', '-g']).stdout.trim();
-    ui.warn(L('已经装好，但当前终端还找不到 claude 命令。请打开新终端再试。', 'Installed, but this terminal cannot find claude yet. Open a new terminal.'));
+    ui.warn(L(`已经装好，但当前终端还找不到 ${bin} 命令。请打开新终端再试。`, `Installed, but this terminal cannot find ${bin} yet. Open a new terminal.`));
     if (prefix) ui.sub(L(`npm 全局目录：${prefix}（需要在 PATH 里）`, `npm global folder: ${prefix} (must be on PATH)`));
   }
   return c.installed ? c : { installed: false };
 }
 
-async function pickRegistry(opts) {
+async function pickRegistry(opts, pkg = CLAUDE_PKG) {
   if (opts.registry) return { name: opts.registry, url: opts.registry.replace(/\/+$/, '') };
   const probe = async (name, url) => {
-    const r = await http('GET', `${url}/${CLAUDE_PKG}/latest`, { timeout: 8000 });
+    const r = await http('GET', `${url}/${pkg}/latest`, { timeout: 8000 });
     return { name, url, ok: r.ok, ms: r.ms, version: r.json?.version };
   };
   const [a, b] = await Promise.all([probe('npmjs', REGISTRIES.npmjs), probe('npmmirror', REGISTRIES.npmmirror)]);
@@ -1388,11 +1482,11 @@ async function pickRegistry(opts) {
   return null;
 }
 
-// Newest Claude Code on npm (the --registry if given, else whichever of npmjs / npmmirror answers first); null when offline.
-async function latestClaudeVersion(opts) {
+// Newest version of a package on npm (the --registry if given, else whichever of npmjs / npmmirror answers first); null when offline.
+async function latestNpmVersion(opts, pkg = CLAUDE_PKG) {
   const urls = opts.registry ? [opts.registry.replace(/\/+$/, '')] : Object.values(REGISTRIES);
   const probes = urls.map(async (url) => {
-    const r = await http('GET', `${url}/${CLAUDE_PKG}/latest`, { timeout: 6000 });
+    const r = await http('GET', `${url}/${pkg}/latest`, { timeout: 6000 });
     if (!r.ok || typeof r.json?.version !== 'string') throw new Error('no version');
     return r.json.version;
   });
@@ -1410,7 +1504,7 @@ function updateHint(installed, latest) {
   );
 }
 
-async function obtainAndCheckKey(opts, interactive, base, existingKey) {
+async function obtainAndCheckKey(opts, interactive, base, existingKey, { tool = 'claude' } = {}) {
   let from = null;
   let raw = null;
   if (process.env.EVOLINK_API_KEY) {
@@ -1452,6 +1546,12 @@ async function obtainAndCheckKey(opts, interactive, base, existingKey) {
         return { key, check: null };
       }
       const check = await checkKey(base, key);
+      if (check.ok && tool === 'codex') {
+        const gpt = codexModelIds(check.ids).length;
+        ui.ok(L(`Key 有效（${maskKey(key)}）· 可用模型 ${check.count} 个，其中 GPT ${gpt} 个`, `Key is valid (${maskKey(key)}) · ${check.count} models, ${gpt} GPT`));
+        printBalance(check.balance);
+        return { key, check };
+      }
       if (check.ok) {
         ui.ok(L(`Key 有效（${maskKey(key)}）· 可用模型 ${check.count} 个，其中 Claude ${check.claudeCount} 个`, `Key is valid (${maskKey(key)}) · ${check.count} models, ${check.claudeCount} Claude`));
         if (check.claudeCount === 0) ui.warn(L('这把 Key 没有开通任何 Claude 模型，Claude Code 用不了；请在控制台调整 Key 的模型范围。', 'This key has no Claude models; Claude Code cannot work with it. Adjust the key in the dashboard.'));
@@ -1570,7 +1670,7 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
     if (v === 'ANTHROPIC_MODEL') continue;
     if (hasOwn(env, v) && env[v] !== '' && known && !modelAvailable(env[v], ids)) remove.push(v);
   }
-  // Claude Code 2.1.284 sends claude-sonnet-5-5 for the "sonnet" alias, which EvoLink does not serve yet (09-29 live test):
+  // Claude Code 2.1.284 moved the "sonnet" alias to claude-sonnet-5-5 a day or two before EvoLink served it (09-29 live test):
   // pin the alias to the newest Sonnet this key can use, unless the user already has a usable pin of their own.
   if (opts.pinSonnet !== false && known) {
     const own = hasOwn(env, 'ANTHROPIC_DEFAULT_SONNET_MODEL') ? env.ANTHROPIC_DEFAULT_SONNET_MODEL : undefined;
@@ -1654,7 +1754,7 @@ const WHY = {
   CLAUDE_CODE_MAX_OUTPUT_TOKENS: ['降低单次预扣，避免"余额不足"', 'lowers the per-request hold'],
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: ['减少非必要请求（与文档一致；也会关掉自动更新）', 'fewer background requests (also turns off auto-update)'],
   ANTHROPIC_MODEL: ['默认模型', 'default model'],
-  ANTHROPIC_DEFAULT_SONNET_MODEL: ['/model 里的 Sonnet 用它：Claude Code 2.1.284 起默认指向 claude-sonnet-5-5，EvoLink 暂无', 'used for the Sonnet alias: Claude Code 2.1.284+ defaults it to claude-sonnet-5-5, which EvoLink does not serve yet'],
+  ANTHROPIC_DEFAULT_SONNET_MODEL: ['/model 里的 Sonnet 用它：这把 Key 能用的最新 Sonnet，Claude Code 以后换默认 Sonnet 也不会选到 EvoLink 还没有的模型', 'used for the Sonnet alias: the newest Sonnet this key can use, so a later Claude Code default EvoLink lacks cannot break it'],
   disableAutoMode: ['先关掉 auto mode：EvoLink 暂不支持它的审核请求，开着会被拦并计费；网关修好后重跑 setup --auto-mode 即可恢复', 'auto mode off for now: EvoLink cannot serve its review requests yet (actions get blocked and billed); re-run setup --auto-mode once the gateway supports it'],
 };
 
@@ -1819,6 +1919,11 @@ function printNextSteps({ plan, claude, editors, trusted, sandbox }) {
   }
   ui.print(`  ${ui.mark('dot')} ${L('进入后输入 /status：Anthropic base URL 显示 EvoLink 地址，就说明配置生效了。', 'Inside, run /status: the Anthropic base URL line should show the EvoLink address.')}`);
   if (editors.length) ui.print(`  ${ui.mark('dot')} ${L('VS Code 等编辑器里的 Claude Code 扩展：重新加载窗口（Developer: Reload Window）后生效。', 'Editor extension: run "Developer: Reload Window" for it to take effect.')}`);
+  const missing = editorsMissing(CLAUDE_EXTENSION);
+  if (missing.length) {
+    const link = extensionLink(missing[0], CLAUDE_EXTENSION);
+    ui.print(`  ${ui.mark('dot')} ${L(`想在 ${missing.join(' / ')} 里用 Claude Code：在编辑器里打开 ${link} 安装扩展，或重新运行 setup 并加 --install-extension`, `To use Claude Code in ${missing.join(' / ')}: open ${link} in the editor to install the extension, or re-run setup with --install-extension`)}`);
+  }
   if (claude.installed && claude.version) ui.print(`  ${ui.mark('dot')} ${L('用 claude update 可以手动更新 Claude Code。', 'Update Claude Code any time with: claude update')}`);
   ui.print('');
   ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset`);
@@ -1834,9 +1939,598 @@ function finish(result, opts, code = EXIT.OK) {
 }
 
 // ---------------------------------------------------------------------------
+// Codex CLI: `evolink setup codex` writes a separate profile, so `codex -p evolink` goes through EvoLink while a
+// plain `codex` keeps the user's own setup. The main config.toml is never touched in this mode.
+
+const CODEX_PKG = '@openai/codex';
+const CODEX_PROFILE = 'evolink';
+// Not "evolink": our docs taught [model_providers.evolink] with env_key = "OPENAI_API_KEY" in config.toml, and a profile
+// deep-merges into config.toml, so that env_key would win over the key written here (Codex 0.159.2 source).
+const CODEX_PROVIDER = 'evolink-cli';
+const CODEX_TARGETS = ['codex', 'codex-cli'];
+
+// Offered in the interactive picker, filtered by what the key can use; the first usable one is the default. All are in
+// Codex 0.159's own model list (so no "metadata not found" warning) and none triggers its model-migration prompt.
+export const RECOMMENDED_CODEX_MODELS = [
+  { id: 'gpt-6.1-sol', zh: 'Codex 默认的模型，性价比高', en: "Codex's own default; good value" },
+  { id: 'gpt-6-sol', zh: '上一版 Sol，价格相同', en: 'the previous Sol, same price' },
+  { id: 'gpt-6-astra', zh: '最强，单价也最高', en: 'strongest; most expensive' },
+  { id: 'gpt-6-luna', zh: '最便宜、最快，适合轻量任务', en: 'cheapest and fastest' },
+];
+
+export function codexPaths() {
+  const home = process.env.CODEX_HOME ? path.resolve(process.env.CODEX_HOME) : path.join(os.homedir(), '.codex');
+  return { home, profile: path.join(home, `${CODEX_PROFILE}.config.toml`), config: path.join(home, 'config.toml') };
+}
+
+// GPT text models the key can use. Every one answers on /v1/responses (09-30 live test), but /v1/models does not say
+// which endpoint a model supports (GPT models all list only "openai"), so image models are filtered out by name.
+export function codexModelIds(ids) {
+  return [...ids].filter((id) => /^gpt-\d/i.test(id) && !/image/i.test(id)).sort();
+}
+
+export function detectCodex() {
+  const found = which('codex').filter((p) => !/\.ps1$/i.test(p));
+  if (!found.length) return { installed: false };
+  const r = run(found[0], ['--version'], { timeout: 30000 });
+  const m = /(\d+\.\d+\.\d+)/.exec(`${r.stdout}\n${r.stderr}`);
+  return { installed: true, path: found[0], version: m ? m[1] : null };
+}
+
+async function maybeInstallCodex(opts, interactive) {
+  const guide = () => {
+    ui.sub(L('可以这样安装 Codex：', 'Install Codex like this:'));
+    ui.sub(`  npm install -g ${CODEX_PKG}${L(`（中国大陆加 --registry=${REGISTRIES.npmmirror}）`, `   (mainland China: add --registry=${REGISTRIES.npmmirror})`)}`);
+    if (process.platform === 'darwin') ui.sub(L('  或者：brew install --cask codex', '  or: brew install --cask codex'));
+    ui.sub(L('配置可以先写好，装好 Codex 后直接生效。', 'The profile can be written now and works once Codex is installed.'));
+  };
+  return installWithNpm({ pkg: CODEX_PKG, label: 'Codex', bin: 'codex', detect: detectCodex, guide }, opts, interactive);
+}
+
+const tomlString = (s) => JSON.stringify(String(s));
+
+// Keys setup manages in the profile. Codex itself also writes into the profile ([tui] on the first launch, [projects."…"]
+// when a folder is trusted, [notice] …; 09-30 live test), and users may add their own settings: those are kept.
+const CODEX_MANAGED_KEYS = new Set(['model', 'model_provider', 'web_search', 'approvals_reviewer']);
+const CODEX_PROVIDER_TABLE = `model_providers.${CODEX_PROVIDER}`;
+
+// Written in one piece: setup's keys and provider table, then whatever else the file held (`kept`, from splitCodexProfile).
+export function renderCodexProfile({ base, key, model, reviewer = null, kept = { top: '', tables: '' } }) {
+  const lines = [
+    '# EvoLink profile for Codex, written by `evolink setup codex` (https://github.com/deeplearning-goethe/evolink-cli).',
+    `# Start Codex with:  codex -p ${CODEX_PROFILE}        Undo:  evolink reset codex`,
+    '# Your own config.toml is not changed. This file holds your EvoLink key: keep it private.',
+    `model = ${tomlString(model)}`,
+    `model_provider = ${tomlString(CODEX_PROVIDER)}`,
+    // EvoLink does not run OpenAI's hosted web search tool.
+    'web_search = "disabled"',
+  ];
+  // config.toml turns on automatic approval review, whose codex-auto-review model EvoLink does not serve: every reviewed
+  // command would be denied. Only written when config.toml asks for it.
+  if (reviewer) lines.push(`approvals_reviewer = ${tomlString(reviewer)}`);
+  // Top-level keys must come before the first [table], or TOML files them under it.
+  if (kept.top) lines.push(kept.top);
+  lines.push(
+    '',
+    `[${CODEX_PROVIDER_TABLE}]`,
+    'name = "EvoLink"',
+    `base_url = ${tomlString(`${base}/v1`)}`,
+    'wire_api = "responses"',
+    // A key in the file reaches the CLI and the VS Code extension alike (an env_key variable does not reach apps started
+    // from the Dock), and Codex keeps it out of its logs and session files (09-30 live test, Codex 0.159.2).
+    `experimental_bearer_token = ${tomlString(key)}`,
+  );
+  if (kept.tables) lines.push('', kept.tables);
+  return `${lines.join('\n')}\n`;
+}
+
+// Splits a profile into setup's part (`core`: the managed keys and the provider table, as written) and everything else
+// (`top`: other top-level lines, `tables`: other tables). `ours` tells whether setup's provider table is still there.
+export function splitCodexProfile(text) {
+  const core = [];
+  const top = [];
+  const tables = [];
+  let table = null;
+  let ours = false;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const h = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(line);
+    if (h) {
+      table = h[1].replace(/"/g, '').replace(/\s+/g, '');
+      if (table === CODEX_PROVIDER_TABLE) {
+        ours = true;
+        core.push(line.trim());
+      } else tables.push(line);
+      continue;
+    }
+    if (table === CODEX_PROVIDER_TABLE) {
+      if (line.trim()) core.push(line.trim());
+    } else if (table !== null) tables.push(line);
+    else if (line.trim() && !/^\s*#/.test(line)) {
+      const kv = /^\s*([A-Za-z0-9_-]+)\s*=/.exec(line);
+      if (kv && CODEX_MANAGED_KEYS.has(kv[1])) core.push(line.trim());
+      else top.push(line);
+    }
+  }
+  return { core: core.join('\n'), top: top.join('\n').trim(), tables: tables.join('\n').trim(), ours };
+}
+export const codexProfileCore = (text) => splitCodexProfile(text).core;
+
+// Settings in config.toml that a `-p evolink` session inherits or trips over (a profile layers on top of config.toml).
+export function scanCodexConfig(text) {
+  const out = { profileTable: false, legacyProfile: null, autoReview: false, evolinkEnvKey: null };
+  let table = null;
+  for (const line of String(text || '').split(/\r?\n/)) {
+    const h = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(line);
+    if (h) {
+      table = h[1].replace(/"/g, '').replace(/\s+/g, '');
+      if (table === `profiles.${CODEX_PROFILE}`) out.profileTable = true;
+      continue;
+    }
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"/.exec(line);
+    if (!kv) continue;
+    if (table === null && kv[1] === 'profile') out.legacyProfile = kv[2];
+    if (table === null && kv[1] === 'approvals_reviewer' && ['auto_review', 'guardian_subagent'].includes(kv[2])) out.autoReview = true;
+    if (table === 'model_providers.evolink' && kv[1] === 'env_key') out.evolinkEnvKey = kv[2];
+  }
+  return out;
+}
+
+// Reads back the keys setup writes (doctor, and reusing the key on a re-run). Not a general TOML parser.
+export function parseCodexProfile(text) {
+  const out = {};
+  for (const k of ['model', 'model_provider', 'model_catalog_json', 'web_search', 'approvals_reviewer', 'base_url', 'wire_api', 'experimental_bearer_token', 'env_key']) {
+    const m = new RegExp(`^[ \\t]*${k}[ \\t]*=[ \\t]*"((?:[^"\\\\\\n]|\\\\.)*)"`, 'm').exec(String(text || ''));
+    if (!m) continue;
+    try {
+      out[k] = JSON.parse(`"${m[1]}"`);
+    } catch {
+      out[k] = m[1];
+    }
+  }
+  return out;
+}
+
+// The key setup offers to reuse: an earlier Codex profile first, then the Claude Code settings.
+function existingCodexKey(paths) {
+  if (isFile(paths.profile)) {
+    const p = parseCodexProfile(fs.readFileSync(paths.profile, 'utf8'));
+    if (p.experimental_bearer_token && isEvolinkUrl(p.base_url || '')) return p.experimental_bearer_token;
+  }
+  return existingEvolinkKey(readJson(claudePaths().settings).data);
+}
+
+async function decideCodexModel(opts, interactive, current, ids) {
+  const known = ids.size > 0;
+  const usable = codexModelIds(ids);
+  if (known && !usable.length) {
+    throw new CliError(L('这把 Key 没有开通任何 GPT 模型，Codex 用不了；请在控制台调整 Key 的模型范围。', 'This key has no GPT models, so Codex cannot use it. Adjust the key in the dashboard.'), EXIT.AUTH);
+  }
+  const ok = (m) => !known || usable.includes(m);
+  const suggest = (m) => {
+    const s = suggestModel(m, new Set(usable));
+    return s ? L(`，你是不是想用 ${s}？`, `; did you mean ${s}?`) : '';
+  };
+  if (opts.model) {
+    const m = opts.model.trim();
+    if (!ok(m)) throw new CliError(L(`这把 Key 在 Codex 里用不了模型 ${m}`, `This key cannot use model ${m} in Codex`) + (suggest(m) || L('。', '.')), EXIT.AUTH);
+    ui.ok(L(`默认模型：${m}`, `Default model: ${m}`));
+    return m;
+  }
+  const recommended = RECOMMENDED_CODEX_MODELS.filter((r) => ok(r.id));
+  const fallback = recommended[0]?.id || usable[usable.length - 1] || RECOMMENDED_CODEX_MODELS[0].id;
+  const currentOk = !!current && ok(current);
+  if (current && !currentOk) ui.warn(L(`现在配置的模型 ${current} 这把 Key 用不了，将改用 ${fallback}。`, `The configured model ${current} is not available for this key; switching to ${fallback}.`));
+  if (!interactive) {
+    const m = currentOk ? current : fallback;
+    ui.ok(currentOk ? L(`保持现有模型：${m}`, `Keeping model: ${m}`) : L(`默认模型：${m}`, `Default model: ${m}`));
+    return m;
+  }
+  const options = [];
+  if (currentOk) options.push({ label: L(`保持现有设置：${current}`, `Keep current: ${current}`), value: current });
+  for (const r of recommended) if (r.id !== current) options.push({ label: r.id, note: L(r.zh, r.en), value: r.id });
+  options.push({ label: L('手动输入模型 ID', 'Type a model ID'), value: null });
+  const idx = await choose(L('Codex 默认用哪个模型？（之后在 Codex 里输入 /model 随时能换）', 'Which model should Codex use by default? (switch any time with /model)'), options, 0);
+  let m = options[idx].value;
+  while (!m) {
+    const t = (await askLine(L('  模型 ID：', '  Model ID: '))).trim();
+    if (!t) continue;
+    if (ok(t)) m = t;
+    else ui.warn(L(`这把 Key 在 Codex 里用不了 ${t}`, `This key cannot use ${t} in Codex`) + suggest(t));
+  }
+  return m;
+}
+
+// What config.toml means for `codex -p evolink`: errors stop Codex outright; info explains an old setup that stays as is.
+function codexConfigNotes(mainConfig, paths) {
+  const file = tildify(paths.config);
+  const notes = [];
+  if (mainConfig.profileTable) {
+    notes.push({
+      level: 'error',
+      text: L(
+        `${file} 里有 [profiles.${CODEX_PROFILE}] 这一段：新版 Codex 遇到它会直接报错，codex -p ${CODEX_PROFILE} 起不来。请把这一整段删掉（它已经被独立配置档取代）。`,
+        `${file} has a [profiles.${CODEX_PROFILE}] table: current Codex refuses to start codex -p ${CODEX_PROFILE} while it exists. Delete that table (the profile file replaces it).`,
+      ),
+    });
+  }
+  if (mainConfig.legacyProfile) {
+    notes.push({
+      level: 'error',
+      text: L(
+        `${file} 里有 profile = "${mainConfig.legacyProfile}"：新版 Codex 不再支持这种写法，所有 codex 命令都会报错。请删掉这一行（要用某个配置档时改用 codex -p 名字）。`,
+        `${file} sets profile = "${mainConfig.legacyProfile}", which current Codex rejects for every command. Delete that line (pick a profile with codex -p <name> instead).`,
+      ),
+    });
+  }
+  if (mainConfig.evolinkEnvKey) {
+    notes.push({
+      level: 'info',
+      text: L(
+        `${file} 里有旧教程写的 [model_providers.evolink]（Key 取自环境变量 ${mainConfig.evolinkEnvKey}）：直接运行 codex 仍按它走；codex -p ${CODEX_PROFILE} 用本工具写的配置，不受它影响。`,
+        `${file} has an older [model_providers.evolink] setup (key from ${mainConfig.evolinkEnvKey}): plain codex still uses it; codex -p ${CODEX_PROFILE} uses this tool's profile and is not affected.`,
+      ),
+    });
+  }
+  return notes;
+}
+
+function buildCodexPlan({ base, key, model, paths, mainConfig }) {
+  const existed = isFile(paths.profile);
+  const before = existed ? fs.readFileSync(paths.profile, 'utf8') : null;
+  const reviewer = mainConfig.autoReview ? 'user' : null;
+  const content = renderCodexProfile({ base, key, model, reviewer, kept: before ? splitCodexProfile(before) : undefined });
+  const changed = before === null || codexProfileCore(before) !== codexProfileCore(content);
+  return { files: [{ kind: 'profile', file: paths.profile, content, existed, changed }], base, key, model, reviewer, mainConfig };
+}
+
+function printCodexPlan(plan, paths) {
+  ui.print('');
+  for (const f of plan.files) {
+    const tag = !f.existed ? L('  （新建）', '  (new file)') : f.changed ? L('  （替换，原文件先备份）', '  (replaced; the old file is backed up first)') : L('  （无需改动）', '  (unchanged)');
+    ui.print(`  ${tildify(f.file)}${tag}`);
+    if (f.kind === 'profile') {
+      ui.print(`    model_provider  → ${CODEX_PROVIDER}${ui.dim(`  ${plan.base}/v1 · Responses API`)}`);
+      ui.print(`    model           → ${plan.model}`);
+      ui.print(`    ${L('Key', 'key')}             → ${maskKey(plan.key)}${ui.dim(`  ${L('只存在这个文件里，只有你能读', 'kept in this file, readable only by you')}`)}`);
+      ui.print(`    web_search      → disabled${ui.dim(`  ${L('EvoLink 不提供 OpenAI 自带的联网搜索', "EvoLink does not run OpenAI's hosted web search")}`)}`);
+      if (plan.reviewer) ui.print(`    approvals_reviewer → user${ui.dim(`  ${L('你的 config.toml 开了自动审批审核，它用的 codex-auto-review 模型 EvoLink 没有，开着会拒绝执行命令', 'your config.toml turns on automatic approval review; EvoLink does not serve its codex-auto-review model, so reviewed commands would be denied')}`)}`);
+    }
+  }
+  ui.print(`  ${tildify(paths.config)}${ui.dim(`  ${L('不改：直接运行 codex 仍是你原来的设置', 'not changed: plain `codex` keeps your own setup')}`)}`);
+}
+
+function applyCodexPlan(plan) {
+  const state = loadState();
+  const cx = (state.codex ||= { files: {} });
+  const backup = newBackupSession();
+  const written = [];
+  for (const f of plan.files) {
+    if (!f.changed) continue;
+    let original = null;
+    if (f.existed && !cx.files[f.file]) {
+      // A file setup did not write: keep a copy outside the rotating backups, so reset can put it back.
+      original = path.join(evolinkHome(), 'originals', `codex-${path.basename(f.file)}`);
+      fs.mkdirSync(path.dirname(original), { recursive: true, mode: 0o700 });
+      fs.copyFileSync(f.file, original);
+      try {
+        fs.chmodSync(original, 0o600);
+      } catch {}
+    }
+    if (f.existed) backupFile(backup, f.file, `codex-${path.basename(f.file)}`);
+    writeAtomic(f.file, f.content);
+    if (!cx.files[f.file]) cx.files[f.file] = { existed: f.existed, original };
+    written.push(f.file);
+  }
+  cx.updatedAt = new Date().toISOString();
+  saveState(state);
+  pruneBackups();
+  return { written, backupDir: backup.files.length ? backup.dir : null };
+}
+
+// Codex speaks the Responses API; a dozen tokens is enough to prove the key and the model.
+async function testResponses(base, key, model) {
+  const r = await http('POST', `${base}/v1/responses`, { key, timeout: 90000, body: { model, input: 'ping', max_output_tokens: 16 } });
+  return r.ok ? { ok: true, model, ms: r.ms } : { ok: false, model, failure: describeFailure(r), ms: r.ms };
+}
+
+async function cmdSetupCodex(opts) {
+  const interactive = !opts.yes && !opts.json;
+  const result = { command: 'setup', target: 'codex', version: VERSION, ok: false, warnings: [] };
+  const baseNorm = normalizeBaseUrl(opts.baseUrl || process.env.EVOLINK_BASE_URL || DEFAULT_BASE_URL);
+  if (baseNorm.error) throw new CliError(L('接口地址格式不对，应类似 https://direct.evolink.ai', 'Invalid base URL; expected something like https://direct.evolink.ai'), EXIT.USAGE);
+  const base = baseNorm.url;
+
+  ui.title(L(`EvoLink 一键配置 · Codex  v${VERSION}`, `EvoLink setup · Codex  v${VERSION}`));
+  ui.print(ui.dim(L(`只新建一个 Codex 配置档（${CODEX_PROFILE}），你原来的 config.toml 不动；改之前自动备份，随时可以撤销。`, `Only adds a Codex profile ("${CODEX_PROFILE}"); your config.toml is left alone. Everything is backed up first and can be undone.`)));
+  const sandbox = sandboxHome();
+  if (sandbox) {
+    ui.info(
+      L(
+        `测试模式：HOME 是 ${sandbox.home}，只改这里面的配置，你真实的家目录 ${sandbox.real} 不受影响（自动安装 Codex 除外，可加 --no-install）。`,
+        `Test mode: HOME is ${sandbox.home}; only settings under it change and your real home ${sandbox.real} is left alone (except installing Codex; add --no-install).`,
+      ),
+    );
+  }
+
+  // [1/5] environment
+  ui.step(1, 5, L('检查环境', 'Environment'));
+  ui.ok(`${osLabel()} · Node ${process.versions.node}`);
+  let codex = detectCodex();
+  if (codex.installed) ui.ok(`Codex ${codex.version || '?'}  ${ui.dim(tildify(codex.path))}`);
+  else {
+    // The profile does nothing without Codex itself, so it is installed by default (--no-install skips it).
+    ui.warn(L('没有找到 Codex。', 'Codex is not installed.'));
+    codex = await maybeInstallCodex(opts, interactive);
+  }
+  result.codex = { installed: codex.installed, version: codex.version || null, path: codex.path || null };
+  if (codex.installed && codex.version && !opts.skipChecks) {
+    const latest = await latestNpmVersion(opts, CODEX_PKG);
+    if (latest && compareVersions(codex.version, latest) < 0) {
+      ui.warn(L(`Codex 有新版本 ${latest}（当前 ${codex.version}），建议更新：npm install -g ${CODEX_PKG}@latest`, `Codex ${latest} is available (you have ${codex.version}); update with: npm install -g ${CODEX_PKG}@latest`));
+      result.codex.latest = latest;
+    }
+  }
+
+  // [2/5] key
+  ui.step(2, 5, L('API Key', 'API key'));
+  const paths = codexPaths();
+  const current = isFile(paths.profile) ? parseCodexProfile(fs.readFileSync(paths.profile, 'utf8')) : {};
+  const { key, check } = await obtainAndCheckKey(opts, interactive, base, existingCodexKey(paths), { tool: 'codex' });
+  result.key = maskKey(key);
+  const ids = check?.ids || new Set();
+  if (check) result.api = { models: check.count, gptModels: codexModelIds(ids).length, balance: check.balance };
+
+  // [3/5] model
+  ui.step(3, 5, L('模型', 'Model'));
+  const model = await decideCodexModel(opts, interactive, current.model || null, ids);
+  result.model = model;
+
+  // [4/5] plan
+  ui.step(4, 5, L('确认改动', 'Review changes'));
+  const mainConfig = scanCodexConfig(isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '');
+  const plan = buildCodexPlan({ base, key, model, paths, mainConfig });
+  printCodexPlan(plan, paths);
+  for (const n of codexConfigNotes(mainConfig, paths)) {
+    if (n.level === 'error') {
+      ui.warn(n.text);
+      result.warnings.push(n.text);
+    } else ui.info(n.text);
+  }
+  const pending = plan.files.filter((f) => f.changed).length;
+  result.changes = plan.files.map((f) => ({ file: f.file, action: !f.existed ? 'create' : f.changed ? 'replace' : 'keep' }));
+  if (opts.dryRun) {
+    ui.print('');
+    ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
+    result.ok = true;
+    result.dryRun = true;
+    return finish(result, opts);
+  }
+  if (pending === 0) ui.ok(L('配置已经是最新的，不需要改动。', 'Already up to date; nothing to change.'));
+  else if (interactive && !(await confirm(L('确认写入？', 'Apply these changes?'), true))) throw new CancelledError();
+
+  // [5/5] apply and verify
+  ui.step(5, 5, L('写入并验证', 'Apply and verify'));
+  if (pending > 0) {
+    const applied = applyCodexPlan(plan);
+    if (applied.backupDir) ui.ok(L(`已备份原文件到 ${tildify(applied.backupDir)}`, `Backed up originals to ${tildify(applied.backupDir)}`));
+    for (const f of applied.written) ui.ok(L(`已写入 ${tildify(f)}`, `Wrote ${tildify(f)}`));
+    result.backupDir = applied.backupDir;
+    result.written = applied.written;
+  }
+  if (!opts.skipChecks && opts.test !== false && ids.size) {
+    let go = true;
+    if (interactive) go = await confirm(L(`发一条测试消息确认能用吗？（模型 ${model}，十几个 token，费用约 0.01 Credits）`, `Send a tiny test request with ${model}? (a dozen tokens, about 0.01 credits)`), true);
+    if (go) {
+      const t = await testResponses(base, key, model);
+      result.test = t.ok ? { ok: true, model, ms: t.ms } : { ok: false, model, error: t.failure };
+      if (t.ok) ui.ok(L(`测试通过：${model} 正常返回（${t.ms} ms）`, `Test passed: ${model} answered (${t.ms} ms)`));
+      else for (const line of failureLines(t.failure, base)) ui.err(line);
+    }
+  }
+  result.ok = !result.test || result.test.ok;
+  printCodexNextSteps({ codex, sandbox });
+  return finish(result, opts, result.ok ? EXIT.OK : EXIT.AUTH);
+}
+
+function printCodexNextSteps({ codex, sandbox }) {
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
+  ui.print('');
+  ui.title(`${ui.mark('ok')} ${L('配置完成', 'All set')}`);
+  const n = [];
+  if (!codex.installed) {
+    n.push(L(`先安装 Codex：npm install -g ${CODEX_PKG}（中国大陆加 --registry=${REGISTRIES.npmmirror}）`, `Install Codex first: npm install -g ${CODEX_PKG} (in mainland China add --registry=${REGISTRIES.npmmirror})`));
+  }
+  if (sandbox) {
+    n.push(L(`测试模式：在这个终端里用 ${sandboxPrefix(sandbox)}codex -p ${CODEX_PROFILE} 启动（不带 HOME 就会用你真实的配置）`, `Test mode: start it with ${sandboxPrefix(sandbox)}codex -p ${CODEX_PROFILE} in this terminal (without HOME it uses your real settings)`));
+  } else {
+    n.push(L('打开一个新的终端窗口，进入你的项目文件夹：cd 你的项目路径', 'Open a new terminal and go to your project: cd <your project>'));
+    n.push(L(`运行：codex -p ${CODEX_PROFILE}`, `Run: codex -p ${CODEX_PROFILE}`));
+  }
+  n.forEach((line, i) => ui.print(`  ${i + 1}. ${line}`));
+  ui.print(`  ${ui.mark('dot')} ${L(`带 -p ${CODEX_PROFILE} 才走 EvoLink；直接运行 codex 仍是你原来的设置（ChatGPT 账号或你自己的 config.toml）。`, `EvoLink is used only with -p ${CODEX_PROFILE}; plain codex keeps your own setup (ChatGPT sign-in or your config.toml).`)}`);
+  ui.print(`  ${ui.mark('dot')} ${L('在 Codex 里输入 /model 可以换成这把 Key 能用的其他 GPT 模型。', 'Inside Codex, /model switches to any other GPT model this key can use.')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('第一次在某个文件夹启动会问是否信任它，按提示选即可；启动时提示 "Running without the shared background server" 是正常的（带 -p 时 Codex 都这样）。', 'The first launch in a folder asks whether to trust it; answer as you like. The note "Running without the shared background server" is normal with -p.')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('Codex 每轮都会带上很长的系统提示和工具说明：一句简单的话也要约 9 千个输入 token。', 'Codex sends a long system prompt and tool list every turn: even a one-line question costs about 9K input tokens.')}`);
+  ui.print('');
+  ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset codex`);
+  ui.print(`  ${L('遇到问题：运行 ', 'Having trouble? Run ')}${cmd} doctor codex${L('，把输出发给客服（Key 会自动隐去）', ' and send the output to support (your key is hidden)')}`);
+}
+
+async function cmdDoctorCodex(opts) {
+  const report = { command: 'doctor', target: 'codex', version: VERSION, problems: [], warnings: [], summary: [] };
+  const sandbox = sandboxHome();
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
+  const problem = (s) => {
+    report.problems.push(s);
+    ui.err(s);
+  };
+  const warn = (s) => {
+    report.warnings.push(s);
+    ui.warn(s);
+  };
+  ui.title(L(`EvoLink 诊断 · Codex v${VERSION} · ${new Date().toLocaleString('zh-CN', { hour12: false })}`, `EvoLink doctor · Codex v${VERSION} · ${new Date().toISOString()}`));
+
+  ui.step(1, 4, L('环境', 'Environment'));
+  const osl = osLabel();
+  ui.ok(`${osl} · Node ${process.versions.node}`);
+  const codex = detectCodex();
+  let latest = null;
+  if (codex.installed) {
+    ui.ok(`Codex ${codex.version || '?'}  ${ui.dim(tildify(codex.path))}`);
+    if (codex.version) {
+      latest = await latestNpmVersion(opts, CODEX_PKG);
+      if (latest && compareVersions(codex.version, latest) < 0) warn(L(`Codex 有新版本 ${latest}（当前 ${codex.version}），建议更新：npm install -g ${CODEX_PKG}@latest`, `Codex ${latest} is available (you have ${codex.version}); update with: npm install -g ${CODEX_PKG}@latest`));
+    }
+  } else problem(L('没有找到 Codex', 'Codex is not installed'));
+  report.summary.push(`evolink-doctor ${VERSION} codex | ${osl} | node ${process.versions.node} | codex ${codex.installed ? codex.version || '?' : 'missing'}${latest ? ` (latest ${latest})` : ''}`);
+
+  ui.step(2, 4, L('配置档', 'Profile'));
+  const paths = codexPaths();
+  let prof = {};
+  let catalogState = '-';
+  if (!isFile(paths.profile)) problem(L(`${tildify(paths.profile)} 不存在，还没配置过（运行 ${cmd} setup codex）`, `${tildify(paths.profile)} does not exist; run ${cmd} setup codex`));
+  else {
+    prof = parseCodexProfile(fs.readFileSync(paths.profile, 'utf8'));
+    ui.ok(tildify(paths.profile));
+    if (prof.model_provider !== CODEX_PROVIDER) problem(L(`model_provider = ${prof.model_provider || '（没设）'}，应为 ${CODEX_PROVIDER}（重新运行 ${cmd} setup codex 可修复）`, `model_provider = ${prof.model_provider || '(unset)'}; expected ${CODEX_PROVIDER} (re-run ${cmd} setup codex)`));
+    if (!prof.base_url) problem(L('没有设置 base_url', 'base_url is not set'));
+    else if (!isEvolinkUrl(prof.base_url)) problem(L(`base_url 指向 ${prof.base_url}，不是 EvoLink`, `base_url points to ${prof.base_url}, not EvoLink`));
+    else if (!/\/v1\/?$/.test(prof.base_url)) problem(L(`base_url = ${prof.base_url}：Codex 需要以 /v1 结尾`, `base_url = ${prof.base_url}: Codex needs it to end in /v1`));
+    else ui.ok(`base_url = ${prof.base_url}`);
+    if (prof.wire_api && prof.wire_api !== 'responses') problem(L(`wire_api = ${prof.wire_api}：Codex 只支持 responses`, `wire_api = ${prof.wire_api}: Codex only supports responses`));
+    if (prof.experimental_bearer_token) ui.ok(`key = ${maskKey(prof.experimental_bearer_token)}`);
+    else if (prof.env_key) {
+      if (process.env[prof.env_key]) ui.ok(L(`Key 取自环境变量 ${prof.env_key}（${maskKey(process.env[prof.env_key])}）`, `key from ${prof.env_key} (${maskKey(process.env[prof.env_key])})`));
+      else problem(L(`Key 要从环境变量 ${prof.env_key} 读取，但现在没有设置（Codex 会报 Missing environment variable）`, `The key comes from ${prof.env_key}, which is not set (Codex fails with "Missing environment variable")`));
+    } else problem(L('配置档里没有 Key', 'The profile has no key'));
+    if (prof.model) ui.ok(`model = ${prof.model}`);
+    else warn(L('没有设置 model：Codex 会用它自己的默认模型，EvoLink 上可能没有', 'model is not set: Codex falls back to its own default, which EvoLink may not serve'));
+    if (prof.web_search && prof.web_search !== 'disabled') warn(L(`web_search = ${prof.web_search}：EvoLink 不提供 OpenAI 自带的联网搜索`, `web_search = ${prof.web_search}: EvoLink does not run OpenAI's hosted web search`));
+    if (prof.model_catalog_json) {
+      // Relative paths are resolved against CODEX_HOME by Codex.
+      const c = readJson(path.resolve(paths.home, prof.model_catalog_json));
+      catalogState = !c.exists ? 'missing' : c.data ? 'ok' : 'invalid';
+      if (!c.exists) warn(L(`模型目录 ${tildify(prof.model_catalog_json)} 不存在：/model 里只剩 Codex 自带的模型`, `Model catalog ${tildify(prof.model_catalog_json)} is missing; /model shows only Codex's built-in models`));
+      else if (!c.data) problem(L(`模型目录 ${tildify(prof.model_catalog_json)} 不是有效的 JSON（${c.error}）`, `Model catalog ${tildify(prof.model_catalog_json)} is not valid JSON (${c.error})`));
+      else ui.ok(L(`模型目录 ${tildify(prof.model_catalog_json)}`, `model catalog ${tildify(prof.model_catalog_json)}`));
+    }
+  }
+  const mainConfig = scanCodexConfig(isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '');
+  for (const n of codexConfigNotes(mainConfig, paths)) (n.level === 'error' ? problem : ui.info.bind(ui))(n.text);
+  if (mainConfig.autoReview && prof.approvals_reviewer !== 'user') {
+    problem(L(`${tildify(paths.config)} 开了自动审批审核（approvals_reviewer = "auto_review"），它用的 codex-auto-review 模型 EvoLink 没有，需要审核的命令会被拒绝；重新运行 ${cmd} setup codex 会在配置档里关掉它`, `${tildify(paths.config)} turns on automatic approval review (approvals_reviewer = "auto_review"); EvoLink does not serve its codex-auto-review model, so reviewed commands are denied. Re-run ${cmd} setup codex to turn it off in the profile`));
+  }
+  const key = prof.experimental_bearer_token || (prof.env_key ? process.env[prof.env_key] : null) || null;
+  report.summary.push(`profile: ${isFile(paths.profile) ? 'yes' : 'no'} provider=${prof.model_provider || '-'} base=${prof.base_url || '-'} key=${key ? maskKey(key) : '-'} model=${prof.model || '-'} wire=${prof.wire_api || '-'} web_search=${prof.web_search || '-'} catalog=${catalogState}`);
+  report.summary.push(`config.toml: ${isFile(paths.config) ? 'yes' : 'no'} profiles_table=${mainConfig.profileTable ? 'yes' : 'no'} legacy_profile=${mainConfig.legacyProfile ? 'yes' : 'no'} auto_review=${mainConfig.autoReview ? 'yes' : 'no'} old_evolink_provider=${mainConfig.evolinkEnvKey ? 'yes' : 'no'}`);
+
+  ui.step(3, 4, L('连接与 Key', 'Connection and key'));
+  if (key && prof.base_url && isEvolinkUrl(prof.base_url)) {
+    const base = normalizeBaseUrl(prof.base_url).url;
+    const check = await checkKey(base, key);
+    if (check.ok) {
+      const gpt = codexModelIds(check.ids);
+      ui.ok(L(`Key 有效 · 可用模型 ${check.count} 个，其中 GPT ${gpt.length} 个（${check.ms} ms）`, `Key valid · ${check.count} models, ${gpt.length} GPT (${check.ms} ms)`));
+      if (!gpt.length) problem(L('这把 Key 没有开通 GPT 模型，Codex 用不了', 'This key has no GPT models, so Codex cannot use it'));
+      printBalance(check.balance);
+      if (prof.model && gpt.length && !gpt.includes(prof.model)) problem(L(`model = ${prof.model}：这把 Key 在 Codex 里用不了`, `model = ${prof.model} is not available for this key in Codex`));
+      report.summary.push(`api: models=${check.count} gpt=${gpt.length} balance=${check.balance?.user ?? '-'} key_quota=${check.balance?.unlimited ? 'unlimited' : check.balance?.token ?? '-'}`);
+      if (opts.test && prof.model) {
+        const t = await testResponses(base, key, prof.model);
+        if (t.ok) ui.ok(L(`测试请求通过：${prof.model}（${t.ms} ms）`, `Test request passed: ${prof.model} (${t.ms} ms)`));
+        else for (const l of failureLines(t.failure, base)) problem(l);
+        report.summary.push(`test: ${t.ok ? `ok ${prof.model}` : `fail ${t.failure.kind} ${t.failure.status || ''}`}`);
+      }
+    } else {
+      for (const l of failureLines(check.failure, base)) problem(l);
+      report.summary.push(`api: fail ${check.failure.kind} ${check.failure.status || check.failure.code || ''}`);
+    }
+  } else ui.info(L('没有可用的 EvoLink 配置，跳过联网检查', 'No EvoLink configuration; skipping online checks'));
+
+  ui.step(4, 4, L('其他', 'Other'));
+  if (process.env.CODEX_HOME) ui.info(`CODEX_HOME = ${process.env.CODEX_HOME}`);
+  const chatgpt = isFile(path.join(paths.home, 'auth.json'));
+  if (chatgpt) ui.info(L(`这台电脑的 Codex 也登录了账号：直接运行 codex 用它，带 -p ${CODEX_PROFILE} 才走 EvoLink`, `Codex is also signed in here: plain codex uses that sign-in, -p ${CODEX_PROFILE} uses EvoLink`));
+  else ui.ok(L(`启动命令：codex -p ${CODEX_PROFILE}`, `Start with: codex -p ${CODEX_PROFILE}`));
+  report.summary.push(`codex_home: ${process.env.CODEX_HOME ? 'custom' : 'default'} signed_in: ${chatgpt ? 'yes' : 'no'}`);
+
+  ui.print('');
+  if (report.problems.length) ui.title(`${ui.mark('err')} ${L(`发现 ${report.problems.length} 个问题（见上方 ✗）`, `${report.problems.length} problem(s) found (marked above)`)}`);
+  else ui.title(`${ui.mark('ok')} ${L('没有发现问题', 'No problems found')}`);
+  if (report.problems.length) ui.print(`  ${L('多数问题重新运行一次 setup 就能修好：', 'Most problems are fixed by running setup again: ')}${cmd} setup codex`);
+  ui.print('');
+  ui.print(ui.dim(L('—— 以下内容可以直接发给客服（Key 已隐去）——', '--- Send the lines below to support (key hidden) ---')));
+  for (const line of report.summary) ui.print(line);
+  if (report.problems.length) ui.print(`problems: ${report.problems.length}`);
+  if (opts.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  return report.problems.length ? EXIT.ERROR : EXIT.OK;
+}
+
+async function resetCodex(opts) {
+  const interactive = !opts.yes && !opts.json;
+  const state = loadState();
+  const cx = state.codex;
+  ui.title(L(`EvoLink 撤销配置 · Codex v${VERSION}`, `EvoLink reset · Codex v${VERSION}`));
+  if (!cx || !Object.keys(cx.files || {}).length) {
+    ui.info(L('没有找到 evolink setup codex 的改动记录，无需撤销。', 'No changes recorded by evolink setup codex; nothing to undo.'));
+    return { result: { ok: true, changes: [] }, code: EXIT.OK };
+  }
+  const actions = [];
+  const skipped = [];
+  for (const [file, rec] of Object.entries(cx.files)) {
+    if (!isFile(file)) continue;
+    // Still ours while setup's provider table is there, even with the settings Codex adds by itself (trusted folders,
+    // [tui] …) or a different model; the file is backed up before it goes.
+    const parts = splitCodexProfile(fs.readFileSync(file, 'utf8'));
+    if (!parts.ours) {
+      skipped.push(file);
+      continue;
+    }
+    actions.push({ file, restore: !!(rec.existed && rec.original && isFile(rec.original)), original: rec.original, extra: !!(parts.top || parts.tables) });
+  }
+  ui.print('');
+  for (const a of actions) {
+    ui.print(`  ${tildify(a.file)}  ${a.restore ? L('还原为 setup 之前的内容', 'restored to what it was before setup') : L('删除（由 setup 新建）', 'deleted (created by setup)')}`);
+    if (a.extra) ui.print(ui.dim(`    ${L('里面后来加上的设置（例如信任过的文件夹）也会一起去掉，可以从备份找回', 'settings added to it later (such as trusted folders) go too; they stay in the backup')}`));
+  }
+  if (skipped.length) ui.warn(L(`这些文件已经不是 setup 写的内容，保持不动：${skipped.map(tildify).join(', ')}`, `No longer the file setup wrote, left as is: ${skipped.map(tildify).join(', ')}`));
+  if (!actions.length) {
+    ui.ok(L('没有需要撤销的内容。', 'Nothing to undo.'));
+    if (!opts.dryRun) {
+      delete state.codex;
+      saveState(state);
+    }
+    return { result: { ok: true, changes: [], skipped }, code: EXIT.OK };
+  }
+  if (opts.dryRun) {
+    ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
+    return { result: { ok: true, dryRun: true }, code: EXIT.OK };
+  }
+  if (interactive && !(await confirm(L('确认撤销？', 'Undo these changes?'), true))) throw new CancelledError();
+  const backup = newBackupSession();
+  for (const a of actions) {
+    backupFile(backup, a.file, `codex-${path.basename(a.file)}`);
+    if (a.restore) writeAtomic(a.file, fs.readFileSync(a.original));
+    else fs.unlinkSync(a.file);
+    if (a.original) {
+      try {
+        fs.unlinkSync(a.original);
+      } catch {}
+    }
+  }
+  delete state.codex;
+  saveState(state);
+  ui.ok(L(`已撤销。改动前的文件备份在 ${tildify(backup.dir)}`, `Undone. Backups are in ${tildify(backup.dir)}`));
+  return { result: { ok: true, backupDir: backup.dir, restored: actions.length, skipped }, code: EXIT.OK };
+}
+
+// ---------------------------------------------------------------------------
 // doctor
 
 async function cmdDoctor(opts) {
+  const target = opts._[1];
+  if (CODEX_TARGETS.includes(target)) return cmdDoctorCodex(opts);
+  if (target && !['claude-code', 'claude'].includes(target)) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex）`, `Unknown target ${target} (claude-code, codex)`), EXIT.USAGE);
   const report = { command: 'doctor', version: VERSION, problems: [], warnings: [], summary: [] };
   const sandbox = sandboxHome();
   const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
@@ -1860,7 +2554,7 @@ async function cmdDoctor(opts) {
     ui.ok(`Claude Code ${claude.version || '?'}  ${ui.dim(tildify(claude.path))}`);
     if (!claude.onPath) warn(L('claude 不在 PATH 里，新终端可能找不到命令', 'claude is not on PATH'));
     if (claude.version) {
-      latest = await latestClaudeVersion(opts);
+      latest = await latestNpmVersion(opts);
       if (latest && compareVersions(claude.version, latest) < 0) warn(updateHint(claude.version, latest));
     }
   } else problem(L('没有找到 Claude Code', 'Claude Code is not installed'));
@@ -1977,6 +2671,10 @@ async function cmdDoctor(opts) {
     if (/"claudeCode\.disableLoginPrompt"\s*:\s*true/.test(raw)) ui.ok(L(`${ed.name}：Claude Code 扩展已跳过登录提示`, `${ed.name}: extension login prompt disabled`));
     else warn(L(`${ed.name}：Claude Code 扩展会要求登录 Anthropic 账号；运行 setup 或在设置里勾选 "Disable Login Prompt"`, `${ed.name}: the extension will ask for an Anthropic login; run setup or enable "Disable Login Prompt"`));
   }
+  for (const name of editorsMissing(CLAUDE_EXTENSION)) {
+    ui.info(L(`${name} 没装 Claude Code 扩展（需要的话：${cmd} setup --install-extension）`, `${name} does not have the Claude Code extension (to add it: ${cmd} setup --install-extension)`));
+  }
+  if (isFile(codexPaths().profile)) ui.info(L(`也配置了 Codex：运行 ${cmd} doctor codex 查看`, `Codex is set up too: run ${cmd} doctor codex`));
 
   ui.print('');
   if (report.problems.length) ui.title(`${ui.mark('err')} ${L(`发现 ${report.problems.length} 个问题（见上方 ✗）`, `${report.problems.length} problem(s) found (marked above)`)}`);
@@ -1994,13 +2692,38 @@ async function cmdDoctor(opts) {
 // reset
 
 async function cmdReset(opts) {
+  const target = opts._[1] || null;
+  const codex = !target || CODEX_TARGETS.includes(target);
+  const claude = !target || ['claude-code', 'claude'].includes(target);
+  if (!codex && !claude) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex）`, `Unknown target ${target} (claude-code, codex)`), EXIT.USAGE);
+  // Without a target, undo everything setup recorded; with nothing recorded at all, the Claude Code part says so.
+  const state = loadState();
+  const parts = {};
+  let code = EXIT.OK;
+  if (claude && (target || state.claudeCode || !state.codex)) {
+    const r = await resetClaude(opts);
+    parts.claudeCode = r.result;
+    code = code || r.code;
+  }
+  if (codex && (target || state.codex)) {
+    if (parts.claudeCode) ui.print('');
+    const r = await resetCodex(opts);
+    parts.codex = r.result;
+    code = code || r.code;
+  }
+  const names = Object.keys(parts);
+  const result = names.length === 1 ? { command: 'reset', ...parts[names[0]] } : { command: 'reset', ok: names.every((k) => parts[k].ok), ...parts };
+  return finish(result, opts, code);
+}
+
+async function resetClaude(opts) {
   const interactive = !opts.yes && !opts.json;
   const state = loadState();
   const cc = state.claudeCode;
   ui.title(L(`EvoLink 撤销配置 v${VERSION}`, `EvoLink reset v${VERSION}`));
   if (!cc) {
     ui.info(L('没有找到 evolink setup 的改动记录，无需撤销。', 'No changes recorded by evolink setup; nothing to undo.'));
-    return finish({ command: 'reset', ok: true, changes: [] }, opts);
+    return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   const settingsFile = cc.settingsFile || claudePaths().settings;
   const globalFile = cc.globalFile || claudePaths().globalConfig;
@@ -2037,11 +2760,11 @@ async function cmdReset(opts) {
     ui.ok(L('没有需要撤销的内容。', 'Nothing to undo.'));
     delete state.claudeCode;
     if (!opts.dryRun) saveState(state);
-    return finish({ command: 'reset', ok: true, changes: [] }, opts);
+    return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   if (opts.dryRun) {
     ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
-    return finish({ command: 'reset', ok: true, dryRun: true }, opts);
+    return { result: { ok: true, dryRun: true }, code: EXIT.OK };
   }
   if (interactive && !(await confirm(L('确认撤销？', 'Undo these changes?'), true))) throw new CancelledError();
 
@@ -2077,13 +2800,13 @@ async function cmdReset(opts) {
   delete state.claudeCode;
   saveState(state);
   ui.ok(L(`已撤销。改动前的文件备份在 ${tildify(backup.dir)}`, `Undone. Backups are in ${tildify(backup.dir)}`));
-  return finish({ command: 'reset', ok: true, backupDir: backup.dir, restored: total, skipped }, opts);
+  return { result: { ok: true, backupDir: backup.dir, restored: total, skipped }, code: EXIT.OK };
 }
 
 // ---------------------------------------------------------------------------
 // CLI entry
 
-const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode', 'pin-sonnet']);
+const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode', 'pin-sonnet', 'install-extension']);
 const VALUE_FLAGS = new Set(['model', 'max-output-tokens', 'base-url', 'registry', 'trust', 'lang']);
 const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -2121,15 +2844,16 @@ export function parseArgs(argv) {
 
 function helpText() {
   return L(
-    `EvoLink 命令行工具 v${VERSION}：一键把 Claude Code 接到 EvoLink
+    `EvoLink 命令行工具 v${VERSION}：一键把 Claude Code / Codex 接到 EvoLink
 
 用法：
   evolink [setup]      配置 Claude Code（默认命令）
-  evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）
-  evolink reset        撤销 setup 做的改动
+  evolink setup codex  配置 Codex 命令行：新建独立配置档，用 codex -p evolink 启动，不动你原来的 config.toml
+  evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex 用 evolink doctor codex
+  evolink reset        撤销 setup 做的改动（只撤销 Codex：evolink reset codex）
 
 常用选项：
-  --model <id>         默认模型，如 claude-sonnet-5；default 表示跟随 Claude Code 默认
+  --model <id>         默认模型，如 claude-sonnet-5（Codex 如 gpt-6-sol）；default 表示跟随 Claude Code 默认
   --yes, -y            不提问，全部用默认值（Key 从环境变量 EVOLINK_API_KEY 读取）
   --key-stdin          从标准输入读取 Key
   --dry-run            只预览改动，不写文件
@@ -2137,8 +2861,9 @@ function helpText() {
   --max-output-tokens <n>  单次输出上限，默认不设置（跟随 Claude Code）；余额少时建议 32000，可降低单次预扣
   --disable-nonessential-traffic  关闭自动更新、遥测等非必要请求（默认不关）
   --auto-mode          不关闭 Claude Code 的 auto mode（默认关闭：EvoLink 暂不支持它的审核请求）
-  --no-pin-sonnet      不把 /model 里的 Sonnet 钉到这把 Key 能用的最新 Sonnet（默认钉住：Claude Code 2.1.284 起它指向 EvoLink 暂无的 claude-sonnet-5-5）
-  --no-install         没装 Claude Code 时不自动安装
+  --no-pin-sonnet      不把 /model 里的 Sonnet 钉到这把 Key 能用的最新 Sonnet（默认钉住：Claude Code 换默认 Sonnet 时，EvoLink 可能晚一两天才有）
+  --no-install         没装 Claude Code（或 Codex）时不自动安装
+  --install-extension  顺便给 VS Code / Cursor 等编辑器装上 Claude Code 扩展（默认不装：终端里的 claude 用不到它）
   --no-onboarding      不修改 ~/.claude.json
   --no-vscode          不修改编辑器里 Claude Code 扩展的设置
   --no-test            不发测试请求
@@ -2151,15 +2876,16 @@ function helpText() {
 
 环境变量：EVOLINK_API_KEY、EVOLINK_BASE_URL、CLAUDE_CONFIG_DIR
 所有改动前都会备份到 ~/.evolink/backups/。`,
-    `EvoLink CLI v${VERSION}: connect Claude Code to EvoLink in one command
+    `EvoLink CLI v${VERSION}: connect Claude Code or Codex to EvoLink in one command
 
 Usage:
   evolink [setup]      configure Claude Code (default)
-  evolink doctor       diagnose the setup; output is safe to send to support
-  evolink reset        undo what setup changed
+  evolink setup codex  configure the Codex CLI: a separate profile, started with codex -p evolink; your config.toml is left alone
+  evolink doctor       diagnose the setup; output is safe to send to support (Codex: evolink doctor codex)
+  evolink reset        undo what setup changed (Codex only: evolink reset codex)
 
 Options:
-  --model <id>         default model, e.g. claude-sonnet-5; "default" = Claude Code's own default
+  --model <id>         default model, e.g. claude-sonnet-5 (Codex: gpt-6-sol); "default" = Claude Code's own default
   --yes, -y            no prompts (key from EVOLINK_API_KEY)
   --key-stdin          read the key from stdin
   --dry-run            preview only
@@ -2167,8 +2893,9 @@ Options:
   --max-output-tokens <n>  output cap, unset by default (Claude Code's own); 32000 lowers the per-request hold when credits are low
   --disable-nonessential-traffic  turn off auto-update, telemetry and other background traffic (on by default)
   --auto-mode          keep Claude Code's auto mode on (off by default: EvoLink cannot serve its review requests yet)
-  --no-pin-sonnet      do not pin the Sonnet alias to the newest Sonnet this key can use (pinned by default: Claude Code 2.1.284+ sends claude-sonnet-5-5, which EvoLink does not serve yet)
-  --no-install         do not install Claude Code when missing
+  --no-pin-sonnet      do not pin the Sonnet alias to the newest Sonnet this key can use (pinned by default: when Claude Code moves the alias, EvoLink may lag a day or two)
+  --no-install         do not install Claude Code (or Codex) when missing
+  --install-extension  also install the Claude Code extension into VS Code, Cursor and similar editors (off by default: the terminal claude does not need it)
   --no-onboarding      do not touch ~/.claude.json
   --no-vscode          do not touch editor settings for the Claude Code extension
   --no-test            skip the test request

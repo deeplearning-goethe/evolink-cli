@@ -27,6 +27,13 @@ import {
   compareVersions,
   officialAccount,
   overridesLogin,
+  codexModelIds,
+  renderCodexProfile,
+  parseCodexProfile,
+  splitCodexProfile,
+  codexProfileCore,
+  scanCodexConfig,
+  extensionLink,
 } from '../bin/evolink.mjs';
 
 const KEY = `sk-${'A1b2C3d4'.repeat(6)}`;
@@ -260,4 +267,82 @@ test('sonnet pin picks the newest Sonnet the key can use', () => {
   assert.equal(pickSonnetPin(new Set(['claude-sonnet-4-20250514', 'claude-sonnet-4-0'])), 'claude-sonnet-4-0');
   assert.equal(pickSonnetPin(new Set(['claude-opus-5-5', 'gpt-6-luna'])), null);
   assert.equal(pickSonnetPin(new Set()), null);
+});
+
+test('Codex models: GPT text models only, image models left out', () => {
+  const ids = new Set(['gpt-6-sol', 'gpt-5.5', 'gpt-image-2', 'gpt-4o-image', 'gpt-image-1.5-lite', 'claude-sonnet-5', 'gemini-3.8-flash', 'gpt-6.1-sol']);
+  assert.deepEqual(codexModelIds(ids), ['gpt-5.5', 'gpt-6-sol', 'gpt-6.1-sol']);
+  assert.deepEqual(codexModelIds(new Set(['claude-opus-5-5'])), []);
+});
+
+test('Codex profile: written whole, read back, strings escaped for TOML', () => {
+  const text = renderCodexProfile({ base: 'https://direct.evolink.ai', key: KEY, model: 'gpt-6.1-sol' });
+  assert.match(text, /^model = "gpt-6\.1-sol"$/m);
+  assert.match(text, /^model_provider = "evolink-cli"$/m);
+  assert.match(text, /^web_search = "disabled"$/m);
+  assert.match(text, /^\[model_providers\.evolink-cli\]$/m);
+  assert.match(text, /^base_url = "https:\/\/direct\.evolink\.ai\/v1"$/m);
+  assert.match(text, /^wire_api = "responses"$/m);
+  assert.doesNotMatch(text, /approvals_reviewer|model_catalog_json/);
+  // Top-level keys must come before the first [table], or TOML puts them inside it.
+  const withReviewer = renderCodexProfile({ base: 'https://direct.evolink.ai', key: KEY, model: 'gpt-6.1-sol', reviewer: 'user' });
+  assert.ok(withReviewer.indexOf('approvals_reviewer = "user"') < withReviewer.indexOf('[model_providers'));
+  const p = parseCodexProfile(withReviewer);
+  assert.equal(p.model, 'gpt-6.1-sol');
+  assert.equal(p.model_provider, 'evolink-cli');
+  assert.equal(p.experimental_bearer_token, KEY);
+  assert.equal(p.base_url, 'https://direct.evolink.ai/v1');
+  assert.equal(p.approvals_reviewer, 'user');
+  assert.equal(parseCodexProfile('x = "a \\"quoted\\" C:\\\\path"\nmodel = "m"').model, 'm');
+  assert.deepEqual(parseCodexProfile(''), {});
+});
+
+test('Codex profile: what Codex or the user adds is carried over; setup recognises its own file', () => {
+  const ours = renderCodexProfile({ base: 'https://direct.evolink.ai', key: KEY, model: 'gpt-6.1-sol' });
+  // What Codex 0.159.2 appended in a live TUI session, plus a user's own setting and table.
+  const grown = `${ours}\n[tui]\nscreen_reader_detection_done = true\n\n[projects."/Users/a/proj"]\ntrust_level = "trusted"\n`.replace(
+    'web_search = "disabled"\n',
+    'web_search = "disabled"\nmodel_reasoning_effort = "high"\n',
+  );
+  const parts = splitCodexProfile(grown);
+  assert.equal(parts.ours, true);
+  assert.equal(parts.core, splitCodexProfile(ours).core, 'the managed part is unchanged');
+  assert.equal(parts.top, 'model_reasoning_effort = "high"');
+  assert.match(parts.tables, /^\[tui\]\nscreen_reader_detection_done = true\n\n\[projects\."\/Users\/a\/proj"\]\ntrust_level = "trusted"$/);
+  assert.equal(codexProfileCore(grown), codexProfileCore(ours));
+  const again = renderCodexProfile({ base: 'https://direct.evolink.ai', key: KEY, model: 'gpt-6-sol', kept: parts });
+  assert.match(again, /^model = "gpt-6-sol"$/m);
+  assert.ok(again.indexOf('model_reasoning_effort = "high"') < again.indexOf('[model_providers'), 'kept top-level keys stay above the first table');
+  assert.ok(again.indexOf('[tui]') > again.indexOf('experimental_bearer_token'), 'kept tables follow ours');
+  assert.match(again, /\[projects\."\/Users\/a\/proj"\]\ntrust_level = "trusted"\n$/);
+  assert.deepEqual(splitCodexProfile(again), { ...splitCodexProfile(again), top: parts.top, tables: parts.tables, ours: true });
+  assert.equal(splitCodexProfile('model = "o3"\n[model_providers.mine]\nname = "x"\n').ours, false, 'a file without our provider table is not ours');
+});
+
+test('config.toml scan: blockers and inherited settings for codex -p evolink', () => {
+  const s = scanCodexConfig(`profile = "work"
+approvals_reviewer = "auto_review"
+model_provider = "evolink"
+
+[model_providers.evolink]
+name = "EvoLink"
+env_key = "OPENAI_API_KEY"
+
+[profiles.evolink]
+model = "gpt-5.2"
+
+[profiles.work]
+approvals_reviewer = "user"
+profile = "nested-is-not-top-level"
+`);
+  assert.deepEqual(s, { profileTable: true, legacyProfile: 'work', autoReview: true, evolinkEnvKey: 'OPENAI_API_KEY' });
+  assert.deepEqual(scanCodexConfig('[profiles."evolink"]\n'), { profileTable: true, legacyProfile: null, autoReview: false, evolinkEnvKey: null });
+  assert.deepEqual(scanCodexConfig('[x]\napprovals_reviewer = "auto_review"\n'), { profileTable: false, legacyProfile: null, autoReview: false, evolinkEnvKey: null });
+  assert.deepEqual(scanCodexConfig(''), { profileTable: false, legacyProfile: null, autoReview: false, evolinkEnvKey: null });
+});
+
+test('extension install links', () => {
+  assert.equal(extensionLink('VS Code', 'anthropic.claude-code'), 'vscode:extension/anthropic.claude-code');
+  assert.equal(extensionLink('Cursor', 'anthropic.claude-code'), 'cursor:extension/anthropic.claude-code');
+  assert.equal(extensionLink('Windsurf', 'openai.chatgpt'), 'vscode:extension/openai.chatgpt');
 });
