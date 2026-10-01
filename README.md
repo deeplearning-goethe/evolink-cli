@@ -4,7 +4,7 @@
 
 一条命令把 Claude Code 或 Codex 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.2.0，支持 Claude Code 和 Codex 命令行。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
+> **测试阶段**：v0.3.0，支持 Claude Code、Codex 命令行，以及 VS Code 等编辑器里的 Codex 扩展。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
 
 ## 用法
 
@@ -17,6 +17,8 @@
 | 带参数（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5` |
 | Codex（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- codex` |
 | Codex（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex` |
+| VS Code 里的 Codex 扩展（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- codex --vscode` |
+| VS Code 里的 Codex 扩展（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex --vscode` |
 | 顺便给 VS Code / Cursor 装上 Claude Code 扩展 | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --install-extension` |
 | 事后自检 / 撤销 | `~/.evolink/bin/evolink doctor`、`~/.evolink/bin/evolink reset`（Windows：`& "$env:USERPROFILE\.evolink\bin\evolink.cmd" doctor`）；Codex 加 `codex`：`evolink doctor codex`、`evolink reset codex`；不带 `codex` 的 `reset` 会把两边都撤销 |
 
@@ -58,13 +60,33 @@
 
 - **模型**：从这把 Key 能用的 GPT 文本模型里选（09-30 实测 11 个都支持 `/v1/responses`；图像模型自动排除），默认跟随 Codex 自己的默认模型 `gpt-6.1-sol`（这把 Key 没有时依次改用 gpt-6-sol、gpt-6-astra、gpt-6-luna）。Codex 0.159 自带的 8 个模型 EvoLink 都有，进入 Codex 后用 `/model` 可以直接换。
 - **为什么 provider 叫 `evolink-cli`**：配置档会和 `config.toml` 合并。以前的文档教过在 `config.toml` 里写 `[model_providers.evolink]`（Key 取自环境变量 `OPENAI_API_KEY`），同名的话，那里的 `env_key` 会盖过配置档里的 Key。
-- **`config.toml` 里会让 Codex 直接报错的写法**：`[profiles.evolink]` 这一段、顶层的 `profile = "…"`。新版 Codex 已不支持，setup 和 doctor 都会指出来，需要手动删掉（工具不改 `config.toml`）。
+- **`config.toml` 里会让 Codex 直接报错的写法**：`[profiles.evolink]` 这一段、顶层的 `profile = "…"`。新版 Codex 已不支持，setup 和 doctor 都会指出来，需要手动删掉（`setup codex` 不改 `config.toml`）。
 - **Codex 自己也会往配置档里写东西**：第一次打开界面写 `[tui]`，信任某个文件夹时写 `[projects."…"]`。重跑 setup 时，这些和你自己加的设置都会保留；只有 setup 管的几项会被更新。
 - **启动提示**：带 `-p` 时 Codex 总会提示 "Running without the shared background server"，这是正常的。
 - **没装 Codex**：默认用 npm 安装（`npm install -g @openai/codex`，自动选官方源或 npmmirror）；`--no-install` 跳过。
 - **费用提醒**：Codex 每轮都带很长的系统提示和工具说明，一句简单的话也要约 9 千个输入 token。
 - **撤销**：`evolink reset codex` 删除配置档（先备份），连同 Codex 后来写进去的信任记录等一起删掉；setup 之前就有的同名文件会还原；已经被整个换成别的内容的文件保持不动。
-- **还没做**：VS Code 的 Codex 扩展（`openai.chatgpt`）不认独立配置档，要让扩展走 EvoLink 就得改主 `config.toml`，排在下一版，届时默认会一并安装扩展。
+- **VS Code 里的 Codex 扩展不认独立配置档**：要让扩展也走 EvoLink，用下一节的 `setup codex --vscode`。`setup codex` 结尾检测到扩展时会提示。
+
+## VS Code 里的 Codex 扩展（`evolink setup codex --vscode`）
+
+Codex 扩展（`openai.chatgpt`）运行的是它自带的 `codex app-server`，只读主配置 `config.toml`，不认独立配置档。所以这个模式直接改 `config.toml`：扩展和终端里直接运行的 `codex` 都会走 EvoLink。
+
+| 文件 | 内容 | 为什么 |
+|---|---|---|
+| `~/.codex/config.toml` 顶层 | `model_provider = "evolink-cli"`、`model`（这把 Key 能用的 GPT 模型；原来的值能用就不动）、`web_search = "disabled"` | 让扩展和 `codex` 都用 EvoLink；EvoLink 不提供 OpenAI 自带的联网搜索 |
+| 同上（仅当开了自动审批审核时） | `approvals_reviewer = "user"` | 自动审批审核要用的 `codex-auto-review` 模型 EvoLink 没有 |
+| 同上，文件末尾 | 一行注释，加上 `[model_providers.evolink-cli]`：`base_url`、`wire_api = "responses"`、Key（`experimental_bearer_token`） | 自定义的模型提供方不需要登录 OpenAI：`app-server` 回报 `requiresOpenaiAuth = false`，扩展就不显示登录页（10-01 读 Codex 0.159.2 源码并实测） |
+| VS Code / Cursor 等编辑器 | 用编辑器自己的命令行安装 Codex 扩展（`code --install-extension openai.chatgpt`）；`--no-install-extension` 跳过 | 没有扩展，这个模式就没用，所以默认安装 |
+
+- **只改这几项**：注释、MCP 服务器、信任的文件夹等其他内容一字不动。工具按整条语句编辑，多行数组、多行字符串、CRLF 换行、BOM 都保留。改之前备份到 `~/.evolink/backups/`。
+- **Key 在 `config.toml` 里**：文件权限改为 0600，只有你自己能读写。如果你用 git 等同步这个文件，请先把它排除。`doctor codex` 会检查权限。
+- **会先确认**：交互运行时先说明影响（扩展和直接运行的 `codex` 都改走 EvoLink；登录过的 ChatGPT 账号保留，只是暂时不用），默认选"否"；加 `--yes` 直接写。
+- **装好之后**：VS Code 已经开着的话，运行 "Developer: Reload Window" 或重启 VS Code；打开 Codex 面板直接对话，不需要登录。在扩展的模型菜单里换模型。
+- **Remote-SSH**：在远端的终端里运行这条命令。扩展在远端运行，读的是远端的配置；远端终端里的 `code` 也会把扩展装到远端。
+- **写不了的情况**：`config.toml` 格式有误，或者已经用别的写法（点号键、内联表）定义了 `model_providers.evolink-cli`。这时 setup 会停下并指出行号，什么都不写。
+- **撤销**：`evolink reset codex` 逐项还原 setup 改过的设置，删掉 `[model_providers.evolink-cli]`，恢复原来的文件权限。setup 之后被你或 Codex 改过的项（例如换了模型）保持不动并列出来；Codex 后来写入的信任记录等也保留。如果文件是 setup 新建的，撤销后又没有别的内容，就删掉。
+- **和命令行配置档可以同时用**：`codex -p evolink` 用配置档，扩展和直接运行的 `codex` 用 `config.toml`；`reset codex` 两边一起撤销。
 
 **Windows 额外处理**：如果 npm 装的 `claude.ps1` 会被执行策略拦下，工具会在征得同意后，把当前用户的执行策略改为 `RemoteSigned`；也可以改用 `claude.cmd`。
 
@@ -88,16 +110,16 @@ GitHub Actions 在每次推送到 main、每个 PR，以及每天 09:00（北京
 
 | 系统 | 内容 |
 |---|---|
-| Ubuntu（Node 22 和 18） | 自动化测试、伪终端交互（Claude Code 和 Codex，各自直接运行和 `setup.sh` 管道运行）、`dist/` 与源码一致；Node 22 另用当天最新的 Claude Code 实测配置生效和首启画面，用当天最新的 Codex 实测配置档生效 |
+| Ubuntu（Node 22 和 18） | 自动化测试、伪终端交互（Claude Code 和 Codex，各自直接运行和 `setup.sh` 管道运行）、`dist/` 与源码一致；Node 22 另用当天最新的 Claude Code 实测配置生效和首启画面，用当天最新的 Codex 实测配置档和 VS Code 扩展模式都生效（扩展模式还会像扩展那样启动 `codex app-server`，确认不需要登录并发一轮消息） |
 | macOS（Node 22） | 同上，含最新 Claude Code 和 Codex 实测 |
-| Windows（Node 22） | 自动化测试（50 项，另 8 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑：带参数运行、`irm \| iex`、启动器 doctor / reset、被篡改的脚本必须被拦下 |
+| Windows（Node 22） | 自动化测试（57 项，另 11 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑：带参数运行、`irm \| iex`、启动器 doctor / reset、被篡改的脚本必须被拦下 |
 
 每天定时跑一次，是为了及时发现 Claude Code 和 Codex 新版本带来的变化。手动验证记录：
 
 | 平台 | 已验证 |
 |---|---|
-| Ubuntu 24.04（Node 22） | **v0.2.0（09-30）**：自动化测试 58/58；伪终端交互 4 种共 30 项；真实 Codex 0.159.2 连模拟网关 8/8；真实 Claude Code 2.1.285 8/8 + 首启画面；**Codex 线上实测**：真实网关上 `setup codex`、`codex exec -p evolink` 返回 OK（gpt-6.1-sol，一句话约 1 万 token）、`doctor codex --test`、`reset codex` 后临时家目录外搜不到 Key；真实 Codex 界面里答完信任提示，Codex 往配置档写了 `[tui]`、`[projects."…"]`，`reset codex` 照样能删掉。**更早（v0.1.4）**：自动化测试 43/43；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 / 2.1.284 读取配置并请求模拟网关（含 `--model sonnet` 跟随钉档）；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行；**Sonnet 钉档线上实测（09-29，v0.1.4）**：Claude Code 2.1.284 的 `--model sonnet` / `sonnet[1m]` 经真实网关都返回 OK，删掉钉档后同一命令报 "There's an issue with the selected model (claude-sonnet-5-5)" |
-| macOS 26（Node 24） | v0.2.0：自动化测试 58/58、伪终端交互 4 种共 30 项（临时目录 + 模拟网关）；更早的版本：真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
+| Ubuntu 24.04（Node 22） | **v0.3.0（10-01）**：自动化测试 68/68；伪终端交互 6 种共 52 项；真实 Codex 0.159.3 连模拟网关 17/17，把 `app-server` 换成扩展内置的 codex 0.159.2 同样 17/17；真实 Claude Code 2.1.286 8/8 + 首启画面；**扩展模式线上实测**：真实网关上 `setup codex --vscode`（原来的 `config.toml` 带注释、MCP 服务器、信任记录和自动审批审核），之后直接运行 `codex exec` 返回 OK，扩展内置的 `app-server` 回报不需要登录并返回 OK（各约 1 万 token），`doctor codex --test` 没有问题；`reset codex` 后 `config.toml` 与 setup 之前逐字节一致，权限改回 644，临时家目录里（备份目录除外）搜不到 Key。**v0.2.0（09-30）**：自动化测试 58/58；伪终端交互 4 种共 30 项；真实 Codex 0.159.2 连模拟网关 8/8；真实 Claude Code 2.1.285 8/8 + 首启画面；**Codex 线上实测**：真实网关上 `setup codex`、`codex exec -p evolink` 返回 OK（gpt-6.1-sol，一句话约 1 万 token）、`doctor codex --test`、`reset codex` 后临时家目录外搜不到 Key；真实 Codex 界面里答完信任提示，Codex 往配置档写了 `[tui]`、`[projects."…"]`，`reset codex` 照样能删掉。**更早（v0.1.4）**：自动化测试 43/43；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 / 2.1.284 读取配置并请求模拟网关（含 `--model sonnet` 跟随钉档）；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行；**Sonnet 钉档线上实测（09-29，v0.1.4）**：Claude Code 2.1.284 的 `--model sonnet` / `sonnet[1m]` 经真实网关都返回 OK，删掉钉档后同一命令报 "There's an issue with the selected model (claude-sonnet-5-5)" |
+| macOS 26（Node 24） | v0.3.0：自动化测试 68/68、伪终端交互 6 种共 52 项（临时目录 + 模拟网关）；v0.2.0：58/58；更早的版本：真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
 | Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | 自动化测试 36 项（另 3 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
 
 ## 开发

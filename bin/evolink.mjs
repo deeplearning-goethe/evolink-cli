@@ -14,7 +14,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
@@ -60,6 +60,7 @@ const CLAUDE_CODE_SONNET_ALIAS = 'claude-sonnet-5-5';
 const RESTRICTIVE_POLICIES = new Set(['Restricted', 'AllSigned', 'Undefined']);
 const DLP_KEY = 'claudeCode.disableLoginPrompt';
 const CLAUDE_EXTENSION = 'anthropic.claude-code';
+const CODEX_EXTENSION = 'openai.chatgpt';
 
 const EXIT = { OK: 0, ERROR: 1, USAGE: 2, AUTH: 2, NOT_INSTALLED: 3, CONFIG: 4, NETWORK: 5, CANCELLED: 130 };
 
@@ -730,6 +731,12 @@ export function detectEditors({ also = [] } = {}) {
     if (isDir(path.dirname(settings)) || also.includes(ed.name)) out.push({ name: ed.name, settings });
   }
   return out;
+}
+
+// Editors (desktop, or the server side of a Remote-SSH / WSL session on this machine) that have an extension.
+const EXTENSION_HOMES = [...EDITORS, { name: 'VS Code Server', ext: '.vscode-server' }, { name: 'Cursor Server', ext: '.cursor-server' }, { name: 'Windsurf Server', ext: '.windsurf-server' }];
+export function editorsWithExtension(extId) {
+  return EXTENSION_HOMES.filter((ed) => hasExtension(ed, extId)).map((ed) => ed.name);
 }
 
 // Editors opened at least once that lack an extension: setup names the install link at the end.
@@ -1939,6 +1946,344 @@ function finish(result, opts, code = EXIT.OK) {
 }
 
 // ---------------------------------------------------------------------------
+// config.toml editing (for `setup codex --vscode`: the Codex extension reads only the main config.toml). Not a TOML
+// library: it finds where every statement starts and ends (multi-line strings, arrays and inline tables included),
+// rewrites whole statements, and leaves every other byte as it was, line endings and comments included.
+
+export class TomlSyntaxError extends Error {
+  constructor(line, what) {
+    super(`config.toml line ${line}: ${what}`);
+    this.line = line;
+  }
+}
+
+const tomlSkipWs = (s, p) => {
+  while (s[p] === ' ' || s[p] === '\t') p++;
+  return p;
+};
+const tomlSkipComment = (s, p) => {
+  while (p < s.length && s[p] !== '\n') p++;
+  return p;
+};
+// Whitespace, line breaks and comments, as allowed between the items of an array.
+const tomlSkipGap = (s, p) => {
+  for (;;) {
+    p = tomlSkipWs(s, p);
+    if (s[p] === '\n' || s[p] === '\r') p++;
+    else if (s[p] === '#') p = tomlSkipComment(s, p);
+    else return p;
+  }
+};
+
+function tomlReadString(s, p, fail) {
+  for (const q of ['"""', "'''"]) {
+    if (!s.startsWith(q, p)) continue;
+    let i = p + 3;
+    for (;;) {
+      const e = s.indexOf(q, i);
+      if (e < 0) fail(p, 'unterminated multi-line string');
+      let bs = 0;
+      for (let k = e - 1; q === '"""' && k >= i && s[k] === '\\'; k--) bs++;
+      if (bs % 2) {
+        i = e + 1;
+        continue;
+      }
+      let end = e + 3;
+      while (s[end] === q[0] && end - e < 5) end++;
+      return end;
+    }
+  }
+  const quote = s[p];
+  let i = p + 1;
+  while (i < s.length && s[i] !== quote && s[i] !== '\n') i += quote === '"' && s[i] === '\\' ? 2 : 1;
+  if (s[i] !== quote) fail(p, 'unterminated string');
+  return i + 1;
+}
+
+function tomlReadKey(s, p, fail) {
+  const parts = [];
+  for (;;) {
+    p = tomlSkipWs(s, p);
+    if (s[p] === '"' || s[p] === "'") {
+      if (s.startsWith(s[p].repeat(3), p)) fail(p, 'a key cannot be a multi-line string');
+      const e = tomlReadString(s, p, fail);
+      parts.push(tomlDecodeString(s.slice(p, e)));
+      p = e;
+    } else {
+      let q = p;
+      while (q < s.length && /[A-Za-z0-9_-]/.test(s[q])) q++;
+      if (q === p) fail(p, 'expected a key');
+      parts.push(s.slice(p, q));
+      p = q;
+    }
+    const after = tomlSkipWs(s, p);
+    if (s[after] !== '.') return { parts, end: p };
+    p = after + 1;
+  }
+}
+
+function tomlReadValue(s, p, fail) {
+  const c = s[p];
+  if (c === '"' || c === "'") return tomlReadString(s, p, fail);
+  if (c === '[' || c === '{') {
+    const close = c === '[' ? ']' : '}';
+    p++;
+    for (;;) {
+      p = tomlSkipGap(s, p);
+      if (s[p] === close) return p + 1;
+      if (p >= s.length) fail(p, `unclosed ${c}`);
+      if (c === '{') {
+        p = tomlSkipWs(s, tomlReadKey(s, p, fail).end);
+        if (s[p] !== '=') fail(p, 'expected "="');
+        p = tomlSkipWs(s, p + 1);
+      }
+      p = tomlSkipGap(s, tomlReadValue(s, p, fail));
+      if (s[p] === ',') p++;
+      else if (s[p] !== close) fail(p, `expected "," or "${close}"`);
+    }
+  }
+  // Numbers, booleans, dates; a date and a time may be separated by one space.
+  let q = p;
+  while (q < s.length && !/[\s,\]}#]/.test(s[q])) q++;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(p, q)) && s[q] === ' ' && /\d/.test(s[q + 1] || '')) {
+    q++;
+    while (q < s.length && !/[\s,\]}#]/.test(s[q])) q++;
+  }
+  if (q === p) fail(p, 'expected a value');
+  return q;
+}
+
+// The value of a TOML string literal; other values come back as their raw text.
+export function tomlDecodeString(raw) {
+  const r = String(raw);
+  const multi = r.startsWith('"""') || r.startsWith("'''");
+  const q = multi ? r.slice(0, 3) : r[0];
+  if (q !== '"' && q !== "'" && q !== '"""' && q !== "'''") return r;
+  let body = r.slice(q.length, r.length - q.length);
+  if (multi) body = body.replace(/^\r?\n/, '');
+  if (q[0] === "'") return body;
+  if (multi) body = body.replace(/\\[ \t]*\r?\n[\s]*/g, '');
+  const esc = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\', e: '\x1b' };
+  return body.replace(/\\(u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8}|.)/g, (_, e) => (e.length > 1 ? String.fromCodePoint(parseInt(e.slice(1), 16)) : esc[e] ?? `\\${e}`));
+}
+
+// Statements with their line ranges (inclusive, 0-based): { kind: 'blank' | 'comment' | 'table' | 'array' | 'kv',
+// start, end, table (the enclosing table's key path; [] at the top), name (headers), key / value / tail (kv) }.
+export function parseTomlStatements(text) {
+  const s = String(text ?? '')
+    .replace(/^\uFEFF/, '')
+    .replace(/\r\n/g, '\n');
+  const starts = [0];
+  for (let i = 0; i < s.length; i++) if (s[i] === '\n') starts.push(i + 1);
+  const lineOf = (p) => {
+    let lo = 0;
+    let hi = starts.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (starts[mid] <= p) lo = mid;
+      else hi = mid - 1;
+    }
+    return lo;
+  };
+  const fail = (p, what) => {
+    throw new TomlSyntaxError(lineOf(p) + 1, what);
+  };
+  const out = [];
+  let table = [];
+  let p = 0;
+  while (p < s.length) {
+    let q = tomlSkipWs(s, p);
+    let st;
+    if (q >= s.length || s[q] === '\n') st = { kind: 'blank', table };
+    else if (s[q] === '#') {
+      q = tomlSkipComment(s, q);
+      st = { kind: 'comment', table };
+    } else if (s[q] === '[') {
+      const array = s[q + 1] === '[';
+      const k = tomlReadKey(s, q + (array ? 2 : 1), fail);
+      q = tomlSkipWs(s, k.end);
+      if (array ? !s.startsWith(']]', q) : s[q] !== ']') fail(q, 'unclosed table header');
+      q += array ? 2 : 1;
+      table = k.parts;
+      st = { kind: array ? 'array' : 'table', name: k.parts, table };
+    } else {
+      const k = tomlReadKey(s, q, fail);
+      q = tomlSkipWs(s, k.end);
+      if (s[q] !== '=') fail(q, 'expected "="');
+      const v0 = tomlSkipWs(s, q + 1);
+      const v1 = tomlReadValue(s, v0, fail);
+      st = { kind: 'kv', key: k.parts, value: s.slice(v0, v1), table, indent: s.slice(p, tomlSkipWs(s, p)) };
+      q = v1;
+      const eol = s.indexOf('\n', q);
+      st.tail = s.slice(q, eol < 0 ? s.length : eol);
+    }
+    q = tomlSkipWs(s, q);
+    if (s[q] === '#') q = tomlSkipComment(s, q);
+    if (q < s.length && s[q] !== '\n') fail(q, 'unexpected text after the value');
+    st.start = lineOf(p);
+    st.end = lineOf(q < s.length ? q : Math.max(p, s.length - 1));
+    out.push(st);
+    p = q + 1;
+  }
+  return out;
+}
+
+const tomlPathEq = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+const tomlPathStarts = (a, prefix) => a.length >= prefix.length && prefix.every((x, i) => a[i] === x);
+
+// The file as lines plus the line break after each one, so untouched lines keep CRLF or LF exactly as they were.
+function tomlDoc(text) {
+  const raw = String(text ?? '');
+  const bom = raw.startsWith('\uFEFF') ? '\uFEFF' : '';
+  const pieces = raw.slice(bom.length).split(/(\r?\n)/);
+  const lines = [];
+  for (let i = 0; i < pieces.length; i += 2) lines.push({ t: pieces[i], e: pieces[i + 1] ?? '' });
+  const crlf = lines.filter((l) => l.e === '\r\n').length;
+  const lf = lines.filter((l) => l.e === '\n').length;
+  return { bom, lines, eol: crlf > lf ? '\r\n' : '\n', sts: parseTomlStatements(raw) };
+}
+const tomlText = (doc) => doc.bom + doc.lines.map((l) => l.t + l.e).join('');
+
+// Replaces lines a..b (inclusive; b = a - 1 inserts before line a) with new lines of text. The last new line keeps
+// the line break of the last replaced one (none at the end of a file that has none).
+function tomlSplice(doc, a, b, texts) {
+  const repl = texts.map((t) => ({ t, e: doc.eol }));
+  if (repl.length && b >= a) repl[repl.length - 1].e = doc.lines[b].e;
+  doc.lines.splice(a, b - a + 1, ...repl);
+}
+
+// Appends lines at the end of the file, which then ends with a line break.
+function tomlAppend(doc, texts) {
+  const L = doc.lines;
+  if (L.length && L[L.length - 1].t === '' && L[L.length - 1].e === '') L.pop();
+  if (L.length && L[L.length - 1].e === '') L[L.length - 1].e = doc.eol;
+  for (const t of texts) L.push({ t, e: doc.eol });
+  L.push({ t: '', e: '' });
+}
+
+const tomlTopKv = (sts, key) => sts.find((st) => st.kind === 'kv' && st.table.length === 0 && tomlPathEq(st.key, [key]));
+const stLines = (doc, st) => doc.lines.slice(st.start, st.end + 1).map((l) => l.t);
+
+// A top-level key: { value (decoded when it is a string), raw, lines (the statement's exact text) }, or undefined.
+export function tomlTopValue(text, key) {
+  const doc = tomlDoc(text);
+  const st = tomlTopKv(doc.sts, key);
+  return st ? { value: tomlDecodeString(st.value), raw: st.value, lines: stLines(doc, st) } : undefined;
+}
+
+// Sets a top-level key to a raw TOML value (or to exact statement lines, `{ lines }`), keeping a trailing comment.
+// New keys go after the last top-level key, before the first [table].
+export function setTomlTop(text, key, rawValue) {
+  const doc = tomlDoc(text);
+  const st = tomlTopKv(doc.sts, key);
+  const texts = Array.isArray(rawValue?.lines) ? rawValue.lines : [`${st ? st.indent : ''}${key} = ${rawValue}${st && st.start === st.end && /^\s*(#.*)?$/.test(st.tail) ? st.tail : ''}`];
+  if (st) {
+    tomlSplice(doc, st.start, st.end, texts);
+    return tomlText(doc);
+  }
+  const firstHeader = doc.sts.findIndex((x) => x.kind === 'table' || x.kind === 'array');
+  const top = firstHeader < 0 ? doc.sts : doc.sts.slice(0, firstHeader);
+  const lastKv = [...top].reverse().find((x) => x.kind === 'kv');
+  let at;
+  if (lastKv) at = lastKv.end + 1;
+  else {
+    // After a leading comment block that is followed by a blank line (a file header), else at the very top.
+    let i = 0;
+    while (i < top.length && top[i].kind === 'comment') i++;
+    at = i > 0 && top[i]?.kind === 'blank' ? top[i].end + 1 : 0;
+  }
+  if (at >= doc.lines.length || (at === doc.lines.length - 1 && doc.lines[at].t === '' && doc.lines[at].e === '')) tomlAppend(doc, texts);
+  else tomlSplice(doc, at, at - 1, texts);
+  return tomlText(doc);
+}
+
+export function deleteTomlTop(text, key) {
+  const doc = tomlDoc(text);
+  const st = tomlTopKv(doc.sts, key);
+  if (!st) return String(text ?? '');
+  tomlSplice(doc, st.start, st.end, []);
+  return tomlText(doc);
+}
+
+// A [table] from its header to its last key (comments right before the next header belong to that one).
+function tomlFindTable(sts, name) {
+  const i = sts.findIndex((x) => x.kind === 'table' && tomlPathEq(x.name, name));
+  if (i < 0) return null;
+  let j = i + 1;
+  while (j < sts.length && sts[j].kind !== 'table' && sts[j].kind !== 'array') j++;
+  const body = sts.slice(i + 1, j);
+  const lastKv = [...body].reverse().find((x) => x.kind === 'kv');
+  return { header: sts[i], body, start: sts[i].start, end: (lastKv || sts[i]).end, after: lastKv || sts[i] };
+}
+
+// { pairs: { key: decoded value }, lines: the table's exact text } for a [table], or null.
+export function readTomlTable(text, name) {
+  const doc = tomlDoc(text);
+  const t = tomlFindTable(doc.sts, name);
+  if (!t) return null;
+  const pairs = {};
+  for (const st of t.body) if (st.kind === 'kv' && st.key.length === 1) pairs[st.key[0]] = tomlDecodeString(st.value);
+  return { pairs, lines: doc.lines.slice(t.start, t.end + 1).map((l) => l.t) };
+}
+
+// Sets keys inside a [table], creating it at the end of the file (after a comment line) when missing.
+export function upsertTomlTable(text, name, entries, comment = null) {
+  let doc = tomlDoc(text);
+  if (!tomlFindTable(doc.sts, name)) {
+    const header = `[${name.map((n) => (/^[A-Za-z0-9_-]+$/.test(n) ? n : tomlString(n))).join('.')}]`;
+    const block = [...(comment ? [comment] : []), header, ...entries.map(([k, v]) => `${k} = ${v}`)];
+    // A blank line of its own before the new table (unless the file is empty): removing the table takes exactly that
+    // line with it, so the file comes back byte for byte.
+    const content = doc.lines.filter((l, i) => !(i === doc.lines.length - 1 && l.t === '' && l.e === ''));
+    if (!content.length) doc.lines = [];
+    tomlAppend(doc, [...(content.length ? [''] : []), ...block]);
+    return tomlText(doc);
+  }
+  for (const [k, v] of entries) {
+    const t = tomlFindTable(doc.sts, name);
+    const st = t.body.find((x) => x.kind === 'kv' && tomlPathEq(x.key, [k]));
+    if (st) tomlSplice(doc, st.start, st.end, [`${st.indent}${k} = ${v}${st.start === st.end && /^\s*(#.*)?$/.test(st.tail) ? st.tail : ''}`]);
+    else tomlSplice(doc, t.after.end + 1, t.after.end, [`${k} = ${v}`]);
+    doc = tomlDoc(tomlText(doc));
+  }
+  return tomlText(doc);
+}
+
+// Replaces a [table] (header to last key) with exact lines, or removes it with `lines = null`; a comment line equal to
+// `comment` right above the header and one blank line around it go too.
+export function replaceTomlTable(text, name, lines, comment = null) {
+  const doc = tomlDoc(text);
+  const t = tomlFindTable(doc.sts, name);
+  if (!t) return String(text ?? '');
+  let a = t.start;
+  if (comment && a > 0 && doc.lines[a - 1].t === comment) a--;
+  if (lines) {
+    tomlSplice(doc, a, t.end, lines);
+    return tomlText(doc);
+  }
+  if (a > 0 && doc.lines[a - 1].t.trim() === '') a--;
+  tomlSplice(doc, a, t.end, []);
+  return tomlText(doc);
+}
+
+// Places where `name` is also defined some other way (dotted keys, inline tables, [[array]] headers, a second
+// [header]): writing a [name] table next to them would make the file invalid.
+export function tomlTableConflicts(text, name) {
+  const lines = [];
+  let headers = 0;
+  for (const st of parseTomlStatements(text)) {
+    if (st.kind === 'table' && tomlPathEq(st.name, name)) headers++;
+    if (st.kind === 'array' && tomlPathStarts(st.name, name)) lines.push(st.start + 1);
+    if (st.kind !== 'kv') continue;
+    const full = [...st.table, ...st.key];
+    const inside = tomlPathStarts(st.table, name);
+    if (!inside && tomlPathStarts(full, name)) lines.push(st.start + 1);
+  }
+  if (headers > 1) lines.push('duplicate');
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // Codex CLI: `evolink setup codex` writes a separate profile, so `codex -p evolink` goes through EvoLink while a
 // plain `codex` keeps the user's own setup. The main config.toml is never touched in this mode.
 
@@ -2090,11 +2435,15 @@ export function parseCodexProfile(text) {
   return out;
 }
 
-// The key setup offers to reuse: an earlier Codex profile first, then the Claude Code settings.
+// The key setup offers to reuse: an earlier Codex profile first, then config.toml (VS Code mode), then Claude Code.
 function existingCodexKey(paths) {
   if (isFile(paths.profile)) {
     const p = parseCodexProfile(fs.readFileSync(paths.profile, 'utf8'));
     if (p.experimental_bearer_token && isEvolinkUrl(p.base_url || '')) return p.experimental_bearer_token;
+  }
+  if (isFile(paths.config)) {
+    const t = readCodexMainConfig(fs.readFileSync(paths.config, 'utf8')).table;
+    if (t?.experimental_bearer_token && isEvolinkUrl(t.base_url || '')) return t.experimental_bearer_token;
   }
   return existingEvolinkKey(readJson(claudePaths().settings).data);
 }
@@ -2156,6 +2505,7 @@ function codexConfigNotes(mainConfig, paths) {
   if (mainConfig.legacyProfile) {
     notes.push({
       level: 'error',
+      all: true,
       text: L(
         `${file} 里有 profile = "${mainConfig.legacyProfile}"：新版 Codex 不再支持这种写法，所有 codex 命令都会报错。请删掉这一行（要用某个配置档时改用 codex -p 名字）。`,
         `${file} sets profile = "${mainConfig.legacyProfile}", which current Codex rejects for every command. Delete that line (pick a profile with codex -p <name> instead).`,
@@ -2227,6 +2577,150 @@ function applyCodexPlan(plan) {
   return { written, backupDir: backup.files.length ? backup.dir : null };
 }
 
+// ---------------------------------------------------------------------------
+// Codex in VS Code: `evolink setup codex --vscode`. The extension (openai.chatgpt) runs its bundled `codex app-server`,
+// which reads only the main config.toml, never a profile, so EvoLink becomes the model provider there. A custom
+// provider needs no OpenAI sign-in: app-server answers account/read with requiresOpenaiAuth = false and the extension
+// skips its login page (Codex 0.159.2 source and live test, 10-01). A plain `codex` then uses EvoLink as well.
+
+const CODEX_PROVIDER_PATH = ['model_providers', CODEX_PROVIDER];
+const CODEX_VSCODE_MARK = '# EvoLink, added by `evolink setup codex --vscode` (undo: evolink reset codex)';
+const AUTO_REVIEWERS = new Set(['auto_review', 'guardian_subagent']);
+
+// What the VS Code mode looks at in config.toml (null: not set). `error` when the file is not valid TOML.
+export function readCodexMainConfig(text) {
+  const out = { error: null, provider: null, model: null, webSearch: null, reviewer: null, legacyProfile: null, table: null, conflicts: [] };
+  try {
+    const get = (k) => tomlTopValue(text, k)?.value ?? null;
+    out.provider = get('model_provider');
+    out.model = get('model');
+    out.webSearch = get('web_search');
+    out.reviewer = get('approvals_reviewer');
+    out.legacyProfile = get('profile');
+    out.table = readTomlTable(text, CODEX_PROVIDER_PATH)?.pairs || null;
+    out.conflicts = tomlTableConflicts(text, CODEX_PROVIDER_PATH);
+  } catch (e) {
+    out.error = e.message;
+  }
+  return out;
+}
+
+// What reset compares against: the provider table still points where setup pointed it, with the same key.
+const codexTableSignature = (pairs) => hashValue(JSON.stringify([pairs?.base_url ?? null, pairs?.experimental_bearer_token ?? null, pairs?.wire_api ?? null]));
+
+// The edits to config.toml; `changes` keeps each top-level key's exact lines from before, for reset.
+export function planCodexMainConfig(text, { base, key, model }) {
+  const original = String(text ?? '');
+  let t = original;
+  const changes = [];
+  const set = (k, v) => {
+    const cur = tomlTopValue(t, k);
+    const changed = !cur || cur.value !== v;
+    changes.push({ key: k, before: cur ? cur.lines : null, beforeValue: cur ? cur.value : undefined, after: v, changed });
+    if (changed) t = setTomlTop(t, k, tomlString(v));
+  };
+  set('model_provider', CODEX_PROVIDER);
+  set('model', model);
+  // EvoLink does not run OpenAI's hosted web search tool.
+  set('web_search', 'disabled');
+  // Automatic approval review asks for codex-auto-review, which EvoLink does not serve: reviewed commands would be denied.
+  if (AUTO_REVIEWERS.has(tomlTopValue(t, 'approvals_reviewer')?.value)) set('approvals_reviewer', 'user');
+  const old = readTomlTable(t, CODEX_PROVIDER_PATH);
+  t = upsertTomlTable(
+    t,
+    CODEX_PROVIDER_PATH,
+    [
+      ['name', '"EvoLink"'],
+      ['base_url', tomlString(`${base}/v1`)],
+      ['wire_api', '"responses"'],
+      // In the file, the key reaches the extension however VS Code was started (a variable set in a shell profile does
+      // not reach an app opened from the Dock), and Codex keeps it out of its logs and session files.
+      ['experimental_bearer_token', tomlString(key)],
+    ],
+    CODEX_VSCODE_MARK,
+  );
+  const now = readTomlTable(t, CODEX_PROVIDER_PATH);
+  const table = { existed: !!old, before: old ? old.lines : null, after: codexTableSignature(now.pairs), changed: !old || old.lines.join('\n') !== now.lines.join('\n') };
+  return { text: t, changes, table, changed: t !== original, base, key, model };
+}
+
+// Undo what setup recorded, key by key; anything changed since (or added by Codex, such as trusted folders) stays.
+export function planCodexMainRestore(text, rec) {
+  const original = String(text ?? '');
+  let t = original;
+  const restored = [];
+  const skipped = [];
+  for (const [k, r] of Object.entries(rec.keys || {})) {
+    if (hashValue(tomlTopValue(t, k)?.value) !== r.after) {
+      skipped.push(k);
+      continue;
+    }
+    t = r.existed ? setTomlTop(t, k, { lines: r.before }) : deleteTomlTop(t, k);
+    restored.push(k);
+  }
+  let keyRemoved = false;
+  if (rec.table) {
+    const cur = readTomlTable(t, CODEX_PROVIDER_PATH);
+    if (cur && codexTableSignature(cur.pairs) === rec.table.after) {
+      t = replaceTomlTable(t, CODEX_PROVIDER_PATH, rec.table.existed ? rec.table.before : null, CODEX_VSCODE_MARK);
+      restored.push(`[${CODEX_PROVIDER_TABLE}]`);
+      keyRemoved = true;
+    } else if (cur) skipped.push(`[${CODEX_PROVIDER_TABLE}]`);
+  }
+  return { text: t, restored, skipped, changed: t !== original, remove: !rec.existed && t.trim() === '', keyRemoved };
+}
+
+function printCodexMainPlan(plan, paths) {
+  ui.print('');
+  const existed = isFile(paths.config);
+  const tag = !existed ? L('  （新建）', '  (new file)') : plan.changed ? L('  （修改，原文件先备份）', '  (changed; backed up first)') : L('  （无需改动）', '  (unchanged)');
+  ui.print(`  ${tildify(paths.config)}${tag}`);
+  const show = (k, note = '') => {
+    const c = plan.changes.find((x) => x.key === k);
+    if (!c) return;
+    const value = c.changed ? `${c.beforeValue === undefined ? '' : `${c.beforeValue} → `}${c.after}` : `${c.after}${L('（不变）', ' (kept)')}`;
+    ui.print(`    ${k.padEnd(19)}${value}${note ? ui.dim(`  ${note}`) : ''}`);
+  };
+  show('model_provider', `${plan.base}/v1 · Responses API`);
+  show('model');
+  ui.print(`    ${L('Key', 'key').padEnd(19)}${maskKey(plan.key)}${ui.dim(`  ${L(`写在 [${CODEX_PROVIDER_TABLE}] 里，文件改成只有你能读写`, `kept in [${CODEX_PROVIDER_TABLE}]; the file becomes readable only by you`)}`)}`);
+  show('web_search', L('EvoLink 不提供 OpenAI 自带的联网搜索', "EvoLink does not run OpenAI's hosted web search"));
+  show('approvals_reviewer', L('自动审批审核要用的 codex-auto-review 模型 EvoLink 没有，开着会拒绝执行命令', 'automatic approval review needs codex-auto-review, which EvoLink does not serve'));
+  ui.print(ui.dim(`    ${L('其他设置（MCP、信任的文件夹、注释等）都不动', 'everything else (MCP servers, trusted folders, comments) stays as it is')}`));
+}
+
+function applyCodexMainPlan(plan, paths) {
+  const state = loadState();
+  const cx = (state.codex ||= { files: {} });
+  const file = paths.config;
+  const existed = isFile(file);
+  if (!cx.config || cx.config.file !== file) {
+    let mode = null;
+    if (existed && process.platform !== 'win32') {
+      try {
+        mode = fs.statSync(file).mode & 0o777;
+      } catch {}
+    }
+    cx.config = { file, existed, mode, keys: {}, table: null };
+  }
+  const rec = cx.config;
+  const backup = newBackupSession();
+  if (existed) backupFile(backup, file, 'codex-config.toml');
+  // Owner-only from now on: the file holds the key.
+  writeAtomic(file, plan.text);
+  for (const c of plan.changes) {
+    if (!c.changed) continue;
+    if (rec.keys[c.key]) rec.keys[c.key].after = hashValue(c.after);
+    else rec.keys[c.key] = { existed: c.before !== null, before: c.before, after: hashValue(c.after) };
+  }
+  if (rec.table) rec.table.after = plan.table.after;
+  else rec.table = { existed: plan.table.existed, before: plan.table.before, after: plan.table.after };
+  cx.updatedAt = new Date().toISOString();
+  saveState(state);
+  pruneBackups();
+  return { backupDir: backup.files.length ? backup.dir : null };
+}
+
 // Codex speaks the Responses API; a dozen tokens is enough to prove the key and the model.
 async function testResponses(base, key, model) {
   const r = await http('POST', `${base}/v1/responses`, { key, timeout: 90000, body: { model, input: 'ping', max_output_tokens: 16 } });
@@ -2235,28 +2729,41 @@ async function testResponses(base, key, model) {
 
 async function cmdSetupCodex(opts) {
   const interactive = !opts.yes && !opts.json;
-  const result = { command: 'setup', target: 'codex', version: VERSION, ok: false, warnings: [] };
+  const vscode = opts.vscode === true;
+  const result = { command: 'setup', target: 'codex', mode: vscode ? 'vscode' : 'profile', version: VERSION, ok: false, warnings: [] };
   const baseNorm = normalizeBaseUrl(opts.baseUrl || process.env.EVOLINK_BASE_URL || DEFAULT_BASE_URL);
   if (baseNorm.error) throw new CliError(L('接口地址格式不对，应类似 https://direct.evolink.ai', 'Invalid base URL; expected something like https://direct.evolink.ai'), EXIT.USAGE);
   const base = baseNorm.url;
 
-  ui.title(L(`EvoLink 一键配置 · Codex  v${VERSION}`, `EvoLink setup · Codex  v${VERSION}`));
-  ui.print(ui.dim(L(`只新建一个 Codex 配置档（${CODEX_PROFILE}），你原来的 config.toml 不动；改之前自动备份，随时可以撤销。`, `Only adds a Codex profile ("${CODEX_PROFILE}"); your config.toml is left alone. Everything is backed up first and can be undone.`)));
+  if (vscode) {
+    ui.title(L(`EvoLink 一键配置 · Codex（VS Code 扩展）  v${VERSION}`, `EvoLink setup · Codex in VS Code  v${VERSION}`));
+    ui.print(ui.dim(L('Codex 扩展只读主配置 config.toml，所以要在里面把 EvoLink 设为模型提供方：扩展和终端里直接运行的 codex 都会走 EvoLink。改之前自动备份，随时可以撤销。', 'The Codex extension reads only the main config.toml, so EvoLink becomes the model provider there: the extension and a plain `codex` in the terminal both use EvoLink. Everything is backed up first and can be undone.')));
+  } else {
+    ui.title(L(`EvoLink 一键配置 · Codex  v${VERSION}`, `EvoLink setup · Codex  v${VERSION}`));
+    ui.print(ui.dim(L(`只新建一个 Codex 配置档（${CODEX_PROFILE}），你原来的 config.toml 不动；改之前自动备份，随时可以撤销。`, `Only adds a Codex profile ("${CODEX_PROFILE}"); your config.toml is left alone. Everything is backed up first and can be undone.`)));
+  }
   const sandbox = sandboxHome();
   if (sandbox) {
     ui.info(
-      L(
-        `测试模式：HOME 是 ${sandbox.home}，只改这里面的配置，你真实的家目录 ${sandbox.real} 不受影响（自动安装 Codex 除外，可加 --no-install）。`,
-        `Test mode: HOME is ${sandbox.home}; only settings under it change and your real home ${sandbox.real} is left alone (except installing Codex; add --no-install).`,
-      ),
+      vscode
+        ? L(
+            `测试模式：HOME 是 ${sandbox.home}，只改这里面的配置，你真实的家目录 ${sandbox.real} 不受影响（安装扩展除外，可加 --no-install-extension）。`,
+            `Test mode: HOME is ${sandbox.home}; only settings under it change and your real home ${sandbox.real} is left alone (except installing the extension; add --no-install-extension).`,
+          )
+        : L(
+            `测试模式：HOME 是 ${sandbox.home}，只改这里面的配置，你真实的家目录 ${sandbox.real} 不受影响（自动安装 Codex 除外，可加 --no-install）。`,
+            `Test mode: HOME is ${sandbox.home}; only settings under it change and your real home ${sandbox.real} is left alone (except installing Codex; add --no-install).`,
+          ),
     );
   }
 
   // [1/5] environment
   ui.step(1, 5, L('检查环境', 'Environment'));
   ui.ok(`${osLabel()} · Node ${process.versions.node}`);
+  const paths = codexPaths();
   let codex = detectCodex();
   if (codex.installed) ui.ok(`Codex ${codex.version || '?'}  ${ui.dim(tildify(codex.path))}`);
+  else if (vscode) ui.info(L('没有装 Codex 命令行：VS Code 扩展自带 Codex，用不到它。', 'The Codex CLI is not installed; the VS Code extension brings its own Codex.'));
   else {
     // The profile does nothing without Codex itself, so it is installed by default (--no-install skips it).
     ui.warn(L('没有找到 Codex。', 'Codex is not installed.'));
@@ -2270,11 +2777,32 @@ async function cmdSetupCodex(opts) {
       result.codex.latest = latest;
     }
   }
+  let mainText = '';
+  let main = null;
+  if (vscode) {
+    const have = editorsWithExtension(CODEX_EXTENSION);
+    if (have.length) ui.ok(L(`Codex 扩展：${have.join('、')}`, `Codex extension: ${have.join(', ')}`));
+    else if (opts.installExtension === false) ui.info(L('还没装 Codex 扩展（加了 --no-install-extension，不自动安装）', 'The Codex extension is not installed (--no-install-extension: not installing it)'));
+    else ui.info(L('还没装 Codex 扩展：写好配置后自动安装', 'The Codex extension is not installed yet; it is installed after the config is written'));
+    result.extension = { installedIn: have };
+    mainText = isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '';
+    main = readCodexMainConfig(mainText);
+    if (main.error) {
+      throw new CliError(L(`${tildify(paths.config)} 格式有误，没法安全地修改（${main.error}）。请先修好，再重新运行。`, `${tildify(paths.config)} is not valid TOML, so it cannot be edited safely (${main.error}). Fix it first, then run setup again.`), EXIT.CONFIG);
+    }
+    if (main.conflicts.length) {
+      const where = main.conflicts.map((l) => (l === 'duplicate' ? L('重复的表头', 'a repeated header') : L(`第 ${l} 行`, `line ${l}`))).join(L('、', ', '));
+      throw new CliError(
+        L(`${tildify(paths.config)} 里已经用别的写法定义了 ${CODEX_PROVIDER_TABLE}（${where}），自动修改会让文件失效。请删掉这些内容，再重新运行。`, `${tildify(paths.config)} already defines ${CODEX_PROVIDER_TABLE} another way (${where}); editing it would break the file. Remove that, then run setup again.`),
+        EXIT.CONFIG,
+      );
+    }
+    ui.ok(isFile(paths.config) ? tildify(paths.config) : L(`${tildify(paths.config)}（还没有，会新建）`, `${tildify(paths.config)} (not there yet; will be created)`));
+  }
 
   // [2/5] key
   ui.step(2, 5, L('API Key', 'API key'));
-  const paths = codexPaths();
-  const current = isFile(paths.profile) ? parseCodexProfile(fs.readFileSync(paths.profile, 'utf8')) : {};
+  const current = vscode ? { model: main.model } : isFile(paths.profile) ? parseCodexProfile(fs.readFileSync(paths.profile, 'utf8')) : {};
   const { key, check } = await obtainAndCheckKey(opts, interactive, base, existingCodexKey(paths), { tool: 'codex' });
   result.key = maskKey(key);
   const ids = check?.ids || new Set();
@@ -2285,7 +2813,12 @@ async function cmdSetupCodex(opts) {
   const model = await decideCodexModel(opts, interactive, current.model || null, ids);
   result.model = model;
 
-  // [4/5] plan
+  const ctx = { opts, interactive, result, base, key, model, ids, paths, codex, sandbox };
+  return vscode ? finishCodexVscode({ ...ctx, mainText, main }) : finishCodexProfile(ctx);
+}
+
+// [4/5] and [5/5] of `setup codex`: the profile.
+async function finishCodexProfile({ opts, interactive, result, base, key, model, ids, paths, codex, sandbox }) {
   ui.step(4, 5, L('确认改动', 'Review changes'));
   const mainConfig = scanCodexConfig(isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '');
   const plan = buildCodexPlan({ base, key, model, paths, mainConfig });
@@ -2308,7 +2841,6 @@ async function cmdSetupCodex(opts) {
   if (pending === 0) ui.ok(L('配置已经是最新的，不需要改动。', 'Already up to date; nothing to change.'));
   else if (interactive && !(await confirm(L('确认写入？', 'Apply these changes?'), true))) throw new CancelledError();
 
-  // [5/5] apply and verify
   ui.step(5, 5, L('写入并验证', 'Apply and verify'));
   if (pending > 0) {
     const applied = applyCodexPlan(plan);
@@ -2317,20 +2849,74 @@ async function cmdSetupCodex(opts) {
     result.backupDir = applied.backupDir;
     result.written = applied.written;
   }
-  if (!opts.skipChecks && opts.test !== false && ids.size) {
-    let go = true;
-    if (interactive) go = await confirm(L(`发一条测试消息确认能用吗？（模型 ${model}，十几个 token，费用约 0.01 Credits）`, `Send a tiny test request with ${model}? (a dozen tokens, about 0.01 credits)`), true);
-    if (go) {
-      const t = await testResponses(base, key, model);
-      result.test = t.ok ? { ok: true, model, ms: t.ms } : { ok: false, model, error: t.failure };
-      if (t.ok) ui.ok(L(`测试通过：${model} 正常返回（${t.ms} ms）`, `Test passed: ${model} answered (${t.ms} ms)`));
-      else for (const line of failureLines(t.failure, base)) ui.err(line);
-    }
-  }
+  await codexTestRequest({ opts, interactive, result, base, key, model, ids });
   result.ok = !result.test || result.test.ok;
   printCodexNextSteps({ codex, sandbox });
   return finish(result, opts, result.ok ? EXIT.OK : EXIT.AUTH);
 }
+
+// [4/5] and [5/5] of `setup codex --vscode`: config.toml, then the extension.
+async function finishCodexVscode({ opts, interactive, result, base, key, model, ids, paths, sandbox, mainText, main }) {
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
+  ui.step(4, 5, L('确认改动', 'Review changes'));
+  const plan = planCodexMainConfig(mainText, { base, key, model });
+  printCodexMainPlan(plan, paths);
+  if (opts.installExtension !== false && !editorsWithExtension(CODEX_EXTENSION).length) {
+    ui.print(`  ${L('Codex 扩展', 'Codex extension')} ${CODEX_EXTENSION}${ui.dim(`  ${L('写好配置后用编辑器的命令行安装（不想装：加 --no-install-extension）', 'installed with the editor command line after the config is written (--no-install-extension skips it)')}`)}`);
+  }
+  if (main.legacyProfile) {
+    const text = L(`${tildify(paths.config)} 里有 profile = "${main.legacyProfile}"：新版 Codex 不再支持这种写法，扩展和 codex 都会报错。请删掉这一行。`, `${tildify(paths.config)} sets profile = "${main.legacyProfile}", which current Codex rejects (the extension and codex both fail). Delete that line.`);
+    ui.warn(text);
+    result.warnings.push(text);
+  }
+  if (scanCodexConfig(mainText).evolinkEnvKey) {
+    ui.info(L('旧教程写的 [model_providers.evolink] 保留不动，之后不再使用（撤销时 model_provider 会改回原来的值）。', 'The older [model_providers.evolink] table stays as is but is no longer used (reset puts model_provider back).'));
+  }
+  result.changes = [{ file: paths.config, action: !isFile(paths.config) ? 'create' : plan.changed ? 'modify' : 'keep', keys: plan.changes.filter((c) => c.changed).map((c) => c.key), providerTable: plan.table.changed }];
+  if (opts.dryRun) {
+    if (opts.installExtension !== false) result.extensions = await installExtension(CODEX_EXTENSION, opts);
+    ui.print('');
+    ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
+    result.ok = true;
+    result.dryRun = true;
+    return finish(result, opts);
+  }
+  if (!plan.changed) ui.ok(L('配置已经是最新的，不需要改动。', 'Already up to date; nothing to change.'));
+  else if (interactive) {
+    ui.print('');
+    ui.warn(L('这会让 VS Code（以及 Cursor 等）里的 Codex 扩展、终端里直接运行的 codex，都改走 EvoLink。', 'The Codex extension in VS Code (and Cursor and similar editors) and a plain `codex` in the terminal will all use EvoLink.'));
+    if (isFile(path.join(paths.home, 'auth.json'))) ui.sub(L('你登录的 ChatGPT 账号保留不动，只是暂时不用；撤销后恢复原来的设置。', 'Your ChatGPT sign-in stays but goes unused; reset brings your own setup back.'));
+    ui.sub(L('Key 会写进 config.toml，文件权限改成只有你能读写；如果你用 git 等同步这个文件，请先把它排除。', 'The key goes into config.toml, which becomes readable only by you; if you sync that file (git, dotfiles), exclude it first.'));
+    ui.sub(L(`随时可以撤销：${cmd} reset codex`, `Undo any time: ${cmd} reset codex`));
+    if (!(await confirm(L('确认修改 config.toml？', 'Change config.toml?'), false))) throw new CancelledError();
+  }
+
+  ui.step(5, 5, L('写入并验证', 'Apply and verify'));
+  if (plan.changed) {
+    const applied = applyCodexMainPlan(plan, paths);
+    if (applied.backupDir) ui.ok(L(`已备份原文件到 ${tildify(applied.backupDir)}`, `Backed up originals to ${tildify(applied.backupDir)}`));
+    ui.ok(L(`已写入 ${tildify(paths.config)}`, `Wrote ${tildify(paths.config)}`));
+    result.backupDir = applied.backupDir;
+    result.written = [paths.config];
+  }
+  // Without the extension this mode does nothing in the editor, so it is installed by default (09-30 rule).
+  if (opts.installExtension !== false) result.extensions = await installExtension(CODEX_EXTENSION, opts);
+  await codexTestRequest({ opts, interactive, result, base, key, model, ids });
+  result.ok = !result.test || result.test.ok;
+  printCodexVscodeNextSteps({ sandbox });
+  return finish(result, opts, result.ok ? EXIT.OK : EXIT.AUTH);
+}
+
+async function codexTestRequest({ opts, interactive, result, base, key, model, ids }) {
+  if (opts.skipChecks || opts.test === false || !ids.size) return;
+  if (interactive && !(await confirm(L(`发一条测试消息确认能用吗？（模型 ${model}，十几个 token，费用约 0.01 Credits）`, `Send a tiny test request with ${model}? (a dozen tokens, about 0.01 credits)`), true))) return;
+  const t = await testResponses(base, key, model);
+  result.test = t.ok ? { ok: true, model, ms: t.ms } : { ok: false, model, error: t.failure };
+  if (t.ok) ui.ok(L(`测试通过：${model} 正常返回（${t.ms} ms）`, `Test passed: ${model} answered (${t.ms} ms)`));
+  else for (const line of failureLines(t.failure, base)) ui.err(line);
+}
+
+const CODEX_TOKENS_NOTE = () => L('Codex 每轮都会带上很长的系统提示和工具说明：一句简单的话也要约 9 千个输入 token。', 'Codex sends a long system prompt and tool list every turn: even a one-line question costs about 9K input tokens.');
 
 function printCodexNextSteps({ codex, sandbox }) {
   const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
@@ -2350,7 +2936,31 @@ function printCodexNextSteps({ codex, sandbox }) {
   ui.print(`  ${ui.mark('dot')} ${L(`带 -p ${CODEX_PROFILE} 才走 EvoLink；直接运行 codex 仍是你原来的设置（ChatGPT 账号或你自己的 config.toml）。`, `EvoLink is used only with -p ${CODEX_PROFILE}; plain codex keeps your own setup (ChatGPT sign-in or your config.toml).`)}`);
   ui.print(`  ${ui.mark('dot')} ${L('在 Codex 里输入 /model 可以换成这把 Key 能用的其他 GPT 模型。', 'Inside Codex, /model switches to any other GPT model this key can use.')}`);
   ui.print(`  ${ui.mark('dot')} ${L('第一次在某个文件夹启动会问是否信任它，按提示选即可；启动时提示 "Running without the shared background server" 是正常的（带 -p 时 Codex 都这样）。', 'The first launch in a folder asks whether to trust it; answer as you like. The note "Running without the shared background server" is normal with -p.')}`);
-  ui.print(`  ${ui.mark('dot')} ${L('Codex 每轮都会带上很长的系统提示和工具说明：一句简单的话也要约 9 千个输入 token。', 'Codex sends a long system prompt and tool list every turn: even a one-line question costs about 9K input tokens.')}`);
+  ui.print(`  ${ui.mark('dot')} ${CODEX_TOKENS_NOTE()}`);
+  // The extension never reads a profile: point at the mode that covers it.
+  if (editorsWithExtension(CODEX_EXTENSION).length) {
+    ui.print(`  ${ui.mark('dot')} ${L(`编辑器里装了 Codex 扩展：扩展不认配置档，还是原来的设置。想让它也走 EvoLink：${cmd} setup codex --vscode（会修改 config.toml）`, `The Codex extension in your editor ignores profiles and keeps your own setup. To route it through EvoLink too: ${cmd} setup codex --vscode (changes config.toml)`)}`);
+  }
+  ui.print('');
+  ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset codex`);
+  ui.print(`  ${L('遇到问题：运行 ', 'Having trouble? Run ')}${cmd} doctor codex${L('，把输出发给客服（Key 会自动隐去）', ' and send the output to support (your key is hidden)')}`);
+}
+
+function printCodexVscodeNextSteps({ sandbox }) {
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
+  ui.print('');
+  ui.title(`${ui.mark('ok')} ${L('配置完成', 'All set')}`);
+  const n = [];
+  if (!editorsWithExtension(CODEX_EXTENSION).length) {
+    n.push(L(`安装 Codex 扩展：在 VS Code 里打开 ${extensionLink('VS Code', CODEX_EXTENSION)}，或在扩展页搜索 Codex（发布者 OpenAI）`, `Install the Codex extension: open ${extensionLink('VS Code', CODEX_EXTENSION)} in VS Code, or search the Extensions view for Codex (publisher OpenAI)`));
+  }
+  n.push(L('VS Code 已经开着的话：在命令面板运行 "Developer: Reload Window"，或者重启 VS Code', 'If VS Code is already open: run "Developer: Reload Window" from the Command Palette, or restart VS Code'));
+  n.push(L('打开 Codex 面板直接对话，不需要登录 ChatGPT', 'Open the Codex panel and start chatting; no ChatGPT sign-in is needed'));
+  n.forEach((line, i) => ui.print(`  ${i + 1}. ${line}`));
+  ui.print(`  ${ui.mark('dot')} ${L('终端里直接运行 codex 也会走 EvoLink（读的是同一个 config.toml）。', 'A plain `codex` in the terminal uses EvoLink too (same config.toml).')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('在扩展的模型菜单里（或 codex 里输入 /model）可以换成这把 Key 能用的其他 GPT 模型。', "Switch to any other GPT model this key can use from the extension's model menu (or /model in codex).")}`);
+  ui.print(`  ${ui.mark('dot')} ${L('用 VS Code Remote-SSH 时，这条命令要在远端的终端里运行：扩展在远端运行，读的是远端的配置。', 'With VS Code Remote-SSH, run this command in the remote terminal: the extension runs there and reads the remote config.')}`);
+  ui.print(`  ${ui.mark('dot')} ${CODEX_TOKENS_NOTE()}`);
   ui.print('');
   ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset codex`);
   ui.print(`  ${L('遇到问题：运行 ', 'Having trouble? Run ')}${cmd} doctor codex${L('，把输出发给客服（Key 会自动隐去）', ' and send the output to support (your key is hidden)')}`);
@@ -2370,6 +2980,14 @@ async function cmdDoctorCodex(opts) {
   };
   ui.title(L(`EvoLink 诊断 · Codex v${VERSION} · ${new Date().toLocaleString('zh-CN', { hour12: false })}`, `EvoLink doctor · Codex v${VERSION} · ${new Date().toISOString()}`));
 
+  const paths = codexPaths();
+  const mainText = isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '';
+  const main = readCodexMainConfig(mainText);
+  // VS Code mode: config.toml itself points at EvoLink (the extension reads only that file).
+  const vscodeMode = main.provider === CODEX_PROVIDER || !!main.table;
+  const hasProfile = isFile(paths.profile);
+  const vscodeOnly = vscodeMode && !hasProfile;
+
   ui.step(1, 4, L('环境', 'Environment'));
   const osl = osLabel();
   ui.ok(`${osl} · Node ${process.versions.node}`);
@@ -2381,15 +2999,15 @@ async function cmdDoctorCodex(opts) {
       latest = await latestNpmVersion(opts, CODEX_PKG);
       if (latest && compareVersions(codex.version, latest) < 0) warn(L(`Codex 有新版本 ${latest}（当前 ${codex.version}），建议更新：npm install -g ${CODEX_PKG}@latest`, `Codex ${latest} is available (you have ${codex.version}); update with: npm install -g ${CODEX_PKG}@latest`));
     }
-  } else problem(L('没有找到 Codex', 'Codex is not installed'));
+  } else if (vscodeOnly) ui.info(L('没有装 Codex 命令行：VS Code 扩展自带 Codex，用不到它', 'The Codex CLI is not installed; the VS Code extension brings its own Codex'));
+  else problem(L('没有找到 Codex', 'Codex is not installed'));
   report.summary.push(`evolink-doctor ${VERSION} codex | ${osl} | node ${process.versions.node} | codex ${codex.installed ? codex.version || '?' : 'missing'}${latest ? ` (latest ${latest})` : ''}`);
 
-  ui.step(2, 4, L('配置档', 'Profile'));
-  const paths = codexPaths();
+  ui.step(2, 4, L('配置', 'Configuration'));
   let prof = {};
   let catalogState = '-';
-  if (!isFile(paths.profile)) problem(L(`${tildify(paths.profile)} 不存在，还没配置过（运行 ${cmd} setup codex）`, `${tildify(paths.profile)} does not exist; run ${cmd} setup codex`));
-  else {
+  if (!hasProfile && !vscodeMode) problem(L(`${tildify(paths.profile)} 不存在，还没配置过（运行 ${cmd} setup codex；VS Code 扩展用 ${cmd} setup codex --vscode）`, `${tildify(paths.profile)} does not exist; run ${cmd} setup codex (for the VS Code extension: ${cmd} setup codex --vscode)`));
+  if (hasProfile) {
     prof = parseCodexProfile(fs.readFileSync(paths.profile, 'utf8'));
     ui.ok(tildify(paths.profile));
     if (prof.model_provider !== CODEX_PROVIDER) problem(L(`model_provider = ${prof.model_provider || '（没设）'}，应为 ${CODEX_PROVIDER}（重新运行 ${cmd} setup codex 可修复）`, `model_provider = ${prof.model_provider || '(unset)'}; expected ${CODEX_PROVIDER} (re-run ${cmd} setup codex)`));
@@ -2415,31 +3033,73 @@ async function cmdDoctorCodex(opts) {
       else ui.ok(L(`模型目录 ${tildify(prof.model_catalog_json)}`, `model catalog ${tildify(prof.model_catalog_json)}`));
     }
   }
-  const mainConfig = scanCodexConfig(isFile(paths.config) ? fs.readFileSync(paths.config, 'utf8') : '');
-  for (const n of codexConfigNotes(mainConfig, paths)) (n.level === 'error' ? problem : ui.info.bind(ui))(n.text);
-  if (mainConfig.autoReview && prof.approvals_reviewer !== 'user') {
+  const mainConfig = scanCodexConfig(mainText);
+  for (const n of codexConfigNotes(mainConfig, paths)) {
+    // Without a profile only what breaks every codex command matters; with VS Code mode on, a plain codex uses EvoLink.
+    if ((!hasProfile && !n.all) || (vscodeMode && n.level === 'info')) continue;
+    (n.level === 'error' ? problem : ui.info.bind(ui))(n.text);
+  }
+  if (hasProfile && mainConfig.autoReview && prof.approvals_reviewer !== 'user') {
     problem(L(`${tildify(paths.config)} 开了自动审批审核（approvals_reviewer = "auto_review"），它用的 codex-auto-review 模型 EvoLink 没有，需要审核的命令会被拒绝；重新运行 ${cmd} setup codex 会在配置档里关掉它`, `${tildify(paths.config)} turns on automatic approval review (approvals_reviewer = "auto_review"); EvoLink does not serve its codex-auto-review model, so reviewed commands are denied. Re-run ${cmd} setup codex to turn it off in the profile`));
   }
-  const key = prof.experimental_bearer_token || (prof.env_key ? process.env[prof.env_key] : null) || null;
-  report.summary.push(`profile: ${isFile(paths.profile) ? 'yes' : 'no'} provider=${prof.model_provider || '-'} base=${prof.base_url || '-'} key=${key ? maskKey(key) : '-'} model=${prof.model || '-'} wire=${prof.wire_api || '-'} web_search=${prof.web_search || '-'} catalog=${catalogState}`);
+  let mainKey = null;
+  if (vscodeMode) {
+    ui.ok(L(`${tildify(paths.config)}（VS Code 模式：扩展和直接运行的 codex 都用它）`, `${tildify(paths.config)} (VS Code mode: the extension and a plain codex use it)`));
+    const fix = L(`重新运行 ${cmd} setup codex --vscode 可修复`, `re-run ${cmd} setup codex --vscode`);
+    const t = main.table;
+    if (main.error) problem(L(`${tildify(paths.config)} 不是有效的 TOML（${main.error}）：Codex 起不来`, `${tildify(paths.config)} is not valid TOML (${main.error}); Codex cannot start`));
+    else {
+      if (main.provider !== CODEX_PROVIDER) problem(L(`model_provider = ${main.provider || '（没设）'}：没有启用 [${CODEX_PROVIDER_TABLE}]（${fix}）`, `model_provider = ${main.provider || '(unset)'}: [${CODEX_PROVIDER_TABLE}] is not in use (${fix})`));
+      if (!t) problem(L(`model_provider = ${CODEX_PROVIDER}，但没有 [${CODEX_PROVIDER_TABLE}] 这一段，Codex 会报错（${fix}）`, `model_provider = ${CODEX_PROVIDER} but there is no [${CODEX_PROVIDER_TABLE}] table, so Codex fails (${fix})`));
+      else {
+        if (!t.base_url) problem(L(`[${CODEX_PROVIDER_TABLE}] 里没有 base_url`, `[${CODEX_PROVIDER_TABLE}] has no base_url`));
+        else if (!isEvolinkUrl(t.base_url)) problem(L(`base_url 指向 ${t.base_url}，不是 EvoLink`, `base_url points to ${t.base_url}, not EvoLink`));
+        else if (!/\/v1\/?$/.test(t.base_url)) problem(L(`base_url = ${t.base_url}：Codex 需要以 /v1 结尾`, `base_url = ${t.base_url}: Codex needs it to end in /v1`));
+        else ui.ok(`base_url = ${t.base_url}`);
+        if (t.wire_api && t.wire_api !== 'responses') problem(L(`wire_api = ${t.wire_api}：Codex 只支持 responses`, `wire_api = ${t.wire_api}: Codex only supports responses`));
+        // Codex prefers env_key over the key in the file.
+        if (t.env_key && !process.env[t.env_key]) problem(L(`[${CODEX_PROVIDER_TABLE}] 要从环境变量 ${t.env_key} 读 Key，但现在没有设置（Codex 会报 Missing environment variable）`, `[${CODEX_PROVIDER_TABLE}] reads the key from ${t.env_key}, which is not set (Codex fails with "Missing environment variable")`));
+        mainKey = (t.env_key ? process.env[t.env_key] : null) || t.experimental_bearer_token || null;
+        if (mainKey) ui.ok(`key = ${maskKey(mainKey)}${t.env_key ? ` (${t.env_key})` : ''}`);
+        else if (!t.env_key) problem(L(`[${CODEX_PROVIDER_TABLE}] 里没有 Key（${fix}）`, `[${CODEX_PROVIDER_TABLE}] has no key (${fix})`));
+        if (process.platform !== 'win32' && t.experimental_bearer_token) {
+          const mode = fs.statSync(paths.config).mode & 0o777;
+          if (mode & 0o077) warn(L(`${tildify(paths.config)} 里有 Key，但别的用户也能读（权限 ${mode.toString(8)}）：运行 chmod 600 ${tildify(paths.config)}`, `${tildify(paths.config)} holds the key but others can read it (mode ${mode.toString(8)}): run chmod 600 ${tildify(paths.config)}`));
+        }
+      }
+      if (main.model) ui.ok(`model = ${main.model}`);
+      else warn(L('没有设置 model：Codex 会用它自己的默认模型，EvoLink 上可能没有', 'model is not set: Codex falls back to its own default, which EvoLink may not serve'));
+      if (main.webSearch !== 'disabled') warn(L(`web_search = ${main.webSearch || '（没设，默认会带上联网搜索）'}：EvoLink 不提供 OpenAI 自带的联网搜索，应为 disabled`, `web_search = ${main.webSearch || '(unset; web search is on by default)'}: EvoLink does not run OpenAI's hosted web search; expected disabled`));
+      if (AUTO_REVIEWERS.has(main.reviewer)) problem(L(`approvals_reviewer = "${main.reviewer}"：它要用的 codex-auto-review 模型 EvoLink 没有，需要审核的命令会被拒绝（${fix}）`, `approvals_reviewer = "${main.reviewer}" needs codex-auto-review, which EvoLink does not serve, so reviewed commands are denied (${fix})`));
+      if (main.conflicts.length) problem(L(`[${CODEX_PROVIDER_TABLE}] 还用别的写法定义了一次，config.toml 会失效`, `[${CODEX_PROVIDER_TABLE}] is also defined another way; config.toml is invalid`));
+    }
+  }
+  const profKey = prof.experimental_bearer_token || (prof.env_key ? process.env[prof.env_key] : null) || null;
+  if (profKey && mainKey && profKey !== mainKey) warn(L('配置档和 config.toml 里的 Key 不一样：codex -p evolink 用配置档的，扩展和直接运行的 codex 用 config.toml 的', 'The profile and config.toml hold different keys: codex -p evolink uses the profile, the extension and a plain codex use config.toml'));
+  // The online checks use the profile when there is one, else config.toml.
+  const key = profKey || mainKey;
+  const keyBase = profKey ? prof.base_url : main.table?.base_url;
+  const keyModel = profKey ? prof.model : main.model;
+  report.summary.push(`profile: ${hasProfile ? 'yes' : 'no'} provider=${prof.model_provider || '-'} base=${prof.base_url || '-'} key=${profKey ? maskKey(profKey) : '-'} model=${prof.model || '-'} wire=${prof.wire_api || '-'} web_search=${prof.web_search || '-'} catalog=${catalogState}`);
   report.summary.push(`config.toml: ${isFile(paths.config) ? 'yes' : 'no'} profiles_table=${mainConfig.profileTable ? 'yes' : 'no'} legacy_profile=${mainConfig.legacyProfile ? 'yes' : 'no'} auto_review=${mainConfig.autoReview ? 'yes' : 'no'} old_evolink_provider=${mainConfig.evolinkEnvKey ? 'yes' : 'no'}`);
+  report.summary.push(`vscode: ${vscodeMode ? `yes provider=${main.provider || '-'} base=${main.table?.base_url || '-'} key=${mainKey ? maskKey(mainKey) : '-'} model=${main.model || '-'} web_search=${main.webSearch || '-'} reviewer=${main.reviewer || '-'}` : 'no'}`);
 
   ui.step(3, 4, L('连接与 Key', 'Connection and key'));
-  if (key && prof.base_url && isEvolinkUrl(prof.base_url)) {
-    const base = normalizeBaseUrl(prof.base_url).url;
+  if (key && keyBase && isEvolinkUrl(keyBase)) {
+    const base = normalizeBaseUrl(keyBase).url;
     const check = await checkKey(base, key);
     if (check.ok) {
       const gpt = codexModelIds(check.ids);
       ui.ok(L(`Key 有效 · 可用模型 ${check.count} 个，其中 GPT ${gpt.length} 个（${check.ms} ms）`, `Key valid · ${check.count} models, ${gpt.length} GPT (${check.ms} ms)`));
       if (!gpt.length) problem(L('这把 Key 没有开通 GPT 模型，Codex 用不了', 'This key has no GPT models, so Codex cannot use it'));
       printBalance(check.balance);
-      if (prof.model && gpt.length && !gpt.includes(prof.model)) problem(L(`model = ${prof.model}：这把 Key 在 Codex 里用不了`, `model = ${prof.model} is not available for this key in Codex`));
+      if (keyModel && gpt.length && !gpt.includes(keyModel)) problem(L(`model = ${keyModel}：这把 Key 在 Codex 里用不了`, `model = ${keyModel} is not available for this key in Codex`));
       report.summary.push(`api: models=${check.count} gpt=${gpt.length} balance=${check.balance?.user ?? '-'} key_quota=${check.balance?.unlimited ? 'unlimited' : check.balance?.token ?? '-'}`);
-      if (opts.test && prof.model) {
-        const t = await testResponses(base, key, prof.model);
-        if (t.ok) ui.ok(L(`测试请求通过：${prof.model}（${t.ms} ms）`, `Test request passed: ${prof.model} (${t.ms} ms)`));
+      if (opts.test && keyModel) {
+        const t = await testResponses(base, key, keyModel);
+        if (t.ok) ui.ok(L(`测试请求通过：${keyModel}（${t.ms} ms）`, `Test request passed: ${keyModel} (${t.ms} ms)`));
         else for (const l of failureLines(t.failure, base)) problem(l);
-        report.summary.push(`test: ${t.ok ? `ok ${prof.model}` : `fail ${t.failure.kind} ${t.failure.status || ''}`}`);
+        report.summary.push(`test: ${t.ok ? `ok ${keyModel}` : `fail ${t.failure.kind} ${t.failure.status || ''}`}`);
       }
     } else {
       for (const l of failureLines(check.failure, base)) problem(l);
@@ -2450,14 +3110,23 @@ async function cmdDoctorCodex(opts) {
   ui.step(4, 4, L('其他', 'Other'));
   if (process.env.CODEX_HOME) ui.info(`CODEX_HOME = ${process.env.CODEX_HOME}`);
   const chatgpt = isFile(path.join(paths.home, 'auth.json'));
-  if (chatgpt) ui.info(L(`这台电脑的 Codex 也登录了账号：直接运行 codex 用它，带 -p ${CODEX_PROFILE} 才走 EvoLink`, `Codex is also signed in here: plain codex uses that sign-in, -p ${CODEX_PROFILE} uses EvoLink`));
+  if (vscodeMode) {
+    if (chatgpt) ui.info(L('这台电脑的 Codex 也登录了 ChatGPT：config.toml 现在用 EvoLink，登录信息保留但不使用', 'Codex is also signed in to ChatGPT here: config.toml now uses EvoLink, so the sign-in is kept but unused'));
+    else ui.ok(L('启动：在 VS Code 里打开 Codex 面板，或直接运行 codex', 'Start: open the Codex panel in VS Code, or run codex'));
+  } else if (chatgpt) ui.info(L(`这台电脑的 Codex 也登录了账号：直接运行 codex 用它，带 -p ${CODEX_PROFILE} 才走 EvoLink`, `Codex is also signed in here: plain codex uses that sign-in, -p ${CODEX_PROFILE} uses EvoLink`));
   else ui.ok(L(`启动命令：codex -p ${CODEX_PROFILE}`, `Start with: codex -p ${CODEX_PROFILE}`));
+  const ext = editorsWithExtension(CODEX_EXTENSION);
+  if (vscodeMode) {
+    if (ext.length) ui.ok(L(`Codex 扩展：${ext.join('、')}`, `Codex extension: ${ext.join(', ')}`));
+    else ui.info(L(`还没装 Codex 扩展：在 VS Code 里打开 ${extensionLink('VS Code', CODEX_EXTENSION)} 安装`, `The Codex extension is not installed: open ${extensionLink('VS Code', CODEX_EXTENSION)} in VS Code`));
+  } else if (ext.length) ui.info(L(`编辑器里装了 Codex 扩展：它不认配置档；想让它也走 EvoLink，运行 ${cmd} setup codex --vscode`, `The Codex extension is installed; it ignores profiles. To route it through EvoLink too: ${cmd} setup codex --vscode`));
+  report.summary.push(`extension: ${ext.length ? ext.join(',') : 'none'}`);
   report.summary.push(`codex_home: ${process.env.CODEX_HOME ? 'custom' : 'default'} signed_in: ${chatgpt ? 'yes' : 'no'}`);
 
   ui.print('');
   if (report.problems.length) ui.title(`${ui.mark('err')} ${L(`发现 ${report.problems.length} 个问题（见上方 ✗）`, `${report.problems.length} problem(s) found (marked above)`)}`);
   else ui.title(`${ui.mark('ok')} ${L('没有发现问题', 'No problems found')}`);
-  if (report.problems.length) ui.print(`  ${L('多数问题重新运行一次 setup 就能修好：', 'Most problems are fixed by running setup again: ')}${cmd} setup codex`);
+  if (report.problems.length) ui.print(`  ${L('多数问题重新运行一次 setup 就能修好：', 'Most problems are fixed by running setup again: ')}${cmd} setup codex${vscodeOnly ? ' --vscode' : ''}`);
   ui.print('');
   ui.print(ui.dim(L('—— 以下内容可以直接发给客服（Key 已隐去）——', '--- Send the lines below to support (key hidden) ---')));
   for (const line of report.summary) ui.print(line);
@@ -2471,13 +3140,13 @@ async function resetCodex(opts) {
   const state = loadState();
   const cx = state.codex;
   ui.title(L(`EvoLink 撤销配置 · Codex v${VERSION}`, `EvoLink reset · Codex v${VERSION}`));
-  if (!cx || !Object.keys(cx.files || {}).length) {
+  if (!cx || (!Object.keys(cx.files || {}).length && !cx.config)) {
     ui.info(L('没有找到 evolink setup codex 的改动记录，无需撤销。', 'No changes recorded by evolink setup codex; nothing to undo.'));
     return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   const actions = [];
   const skipped = [];
-  for (const [file, rec] of Object.entries(cx.files)) {
+  for (const [file, rec] of Object.entries(cx.files || {})) {
     if (!isFile(file)) continue;
     // Still ours while setup's provider table is there, even with the settings Codex adds by itself (trusted folders,
     // [tui] …) or a different model; the file is backed up before it goes.
@@ -2488,19 +3157,35 @@ async function resetCodex(opts) {
     }
     actions.push({ file, restore: !!(rec.existed && rec.original && isFile(rec.original)), original: rec.original, extra: !!(parts.top || parts.tables) });
   }
+  // config.toml (VS Code mode): key by key.
+  const mainRec = cx.config;
+  let main = null;
+  if (mainRec && isFile(mainRec.file)) {
+    try {
+      main = { ...planCodexMainRestore(fs.readFileSync(mainRec.file, 'utf8'), mainRec), file: mainRec.file };
+    } catch (e) {
+      ui.warn(L(`${tildify(mainRec.file)} 现在不是有效的 TOML（${e.message}），没法自动还原；setup 改之前的副本在 ~/.evolink/backups/ 里。`, `${tildify(mainRec.file)} is not valid TOML now (${e.message}), so it cannot be undone automatically; the copy from before setup is in ~/.evolink/backups/.`));
+    }
+  }
+  const mainSkipped = main?.skipped || [];
   ui.print('');
   for (const a of actions) {
     ui.print(`  ${tildify(a.file)}  ${a.restore ? L('还原为 setup 之前的内容', 'restored to what it was before setup') : L('删除（由 setup 新建）', 'deleted (created by setup)')}`);
     if (a.extra) ui.print(ui.dim(`    ${L('里面后来加上的设置（例如信任过的文件夹）也会一起去掉，可以从备份找回', 'settings added to it later (such as trusted folders) go too; they stay in the backup')}`));
   }
+  if (main?.changed) {
+    ui.print(`  ${tildify(main.file)}  ${main.remove ? L('删除（由 setup 新建）', 'deleted (created by setup)') : L('改回 setup 之前的设置', 'put back as it was before setup')}`);
+    if (!main.remove) ui.print(ui.dim(`    ${main.restored.join(', ')}${L('；其他内容不动', '; nothing else changes')}`));
+  }
+  if (mainSkipped.length) ui.warn(L(`config.toml 里这些项在 setup 之后被改过，保持不动：${mainSkipped.join(', ')}`, `Changed in config.toml since setup, left as is: ${mainSkipped.join(', ')}`));
   if (skipped.length) ui.warn(L(`这些文件已经不是 setup 写的内容，保持不动：${skipped.map(tildify).join(', ')}`, `No longer the file setup wrote, left as is: ${skipped.map(tildify).join(', ')}`));
-  if (!actions.length) {
+  if (!actions.length && !main?.changed) {
     ui.ok(L('没有需要撤销的内容。', 'Nothing to undo.'));
     if (!opts.dryRun) {
       delete state.codex;
       saveState(state);
     }
-    return { result: { ok: true, changes: [], skipped }, code: EXIT.OK };
+    return { result: { ok: true, changes: [], skipped: [...skipped, ...mainSkipped] }, code: EXIT.OK };
   }
   if (opts.dryRun) {
     ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
@@ -2518,10 +3203,16 @@ async function resetCodex(opts) {
       } catch {}
     }
   }
+  if (main?.changed) {
+    backupFile(backup, main.file, 'codex-config.toml');
+    if (main.remove) fs.unlinkSync(main.file);
+    // With the key gone, the file gets its old permissions back.
+    else writeAtomic(main.file, main.text, { mode: main.keyRemoved && mainRec.existed && mainRec.mode !== null ? mainRec.mode : 0o600 });
+  }
   delete state.codex;
   saveState(state);
   ui.ok(L(`已撤销。改动前的文件备份在 ${tildify(backup.dir)}`, `Undone. Backups are in ${tildify(backup.dir)}`));
-  return { result: { ok: true, backupDir: backup.dir, restored: actions.length, skipped }, code: EXIT.OK };
+  return { result: { ok: true, backupDir: backup.dir, restored: actions.length + (main?.changed ? 1 : 0), skipped: [...skipped, ...mainSkipped] }, code: EXIT.OK };
 }
 
 // ---------------------------------------------------------------------------
@@ -2849,6 +3540,7 @@ function helpText() {
 用法：
   evolink [setup]      配置 Claude Code（默认命令）
   evolink setup codex  配置 Codex 命令行：新建独立配置档，用 codex -p evolink 启动，不动你原来的 config.toml
+  evolink setup codex --vscode  配置 VS Code 等编辑器里的 Codex 扩展：修改 config.toml（终端里直接运行 codex 也会走 EvoLink），默认顺便装上扩展
   evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex 用 evolink doctor codex
   evolink reset        撤销 setup 做的改动（只撤销 Codex：evolink reset codex）
 
@@ -2864,6 +3556,7 @@ function helpText() {
   --no-pin-sonnet      不把 /model 里的 Sonnet 钉到这把 Key 能用的最新 Sonnet（默认钉住：Claude Code 换默认 Sonnet 时，EvoLink 可能晚一两天才有）
   --no-install         没装 Claude Code（或 Codex）时不自动安装
   --install-extension  顺便给 VS Code / Cursor 等编辑器装上 Claude Code 扩展（默认不装：终端里的 claude 用不到它）
+  --no-install-extension  setup codex --vscode 时不装 Codex 扩展（默认会装：没有扩展这个模式用不了）
   --no-onboarding      不修改 ~/.claude.json
   --no-vscode          不修改编辑器里 Claude Code 扩展的设置
   --no-test            不发测试请求
@@ -2881,6 +3574,7 @@ function helpText() {
 Usage:
   evolink [setup]      configure Claude Code (default)
   evolink setup codex  configure the Codex CLI: a separate profile, started with codex -p evolink; your config.toml is left alone
+  evolink setup codex --vscode  configure the Codex extension in VS Code and similar editors: changes config.toml (a plain codex then uses EvoLink too) and installs the extension
   evolink doctor       diagnose the setup; output is safe to send to support (Codex: evolink doctor codex)
   evolink reset        undo what setup changed (Codex only: evolink reset codex)
 
@@ -2896,6 +3590,7 @@ Options:
   --no-pin-sonnet      do not pin the Sonnet alias to the newest Sonnet this key can use (pinned by default: when Claude Code moves the alias, EvoLink may lag a day or two)
   --no-install         do not install Claude Code (or Codex) when missing
   --install-extension  also install the Claude Code extension into VS Code, Cursor and similar editors (off by default: the terminal claude does not need it)
+  --no-install-extension  with setup codex --vscode, do not install the Codex extension (installed by default: the mode needs it)
   --no-onboarding      do not touch ~/.claude.json
   --no-vscode          do not touch editor settings for the Claude Code extension
   --no-test            skip the test request

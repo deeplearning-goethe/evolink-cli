@@ -4,9 +4,10 @@
 Checks what the node:test suite cannot: hidden key input in raw mode, the numbered
 model picker, yes/no prompts and the trust question, all in a throwaway HOME.
 
-    python3 test/interactive_pty.py [--via-bootstrap] [--codex]
+    python3 test/interactive_pty.py [--via-bootstrap] [--codex [--vscode]]
 
---codex drives `evolink setup codex` instead (key, GPT model picker, the evolink profile).
+--codex drives `evolink setup codex` instead (key, GPT model picker, the evolink profile);
+with --vscode, `setup codex --vscode` (config.toml, whose confirmation defaults to No).
 """
 import json
 import os
@@ -67,7 +68,13 @@ def main():
         "EVOLINK_BASE_URL": f"http://127.0.0.1:{PORT}",
     }
     codex = "--codex" in sys.argv
-    target = ["codex"] if codex else []
+    vscode = codex and "--vscode" in sys.argv
+    target = ["codex", "--vscode", "--no-install-extension"] if vscode else ["codex"] if codex else []
+    mine = '# my Codex settings\n[projects."/work/app"]\ntrust_level = "trusted"\n'
+    if vscode:
+        os.makedirs(os.path.join(home, ".codex"))
+        with open(os.path.join(home, ".codex", "config.toml"), "w") as f:
+            f.write(mine)
     pid, fd = pty.fork()
     if pid == 0:
         os.chdir(project)
@@ -91,8 +98,13 @@ def main():
             os.write(fd, b"2\r")  # claude-sonnet-5
             read_until(fd, r"已信任", buf)
             os.write(fd, b"y\r")
-        read_until(fd, r"确认写入", buf)
-        os.write(fd, b"\r")
+        if vscode:
+            # The default is No here: an explicit y is needed.
+            read_until(fd, r"确认修改 config\.toml？ \[y/N\]", buf)
+            os.write(fd, b"y\r")
+        else:
+            read_until(fd, r"确认写入", buf)
+            os.write(fd, b"\r")
         read_until(fd, r"发一条测试消息", buf)
         os.write(fd, b"\r")
         read_until(fd, r"撤销本次配置", buf, timeout=30)
@@ -110,6 +122,28 @@ def main():
     _, status = os.waitpid(pid, 0)
     mock.terminate()
     out = buf[0]
+    if vscode:
+        cfg = open(os.path.join(home, ".codex", "config.toml")).read()
+        checks = {
+            "exit code 0": os.waitstatus_to_exitcode(status) == 0,
+            "key hidden in terminal": KEY[3:] not in out,
+            "heads-up shown before the No-default question": "都改走 EvoLink" in out,
+            "model chosen from picker": 'model = "gpt-6-luna"' in cfg,
+            "EvoLink is the provider in config.toml": 'model_provider = "evolink-cli"' in cfg and f'experimental_bearer_token = "{KEY}"' in cfg,
+            # The comment sits right on the [projects] header, so it belongs to that table: new keys go above both.
+            "the user's own settings kept": mine in cfg and cfg.index("model_provider") < cfg.index(mine),
+            "config.toml is owner-only": os.stat(os.path.join(home, ".codex", "config.toml")).st_mode & 0o777 == 0o600,
+            "no profile in this mode": not os.path.exists(os.path.join(home, ".codex", "evolink.config.toml")),
+            "Claude Code settings untouched": not os.path.exists(os.path.join(home, ".claude")),
+            "test request passed": "测试通过" in out,
+            "reload hint shown": "Developer: Reload Window" in out,
+        }
+        print(out)
+        print("-" * 60)
+        for name, ok in checks.items():
+            print(("PASS " if ok else "FAIL ") + name)
+        shutil.rmtree(home, ignore_errors=True)
+        sys.exit(0 if all(checks.values()) else 1)
     if codex:
         profile = open(os.path.join(home, ".codex", "evolink.config.toml")).read()
         checks = {

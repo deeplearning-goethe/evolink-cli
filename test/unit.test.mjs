@@ -34,6 +34,16 @@ import {
   codexProfileCore,
   scanCodexConfig,
   extensionLink,
+  parseTomlStatements,
+  TomlSyntaxError,
+  tomlDecodeString,
+  tomlTopValue,
+  setTomlTop,
+  deleteTomlTop,
+  readTomlTable,
+  upsertTomlTable,
+  replaceTomlTable,
+  tomlTableConflicts,
 } from '../bin/evolink.mjs';
 
 const KEY = `sk-${'A1b2C3d4'.repeat(6)}`;
@@ -345,4 +355,134 @@ test('extension install links', () => {
   assert.equal(extensionLink('VS Code', 'anthropic.claude-code'), 'vscode:extension/anthropic.claude-code');
   assert.equal(extensionLink('Cursor', 'anthropic.claude-code'), 'cursor:extension/anthropic.claude-code');
   assert.equal(extensionLink('Windsurf', 'openai.chatgpt'), 'vscode:extension/openai.chatgpt');
+});
+
+// ---------------------------------------------------------------------------
+// config.toml editing
+
+const PROV = ['model_providers', 'evolink-cli'];
+const MARK = '# added by a test';
+
+test('TOML statements: multi-line arrays, strings and inline tables are single statements', () => {
+  const text = [
+    '# top comment',
+    'notify = [',
+    '  "a", # not a header:',
+    '  [1, 2],',
+    ']',
+    'prompt = """',
+    '[not.a.table]',
+    'model = "inside a string"',
+    '"""',
+    "path = 'C:\\dir'",
+    'when = 1979-05-27 07:32:00Z',
+    'inline = { a = 1, b = "x" }',
+    '"quoted key" = true',
+    '',
+    '[tui]',
+    'x = 1 # trailing',
+    '[[mcp]]',
+    'name = "m"',
+  ].join('\n');
+  const sts = parseTomlStatements(text);
+  const kinds = sts.map((s) => `${s.kind}:${s.start}-${s.end}`);
+  assert.deepEqual(kinds, ['comment:0-0', 'kv:1-4', 'kv:5-8', 'kv:9-9', 'kv:10-10', 'kv:11-11', 'kv:12-12', 'blank:13-13', 'table:14-14', 'kv:15-15', 'array:16-16', 'kv:17-17']);
+  assert.deepEqual(sts.find((s) => s.start === 12).key, ['quoted key']);
+  assert.deepEqual(sts.find((s) => s.start === 15).table, ['tui']);
+  assert.equal(tomlTopValue(text, 'model'), undefined, 'a key inside a string is not a key');
+  assert.equal(tomlTopValue(text, 'path').value, 'C:\\dir', 'literal strings keep backslashes');
+  assert.equal(tomlDecodeString('"a\\tb\\u00e9\\"q\\""'), 'a\tb\u00e9"q"');
+  assert.equal(tomlDecodeString('"""\nline1\\\n   line2"""'), 'line1line2');
+  assert.throws(() => parseTomlStatements('a = 1\nb = "open\n'), (e) => e instanceof TomlSyntaxError && e.line === 2);
+  assert.throws(() => parseTomlStatements('x = [1, 2\n'), TomlSyntaxError);
+  assert.throws(() => parseTomlStatements('a = 1 b\n'), /unexpected text/);
+});
+
+test('TOML top-level keys: replace in place (comment kept), insert before the first table, delete', () => {
+  const text = '# my config\n\nmodel = "gpt-5.5" # mine\n  approvals_reviewer = "auto_review"\n\n[tui]\nmodel = "not top level"\n';
+  assert.equal(tomlTopValue(text, 'model').value, 'gpt-5.5');
+  assert.deepEqual(tomlTopValue(text, 'model').lines, ['model = "gpt-5.5" # mine']);
+  let t = setTomlTop(text, 'model', '"gpt-6.1-sol"');
+  assert.match(t, /^model = "gpt-6\.1-sol" # mine$/m);
+  t = setTomlTop(t, 'approvals_reviewer', '"user"');
+  assert.match(t, /^ {2}approvals_reviewer = "user"$/m, 'indentation kept');
+  t = setTomlTop(t, 'model_provider', '"evolink-cli"');
+  assert.equal(t, '# my config\n\nmodel = "gpt-6.1-sol" # mine\n  approvals_reviewer = "user"\nmodel_provider = "evolink-cli"\n\n[tui]\nmodel = "not top level"\n');
+  assert.equal(deleteTomlTop(t, 'model_provider'), '# my config\n\nmodel = "gpt-6.1-sol" # mine\n  approvals_reviewer = "user"\n\n[tui]\nmodel = "not top level"\n');
+  // Only tables: the new key goes to the very top; a leading comment block with a blank line stays first.
+  assert.equal(setTomlTop('[tui]\nx = 1\n', 'model', '"m"'), 'model = "m"\n[tui]\nx = 1\n');
+  assert.equal(setTomlTop('# header\n\n[tui]\n', 'model', '"m"'), '# header\n\nmodel = "m"\n[tui]\n');
+  assert.equal(setTomlTop('', 'model', '"m"'), 'model = "m"\n');
+  assert.equal(setTomlTop('a = 1', 'model', '"m"'), 'a = 1\nmodel = "m"\n', 'a file without a final line break');
+  // Exact lines back (what reset does).
+  assert.equal(setTomlTop(t, 'model', { lines: ['model = "gpt-5.5" # mine'] }).split('\n')[2], 'model = "gpt-5.5" # mine');
+});
+
+test('TOML edits keep CRLF, BOM and lines they do not touch', () => {
+  const crlf = '\uFEFFmodel = "a"\r\n\r\n[tui]\r\nx = 1\r\n';
+  const t = setTomlTop(setTomlTop(crlf, 'model', '"b"'), 'web_search', '"disabled"');
+  assert.equal(t, '\uFEFFmodel = "b"\r\nweb_search = "disabled"\r\n\r\n[tui]\r\nx = 1\r\n');
+  const withTable = upsertTomlTable(t, PROV, [['name', '"EvoLink"']], MARK);
+  assert.equal(withTable, `${t}\r\n${MARK}\r\n[model_providers.evolink-cli]\r\nname = "EvoLink"\r\n`);
+  // Mixed line endings (Codex appends LF lines to a CRLF file on Windows): untouched lines keep theirs.
+  const mixed = 'model = "a"\r\n[tui]\r\nx = 1\n[projects."C:\\\\w"]\ntrust_level = "trusted"\n';
+  const m2 = setTomlTop(mixed, 'model', '"b"');
+  assert.equal(m2, mixed.replace('model = "a"', 'model = "b"'));
+});
+
+test('TOML tables: create, update in place, read back, remove without eating neighbours', () => {
+  const text = 'model = "x"\n\n[model_providers.evolink]\nname = "old" # docs\n\n# about tui\n[tui]\nx = 1\n';
+  let t = upsertTomlTable(text, PROV, [['name', '"EvoLink"'], ['base_url', '"https://direct.evolink.ai/v1"']], MARK);
+  assert.equal(t, `${text}\n${MARK}\n[model_providers.evolink-cli]\nname = "EvoLink"\nbase_url = "https://direct.evolink.ai/v1"\n`);
+  assert.deepEqual(readTomlTable(t, PROV).pairs, { name: 'EvoLink', base_url: 'https://direct.evolink.ai/v1' });
+  // Update: existing keys in place, missing ones after the last key, other keys and comments kept.
+  const grown = t.replace('base_url = "https://direct.evolink.ai/v1"\n', 'base_url = "https://direct.evolink.ai/v1" # keep me\nrequest_max_retries = 8\n');
+  const t2 = upsertTomlTable(grown, PROV, [['base_url', '"https://api.evolink.ai/v1"'], ['wire_api', '"responses"']], MARK);
+  assert.match(t2, /\[model_providers\.evolink-cli\]\nname = "EvoLink"\nbase_url = "https:\/\/api\.evolink\.ai\/v1" # keep me\nrequest_max_retries = 8\nwire_api = "responses"\n$/);
+  // Removing our table leaves the file exactly as it was.
+  assert.equal(replaceTomlTable(t, PROV, null, MARK), text);
+  // A table in the middle: the comment that introduces the next table stays.
+  const mid = upsertTomlTable('[a]\nx = 1\n', PROV, [['name', '"E"']], MARK) + '\n# about b\n[b]\ny = 2\n';
+  assert.equal(replaceTomlTable(mid, PROV, null, MARK), '[a]\nx = 1\n\n# about b\n[b]\ny = 2\n');
+  // Restoring a table someone had before: its exact lines.
+  const had = '[model_providers.evolink-cli]\nname = "Mine"\nbase_url = "https://example.com/v1"\n';
+  const replaced = upsertTomlTable(had, PROV, [['name', '"EvoLink"']], MARK);
+  assert.equal(replaceTomlTable(replaced, PROV, readTomlTable(had, PROV).lines, MARK), had);
+  assert.equal(replaceTomlTable('a = 1\n', PROV, null, MARK), 'a = 1\n', 'no table: unchanged');
+});
+
+test('TOML edits undo exactly (the fallback reset path)', () => {
+  const originals = [
+    '',
+    'a = 1',
+    'a = 1\n',
+    'a = 1\n\n',
+    '# header\n\n[tui]\nx = 1\n',
+    'model = "gpt-5.5"\nweb_search = "live"\n[profiles.w]\nmodel = "o3"\n',
+    'model_provider = "evolink"\n\n[model_providers.evolink]\nname = "EvoLink"\nenv_key = "OPENAI_API_KEY"\n',
+    '\uFEFFapprovals_reviewer = "auto_review"\r\n[tui]\r\nx = 1\r\n',
+  ];
+  for (const original of originals) {
+    let t = original;
+    const undo = [];
+    for (const [k, v] of [['model_provider', '"evolink-cli"'], ['model', '"gpt-6.1-sol"'], ['web_search', '"disabled"'], ['approvals_reviewer', '"user"']]) {
+      const before = tomlTopValue(t, k);
+      t = setTomlTop(t, k, v);
+      undo.unshift((x) => (before ? setTomlTop(x, k, { lines: before.lines }) : deleteTomlTop(x, k)));
+    }
+    t = upsertTomlTable(t, PROV, [['name', '"EvoLink"'], ['experimental_bearer_token', '"sk-x"']], MARK);
+    assert.doesNotThrow(() => parseTomlStatements(t), `edited file still parses: ${JSON.stringify(original)}`);
+    assert.equal(tomlTopValue(t, 'model_provider').value, 'evolink-cli');
+    let back = replaceTomlTable(t, PROV, null, MARK);
+    for (const u of undo) back = u(back);
+    assert.equal(back, original.endsWith('\n') || original === '' ? original : `${original}\n`, `round trip of ${JSON.stringify(original)}`);
+  }
+});
+
+test('TOML conflicts: other ways of defining the provider table are found', () => {
+  assert.deepEqual(tomlTableConflicts('model_providers.evolink-cli.base_url = "x"\n', PROV), [1]);
+  assert.deepEqual(tomlTableConflicts('[model_providers]\nevolink-cli = { name = "x" }\n', PROV), [2]);
+  assert.deepEqual(tomlTableConflicts('[[model_providers.evolink-cli]]\nname = "x"\n', PROV), [1]);
+  assert.deepEqual(tomlTableConflicts('[model_providers.evolink-cli]\na = 1\n[model_providers.evolink-cli]\nb = 2\n', PROV), ['duplicate']);
+  assert.deepEqual(tomlTableConflicts('[model_providers.evolink-cli]\na = 1\n[model_providers.evolink-cli.http_headers]\nX = "y"\n[model_providers.other]\nname = "o"\n', PROV), []);
 });

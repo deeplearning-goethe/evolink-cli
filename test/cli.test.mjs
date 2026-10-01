@@ -785,3 +785,194 @@ test('trust entries Codex writes into the profile survive a re-run and do not bl
   assert.ok(!fs.existsSync(codexProfile(home)));
 });
 
+
+// Codex in VS Code (setup codex --vscode): config.toml itself
+
+const codexConfig = (home) => path.join(codexDir(home), 'config.toml');
+// A fake editor CLI on PATH that records its calls and "installs" into ~/.vscode/extensions.
+function fakeEditorCli(home) {
+  const bin = path.join(home, 'fakebin');
+  const calls = path.join(home, 'code-calls');
+  fs.mkdirSync(bin, { recursive: true });
+  fs.writeFileSync(
+    path.join(bin, 'code'),
+    `#!/bin/sh
+echo "$@" >> "${calls}"
+if [ "$1" = "--list-extensions" ]; then ls "$HOME/.vscode/extensions" 2>/dev/null | sed 's/-[0-9.]*$//'; exit 0; fi
+if [ "$1" = "--install-extension" ]; then mkdir -p "$HOME/.vscode/extensions/$2-9.9.9"; echo "Extension '$2' v9.9.9 was successfully installed."; exit 0; fi
+exit 1
+`,
+    { mode: 0o755 },
+  );
+  return { PATH: `${bin}:${path.dirname(process.execPath)}:/usr/bin:/bin`, calls };
+}
+
+const USER_CODEX_CONFIG = `# my Codex settings
+model = "gpt-5.5-codex"   # an OpenAI model this key does not have
+approvals_reviewer = "auto_review"
+
+[mcp_servers.docs]
+command = "npx"
+args = [
+  "-y", "docs-mcp", # [not a table]
+]
+
+[projects."/work/app"]
+trust_level = "trusted"
+`;
+
+test('setup codex --vscode: EvoLink goes into config.toml, the rest stays, the extension is installed, and reset puts it all back', { skip: WIN }, async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  fs.writeFileSync(codexConfig(home), USER_CODEX_CONFIG, { mode: 0o644 });
+  const editor = fakeEditorCli(home);
+  const before = gw.requests.length;
+  const r = await runCli(['setup', 'codex', '--vscode', '--yes'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH } });
+  assert.equal(r.code, 0, r.all);
+  noFullKey(r, CODEX_KEY);
+  assert.match(r.stdout, /The Codex CLI is not installed; the VS Code extension brings its own Codex/);
+  assert.match(r.stdout, /The configured model gpt-5\.5-codex is not available for this key; switching to gpt-6\.1-sol/);
+  assert.match(r.stdout, /model_provider\s+evolink-cli/);
+  assert.match(r.stdout, /approvals_reviewer\s+auto_review → user/);
+  const cfg = fs.readFileSync(codexConfig(home), 'utf8');
+  assert.match(cfg, /^model = "gpt-6\.1-sol" {3}# an OpenAI model this key does not have$/m, 'replaced in place, comment kept');
+  assert.match(cfg, /^approvals_reviewer = "user"$/m);
+  assert.match(cfg, /^model_provider = "evolink-cli"$/m);
+  assert.match(cfg, /^web_search = "disabled"$/m);
+  assert.ok(cfg.indexOf('model_provider = ') < cfg.indexOf('[mcp_servers.docs]'), 'top-level keys stay above the first table');
+  assert.match(cfg, /\n\n# EvoLink, added by `evolink setup codex --vscode` \(undo: evolink reset codex\)\n\[model_providers\.evolink-cli\]\nname = "EvoLink"\nbase_url = "http:\/\/127\.0\.0\.1:\d+\/v1"\nwire_api = "responses"\n/);
+  assert.ok(cfg.includes(`experimental_bearer_token = "${CODEX_KEY}"`));
+  assert.ok(cfg.includes('args = [\n  "-y", "docs-mcp", # [not a table]\n]\n'), 'the multi-line array is untouched');
+  assert.ok(cfg.includes('[projects."/work/app"]\ntrust_level = "trusted"\n'));
+  assert.equal(fs.statSync(codexConfig(home)).mode & 0o777, 0o600, 'config.toml now holds the key: owner-only');
+  assert.ok(!fs.existsSync(codexProfile(home)), 'no profile in this mode');
+  assert.match(fs.readFileSync(editor.calls, 'utf8'), /--install-extension openai\.chatgpt/);
+  assert.match(r.stdout, /VS Code: openai\.chatgpt installed/);
+  assert.match(r.stdout, /Developer: Reload Window/);
+  assert.match(r.stdout, /no ChatGPT sign-in is needed/);
+  const resp = gw.requests.slice(before).filter((q) => q.path === '/v1/responses');
+  assert.equal(resp.length, 1);
+  assert.equal(resp[0].body.model, 'gpt-6.1-sol');
+
+  const again = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test'], { home, env: { PATH: editor.PATH } });
+  assert.equal(again.code, 0, again.all);
+  assert.match(again.stdout, /Codex extension: VS Code/);
+  assert.match(again.stdout, /Keeping model: gpt-6\.1-sol/);
+  assert.match(again.stdout, /Already up to date/);
+  assert.match(again.stdout, /VS Code already has openai\.chatgpt/);
+
+  // The extension trusts another folder after setup (Codex appends to config.toml): reset keeps that.
+  fs.appendFileSync(codexConfig(home), '\n[projects."/work/other"]\ntrust_level = "trusted"\n');
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /put back as it was before setup/);
+  assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), `${USER_CODEX_CONFIG}\n[projects."/work/other"]\ntrust_level = "trusted"\n`);
+  assert.equal(fs.statSync(codexConfig(home)).mode & 0o777, 0o644, 'the old permissions come back with the key gone');
+  const rr2 = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.match(rr2.stdout, /No changes recorded by evolink setup codex/);
+});
+
+test('setup codex --vscode: dry run and --no-install-extension; a broken or conflicting config.toml stops before writing; Enter means No', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const editor = fakeEditorCli(home);
+  const dry = await runCli(['setup', 'codex', '--vscode', '--yes', '--dry-run'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH } });
+  assert.equal(dry.code, 0, dry.all);
+  assert.match(dry.stdout, /\.codex\/config\.toml {2}\(new file\)/);
+  assert.match(dry.stdout, /would run .*code --install-extension openai\.chatgpt/);
+  assert.match(dry.stdout, /Preview only/);
+  assert.ok(!fs.existsSync(codexDir(home)));
+  assert.ok(!fs.existsSync(path.join(home, '.evolink')));
+  assert.doesNotMatch(fs.readFileSync(editor.calls, 'utf8'), /--install-extension/);
+
+  const noExt = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test', '--no-install-extension'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH } });
+  assert.equal(noExt.code, 0, noExt.all);
+  assert.doesNotMatch(fs.readFileSync(editor.calls, 'utf8'), /--install-extension/);
+  assert.match(noExt.stdout, /Install the Codex extension: open vscode:extension\/openai\.chatgpt/);
+  assert.equal(readJson(path.join(home, '.evolink', 'state.json')).codex.config.existed, false);
+  // Only the extension is set up and there is no Codex CLI: that is fine, the extension brings its own.
+  const doc = await runCli(['doctor', 'codex', '--test'], { home, env: { PATH: editor.PATH } });
+  assert.equal(doc.code, 0, doc.all);
+  assert.match(doc.stdout, /The Codex CLI is not installed; the VS Code extension brings its own Codex/);
+  assert.match(doc.stdout, /\| codex missing$/m);
+  assert.match(doc.stdout, /Test request passed: gpt-6\.1-sol/);
+  // Created by setup: reset deletes the file again.
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /deleted \(created by setup\)/);
+  assert.ok(!fs.existsSync(codexConfig(home)));
+
+  for (const [bad, why] of [
+    ['model_providers.evolink-cli.base_url = "https://example.com/v1"\n', /already defines model_providers\.evolink-cli another way \(line 1\)/],
+    ['[model_providers]\nevolink-cli = { name = "x" }\n', /another way \(line 2\)/],
+    ['model = "unterminated\n', /is not valid TOML, so it cannot be edited safely \(config\.toml line 1: unterminated string\)/],
+  ]) {
+    fs.writeFileSync(codexConfig(home), bad);
+    const r = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test', '--no-install-extension'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH } });
+    assert.equal(r.code, 4, r.all);
+    assert.match(r.all, why);
+    assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), bad, 'left untouched');
+  }
+
+  // Interactive: Enter at the model picker, then Enter at the confirmation, whose default is No.
+  fs.writeFileSync(codexConfig(home), USER_CODEX_CONFIG);
+  const ask = await runCli(['setup', 'codex', '--vscode', '--no-test', '--no-install-extension'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH }, input: '\n\n' });
+  assert.equal(ask.code, 130, ask.all);
+  assert.match(ask.stdout, /a plain `codex` in the terminal will all use EvoLink/);
+  assert.match(ask.stdout, /Change config\.toml\? \[y\/N\]/);
+  assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), USER_CODEX_CONFIG);
+});
+
+test('doctor codex in VS Code mode; reset undoes the profile and config.toml together and leaves later edits alone', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const PATHV = fakeCodex(home);
+  await runCli(['setup', 'codex', '--yes', '--no-test', '--registry', gw.url], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: PATHV } });
+  const s = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test', '--no-install-extension', '--registry', gw.url], { home, env: { PATH: PATHV } });
+  assert.equal(s.code, 0, s.all);
+  assert.ok(fs.readFileSync(codexConfig(home), 'utf8').includes(CODEX_KEY), 'the key came from the profile');
+  const d = await runCli(['doctor', 'codex', '--test', '--registry', gw.url], { home, env: { PATH: PATHV } });
+  assert.equal(d.code, 0, d.all);
+  noFullKey(d, CODEX_KEY);
+  assert.match(d.stdout, /config\.toml \(VS Code mode: the extension and a plain codex use it\)/);
+  assert.match(d.stdout, /^vscode: yes provider=evolink-cli base=http:\/\/127\.0\.0\.1:\d+\/v1 key=sk-Cx7G…p6Td model=gpt-6\.1-sol web_search=disabled reviewer=-$/m);
+  assert.match(d.stdout, /^extension: none$/m);
+  assert.match(d.stdout, /Test request passed: gpt-6\.1-sol/);
+
+  fs.chmodSync(codexConfig(home), 0o644);
+  const loose = await runCli(['doctor', 'codex'], { home, env: { PATH: PATHV } });
+  assert.match(loose.stdout, /holds the key but others can read it \(mode 644\)/);
+  fs.chmodSync(codexConfig(home), 0o600);
+
+  // Later edits: the model is switched by hand and the key in the table is replaced. Reset leaves both.
+  const edited = fs.readFileSync(codexConfig(home), 'utf8').replace('model = "gpt-6.1-sol"', 'model = "gpt-6-luna"').replace(CODEX_KEY, KEY);
+  fs.writeFileSync(codexConfig(home), edited);
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /Changed in config\.toml since setup, left as is: model, \[model_providers\.evolink-cli\]/);
+  assert.ok(!fs.existsSync(codexProfile(home)), 'the profile is undone too');
+  const left = fs.readFileSync(codexConfig(home), 'utf8');
+  assert.doesNotMatch(left, /^model_provider = /m);
+  assert.doesNotMatch(left, /^web_search = /m);
+  assert.match(left, /^model = "gpt-6-luna"$/m);
+  assert.match(left, /\[model_providers\.evolink-cli\]/);
+
+  // model_provider pointing elsewhere while our table is still there: doctor says the table is not in use.
+  const d2 = await runCli(['doctor', 'codex'], { home, env: { PATH: PATHV } });
+  assert.equal(d2.code, 1, d2.all);
+  assert.match(d2.stdout, /model_provider = \(unset\): \[model_providers\.evolink-cli\] is not in use/);
+});
+
+test('setup codex --vscode on a CRLF config.toml (as Notepad writes it): written in CRLF, undone byte for byte', async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  const crlf = '\uFEFF# edited in Notepad\r\nmodel = "gpt-5.5"\r\n\r\n[projects."C:\\\\work\\\\app"]\r\ntrust_level = "trusted"\r\n';
+  fs.writeFileSync(codexConfig(home), crlf);
+  const r = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test', '--no-install-extension'], { home, env: { EVOLINK_API_KEY: CODEX_KEY } });
+  assert.equal(r.code, 0, r.all);
+  const cfg = fs.readFileSync(codexConfig(home), 'utf8');
+  assert.ok(cfg.startsWith('\uFEFF# edited in Notepad\r\nmodel = "gpt-5.5"\r\nmodel_provider = "evolink-cli"\r\nweb_search = "disabled"\r\n'), JSON.stringify(cfg.slice(0, 120)));
+  assert.doesNotMatch(cfg.replace(/\r\n/g, ''), /\n/, 'every line ends in CRLF');
+  assert.match(cfg, /\[model_providers\.evolink-cli\]\r\n/);
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), crlf);
+});
