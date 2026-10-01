@@ -4,7 +4,7 @@
 
 一条命令把 Claude Code 或 Codex 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.3.0，支持 Claude Code、Codex 命令行，以及 VS Code 等编辑器里的 Codex 扩展。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
+> **测试阶段**：v0.4.0，支持 Claude Code、Codex 命令行、VS Code 等编辑器里的 Codex 扩展，以及 VS Code 内置的 Chat（Copilot 自定义端点）。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
 
 ## 用法
 
@@ -19,6 +19,8 @@
 | Codex（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex` |
 | VS Code 里的 Codex 扩展（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- codex --vscode` |
 | VS Code 里的 Codex 扩展（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex --vscode` |
+| VS Code 内置的 Chat（macOS / Linux，在装了 VS Code 的电脑上运行） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- copilot` |
+| VS Code 内置的 Chat（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) copilot` |
 | 顺便给 VS Code / Cursor 装上 Claude Code 扩展 | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --install-extension` |
 | 事后自检 / 撤销 | `~/.evolink/bin/evolink doctor`、`~/.evolink/bin/evolink reset`（Windows：`& "$env:USERPROFILE\.evolink\bin\evolink.cmd" doctor`）；Codex 加 `codex`：`evolink doctor codex`、`evolink reset codex`；不带 `codex` 的 `reset` 会把两边都撤销 |
 
@@ -87,6 +89,26 @@ Codex 扩展（`openai.chatgpt`）运行的是它自带的 `codex app-server`，
 - **写不了的情况**：`config.toml` 格式有误，或者已经用别的写法（点号键、内联表）定义了 `model_providers.evolink-cli`。这时 setup 会停下并指出行号，什么都不写。
 - **撤销**：`evolink reset codex` 逐项还原 setup 改过的设置，删掉 `[model_providers.evolink-cli]`，恢复原来的文件权限。setup 之后被你或 Codex 改过的项（例如换了模型）保持不动并列出来；Codex 后来写入的信任记录等也保留。如果文件是 setup 新建的，撤销后又没有别的内容，就删掉。
 - **和命令行配置档可以同时用**：`codex -p evolink` 用配置档，扩展和直接运行的 `codex` 用 `config.toml`；`reset codex` 两边一起撤销。
+
+## VS Code 内置的 Chat（`evolink setup copilot`）
+
+VS Code 自带的 Chat（Copilot Chat）支持"自定义端点"：在 VS Code 的 `chatLanguageModels.json` 里加一组模型就能用，**不需要登录 GitHub，也不需要 Copilot 订阅**（10-01 用 VS Code 1.140 实测）。
+
+| 文件 | 内容 | 为什么 |
+|---|---|---|
+| VS Code 用户目录下的 `chatLanguageModels.json`（macOS `~/Library/Application Support/Code/User/`，Linux `~/.config/Code/User/`，Windows `%APPDATA%\Code\User\`；装了 Insiders 也一起写） | 一组 `"name": "EvoLink"`、`"vendor": "customendpoint"` 的模型：Claude 走 Messages 接口（`/v1/messages`），GPT 走 Responses 接口（`/v1/responses`），其他走 Chat Completions（`/v1/chat/completions`）；上下文长度取自 EvoLink 的公开价格目录；单次输出上限 32K | 三种接口 10-01 都在真实 VS Code 里测通过（Claude Haiku 4.5、GPT-6 Luna、DeepSeek V4 Flash、GLM 5.3 Flash、Doubao Seed 2.0 Lite）。输出上限定在 32K，是因为 VS Code 每次请求都会带上它，EvoLink 按它预扣额度 |
+
+- **Key 要在 VS Code 里粘贴一次**：VS Code 只从自己的钥匙串读这组的 Key，文件里写明文 Key 会被忽略（读过源码，也实测过）。所以工具不写 Key，只在结尾告诉你：Chat 的模型列表 → "Manage Models..." → 右键 "EvoLink" → "Update API Key" → 粘贴。粘贴后 VS Code 在文件里写的是 `${input:chat.lm.secret.…}` 引用，Key 本身存进系统钥匙串。
+- **默认加推荐的十几个模型**（这把 Key 有的），`--all-models` 加入全部聊天模型。
+- **Gemini 暂时不加**：Chat 的 Agent 模式会在工具参数里带 `$comment` 字段，网关转给 Gemini 时没有去掉，Gemini 返回 400。等网关修复后再加。
+- **不用重启 VS Code**：VS Code 会监听这个文件，改完立刻生效。
+- **重跑 setup**：只更新 EvoLink 这一组的模型列表，已经粘贴过的 Key 引用和其他提供方都保留。
+- **测试请求**：每种接口各发一条十几个 token 的测试消息（Claude Haiku、GPT-6 Luna、DeepSeek V4 Flash 优先），只验证 EvoLink 这一侧；VS Code 那一侧要粘贴 Key 后在 Chat 里试。
+- **费用提醒**：Agent 模式每轮都带很长的系统提示和工具说明，一句简单的话约 2 万个输入 token；只聊天可以切到 Ask 模式。
+- **Remote-SSH**：Chat 的模型配置在你本机的 VS Code 里，要在本机运行这条命令（在远端运行会提示你）。
+- **只写默认 Profile**：用了别的 VS Code Profile 的话，要在那个 Profile 里另外添加。
+- **撤销**：`evolink reset copilot` 去掉 EvoLink 这一组（setup 之前就有同名组的话还原成原来的样子），其他提供方不动；文件是 setup 新建的、撤销后为空就删掉。VS Code 钥匙串里存的 Key 不会跟着删，要删的话先在 VS Code 的 Language Models 页面里删掉这一组。
+- **自检**：`evolink doctor copilot` 检查文件、模型地址、有没有在 VS Code 里粘贴过 Key（只看引用，看不到 Key 本身）。
 
 **Windows 额外处理**：如果 npm 装的 `claude.ps1` 会被执行策略拦下，工具会在征得同意后，把当前用户的执行策略改为 `RemoteSigned`；也可以改用 `claude.cmd`。
 

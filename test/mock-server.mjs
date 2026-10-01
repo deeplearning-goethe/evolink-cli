@@ -24,6 +24,7 @@ export async function startMockGateway({
   balance = { user: 1234.5, token: 100, unlimited: true },
   claudeLatest = '2.1.283',
   codexLatest = '0.159.2',
+  contextWindows = { 'claude-haiku-4-5-20251001': 200000, 'deepseek-v4-flash': 1000000, 'gpt-6-luna': 400000 },
   port = 0,
   log = false,
 } = {}) {
@@ -50,7 +51,11 @@ export async function startMockGateway({
       // Doubles as an npm registry (--registry) for the "newer Claude Code" check.
       if (url.pathname === '/@anthropic-ai/claude-code/latest') return send(200, { name: '@anthropic-ai/claude-code', version: claudeLatest });
       if (url.pathname === '/@openai/codex/latest') return send(200, { name: '@openai/codex', version: codexLatest });
-      const known = ['/v1/models', '/v1/credits', '/v1/messages', '/v1/messages/count_tokens', '/v1/responses'];
+      // The public price list (no key): context windows for a few models.
+      if (url.pathname === '/web/api/models/pricing') {
+        return send(200, { success: true, data: Object.entries(contextWindows).map(([model_name, context_window]) => ({ model_name, model_type: 'text', context_window })) });
+      }
+      const known = ['/v1/models', '/v1/credits', '/v1/messages', '/v1/messages/count_tokens', '/v1/responses', '/v1/chat/completions'];
       if (!known.includes(url.pathname)) return send(404, { error: { message: `Invalid URL (${req.method} ${url.pathname})`, type: 'invalid_request_error' } });
       if (!key) return send(401, authError('API key is required'));
       const k = keys[key];
@@ -93,6 +98,14 @@ export async function startMockGateway({
         ev('message_delta', { delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 1 } });
         ev('message_stop', {});
         return res.end();
+      }
+      // OpenAI Chat Completions (other text models in VS Code Chat).
+      if (url.pathname === '/v1/chat/completions' && req.method === 'POST') {
+        const model = json?.model;
+        if (!allowed.includes(model)) {
+          return send(404, { error: { code: 'model_not_found', message: `Model '${model}' is not available for this API key`, type: 'invalid_request_error' } });
+        }
+        return send(200, { id: `chatcmpl-${rid()}`, object: 'chat.completion', created: Math.floor(Date.now() / 1000), model, choices: [{ index: 0, message: { role: 'assistant', content: 'OK' }, finish_reason: 'stop' }], usage: { prompt_tokens: 8, completion_tokens: 1, total_tokens: 9 } });
       }
       // OpenAI Responses API, which Codex uses (EvoLink serves every GPT text model here; 09-30 live test).
       if (url.pathname === '/v1/responses' && req.method === 'POST') {

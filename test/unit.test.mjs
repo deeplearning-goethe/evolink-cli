@@ -44,6 +44,14 @@ import {
   upsertTomlTable,
   replaceTomlTable,
   tomlTableConflicts,
+  copilotModelName,
+  copilotApiType,
+  copilotModelIds,
+  copilotModelEntry,
+  planCopilotFile,
+  planCopilotRestore,
+  copilotKeySet,
+  COPILOT_MAX_OUTPUT,
 } from '../bin/evolink.mjs';
 
 const KEY = `sk-${'A1b2C3d4'.repeat(6)}`;
@@ -485,4 +493,75 @@ test('TOML conflicts: other ways of defining the provider table are found', () =
   assert.deepEqual(tomlTableConflicts('[[model_providers.evolink-cli]]\nname = "x"\n', PROV), [1]);
   assert.deepEqual(tomlTableConflicts('[model_providers.evolink-cli]\na = 1\n[model_providers.evolink-cli]\nb = 2\n', PROV), ['duplicate']);
   assert.deepEqual(tomlTableConflicts('[model_providers.evolink-cli]\na = 1\n[model_providers.evolink-cli.http_headers]\nX = "y"\n[model_providers.other]\nname = "o"\n', PROV), []);
+});
+
+// ---------------------------------------------------------------------------
+// VS Code Chat (Copilot) custom endpoint
+
+test('Copilot: model names, API types and the models offered', () => {
+  const names = {
+    'claude-sonnet-5-5': 'Claude Sonnet 5.5 (EvoLink)',
+    'claude-haiku-4-5-20251001': 'Claude Haiku 4.5 (EvoLink)',
+    'gpt-6.1-sol': 'GPT-6.1 Sol (EvoLink)',
+    'deepseek-v4-flash': 'DeepSeek V4 Flash (EvoLink)',
+    'qwen3.8-max': 'Qwen3.8 Max (EvoLink)',
+    'glm-5.3': 'GLM 5.3 (EvoLink)',
+    'doubao-seed-2.0-pro': 'Doubao Seed 2.0 Pro (EvoLink)',
+    'kimi-k3': 'Kimi K3 (EvoLink)',
+    'grok-4.7': 'Grok 4.7 (EvoLink)',
+  };
+  for (const [id, name] of Object.entries(names)) assert.equal(copilotModelName(id), name);
+  assert.equal(copilotApiType('claude-opus-5-5'), 'messages');
+  assert.equal(copilotApiType('gpt-6-luna'), 'responses');
+  assert.equal(copilotApiType('deepseek-v4-flash'), 'chat-completions');
+  const ids = new Set(['claude-haiku-4-5-20251001', 'claude-opus-4-6', 'gpt-6-luna', 'gpt-image-2', 'deepseek-v4-flash', 'gemini-3.1-flash-lite', 'gemini-3-pro-image-preview', 'qwen-voice-design', 'doubao-seededit-4.0-i2i', 'seedance-2.0', 'kimi-k3']);
+  const rec = copilotModelIds(ids);
+  assert.deepEqual(rec.models, ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'deepseek-v4-flash', 'kimi-k3'], 'recommended ones the key has, in their order');
+  assert.deepEqual(rec.held, ['gemini-3.1-flash-lite'], 'Gemini is held back; Gemini image models are not chat models');
+  assert.deepEqual(copilotModelIds(ids, { all: true }).models, ['claude-haiku-4-5-20251001', 'claude-opus-4-6', 'deepseek-v4-flash', 'gpt-6-luna', 'kimi-k3']);
+  assert.deepEqual(copilotModelIds(new Set(['claude-opus-4-6'])).models, ['claude-opus-4-6'], 'nothing recommended: every chat model');
+});
+
+test('Copilot: one model entry', () => {
+  const e = copilotModelEntry('claude-haiku-4-5-20251001', 'https://direct.evolink.ai', 200000);
+  assert.deepEqual(e, { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5 (EvoLink)', url: 'https://direct.evolink.ai/v1/messages', apiType: 'messages', toolCalling: true, vision: true, contextWindow: 200000, maxInputTokens: 200000 - COPILOT_MAX_OUTPUT, maxOutputTokens: COPILOT_MAX_OUTPUT });
+  assert.equal(copilotModelEntry('gpt-6-luna', 'https://x.test').url, 'https://x.test/v1/responses');
+  const d = copilotModelEntry('deepseek-v4-flash', 'https://x.test', undefined);
+  assert.equal(d.url, 'https://x.test/v1/chat/completions');
+  assert.equal(d.vision, false);
+  assert.equal(d.contextWindow, 128000, 'unknown window: a safe default');
+  assert.equal(copilotModelEntry('kimi-k3', 'https://x.test', 8000).contextWindow, 128000, 'a window too small for the output cap is ignored');
+  assert.deepEqual(copilotModelEntry('kimi-k3', 'https://x.test').modelOptions, { temperature: 1, top_p: null }, 'Kimi takes temperature 1 only');
+  assert.equal(copilotModelEntry('deepseek-v4-flash', 'https://x.test').modelOptions, undefined);
+});
+
+test('Copilot: chatLanguageModels.json is merged, keeps the key reference, and undoes exactly', () => {
+  const models = [copilotModelEntry('gpt-6-luna', 'https://x.test', 400000)];
+  const fresh = planCopilotFile(null, models);
+  assert.equal(fresh.groupExisted, false);
+  assert.equal(fresh.hasKey, false);
+  assert.deepEqual(JSON.parse(fresh.text), [{ name: 'EvoLink', vendor: 'customendpoint', models }]);
+  assert.match(fresh.text, /^\[\n\t\{\n\t\t"name": "EvoLink"/, 'tabs, like VS Code writes it');
+  const restoredFresh = planCopilotRestore(fresh.text, { existed: false, groupExisted: false, before: null });
+  assert.deepEqual(restoredFresh, { changed: true, remove: true, keyWasSet: false });
+
+  // Someone else's group and our group with a key VS Code stored.
+  const other = { name: 'Mine', vendor: 'openai', apiKey: '${input:chat.lm.secret.0001}', models: [{ id: 'x' }] };
+  const ours = { name: 'EvoLink', vendor: 'customendpoint', apiKey: '${input:chat.lm.secret.ab12}', models: [{ id: 'old' }], settings: { a: 1 } };
+  // A comment and a trailing comma: hand-edited JSONC is read too.
+  const raw = `// written by VS Code\n${JSON.stringify([other, ours], null, '\t').replace(/\n\]$/, ',\n]')}\n`;
+  const p = planCopilotFile(raw, models);
+  assert.equal(p.groupExisted, true);
+  assert.equal(p.hasKey, true);
+  const groups = JSON.parse(p.text);
+  assert.deepEqual(groups[0], other, 'other providers untouched');
+  assert.deepEqual(groups[1], { ...ours, models }, 'key reference and settings kept, models replaced');
+  assert.ok(copilotKeySet(groups[1]));
+  assert.ok(!copilotKeySet({ apiKey: 'sk-plain' }));
+  const back = planCopilotRestore(p.text, { existed: true, groupExisted: true, before: JSON.stringify(ours) });
+  assert.deepEqual(JSON.parse(back.text), [other, ours]);
+  const removed = planCopilotRestore(p.text, { existed: true, groupExisted: false, before: null });
+  assert.deepEqual(JSON.parse(removed.text), [other]);
+  assert.equal(removed.keyWasSet, true);
+  assert.throws(() => planCopilotFile('{"not": "an array"}', models), /not a JSON array/);
 });

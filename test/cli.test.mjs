@@ -16,6 +16,7 @@ const NO_CLAUDE_KEY = `sk-${'Nc5Cl4De'.repeat(6)}`;
 const OLD_SONNET_KEY = `sk-${'Os4Sn6Et'.repeat(6)}`;
 const NEW_SONNET_KEY = `sk-${'Ns5Sn5Et'.repeat(6)}`;
 const CODEX_KEY = `sk-${'Cx7Gp6Td'.repeat(6)}`;
+const CHAT_KEY = `sk-${'Ch4Tm0Dl'.repeat(6)}`;
 let gw;
 
 before(async () => {
@@ -27,6 +28,7 @@ before(async () => {
       [OLD_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-haiku-4-5-20251001'] },
       [NEW_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
       [CODEX_KEY.slice(3)]: { models: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-5.5', 'gpt-6-luna', 'gpt-image-2', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
+      [CHAT_KEY.slice(3)]: { models: ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'gpt-image-2', 'deepseek-v4-flash', 'gemini-3.1-flash-lite', 'kimi-k3'] },
     },
   });
 });
@@ -975,4 +977,104 @@ test('setup codex --vscode on a CRLF config.toml (as Notepad writes it): written
   const rr = await runCli(['reset', 'codex', '--yes'], { home });
   assert.equal(rr.code, 0, rr.all);
   assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), crlf);
+});
+
+
+// VS Code Chat (setup copilot): chatLanguageModels.json in the VS Code user folder
+
+function vscodeUserDir(home) {
+  if (process.platform === 'darwin') return path.join(home, 'Library', 'Application Support', 'Code', 'User');
+  if (WIN) return path.join(home, 'AppData', 'Roaming', 'Code', 'User');
+  return path.join(home, '.config', 'Code', 'User');
+}
+const chatModelsFile = (home) => path.join(vscodeUserDir(home), 'chatLanguageModels.json');
+
+test('setup copilot: an EvoLink group in chatLanguageModels.json, one test per API type, the key reference kept, reset', async () => {
+  const home = tmpHome();
+  fs.mkdirSync(vscodeUserDir(home), { recursive: true });
+  const before = gw.requests.length;
+  const r = await runCli(['setup', 'copilot', '--yes'], { home, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.equal(r.code, 0, r.all);
+  noFullKey(r, CHAT_KEY);
+  assert.match(r.stdout, /Key is valid \(sk-Ch4T…m0Dl\) · 6 models, 4 usable in Chat/, 'Gemini held back, the image model is not a chat model');
+  assert.match(r.stdout, /Gemini \(1\) is left out for now/);
+  const text = fs.readFileSync(chatModelsFile(home), 'utf8');
+  assert.ok(!text.includes(CHAT_KEY.slice(3)), 'the key is never written into the file');
+  const groups = JSON.parse(text);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].name, 'EvoLink');
+  assert.equal(groups[0].vendor, 'customendpoint');
+  assert.equal(groups[0].apiKey, undefined);
+  const byId = Object.fromEntries(groups[0].models.map((m) => [m.id, m]));
+  assert.deepEqual(Object.keys(byId), ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'deepseek-v4-flash', 'kimi-k3']);
+  assert.equal(byId['claude-haiku-4-5-20251001'].url, `${gw.url}/v1/messages`);
+  assert.equal(byId['gpt-6-luna'].apiType, 'responses');
+  assert.equal(byId['deepseek-v4-flash'].url, `${gw.url}/v1/chat/completions`);
+  assert.equal(byId['deepseek-v4-flash'].contextWindow, 1000000, 'from the price list');
+  assert.equal(byId['kimi-k3'].contextWindow, 128000, 'not in the price list: the default');
+  const reqs = gw.requests.slice(before).filter((q) => q.method === 'POST');
+  assert.deepEqual(reqs.map((q) => `${q.path} ${q.body.model}`).sort(), ['/v1/chat/completions deepseek-v4-flash', '/v1/messages claude-haiku-4-5-20251001', '/v1/responses gpt-6-luna']);
+  assert.ok(reqs.every((q) => q.keyUsed === CHAT_KEY.slice(3)));
+  assert.match(r.stdout, /Right-click the "EvoLink" group → "Update API Key"/);
+
+  const again = await runCli(['setup', 'copilot', '--yes', '--no-test'], { home, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.match(again.stdout, /Already up to date/);
+
+  // VS Code stored the key (it writes a reference), and the user has another provider: both survive a re-run.
+  const mine = { name: 'Mine', vendor: 'openai', apiKey: '${input:chat.lm.secret.0001}', models: [{ id: 'x', name: 'X' }] };
+  groups[0].apiKey = '${input:chat.lm.secret.ab12}';
+  fs.writeFileSync(chatModelsFile(home), JSON.stringify([mine, groups[0]], null, '\t'));
+  const all = await runCli(['setup', 'copilot', '--yes', '--no-test', '--all-models'], { home, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.equal(all.code, 0, all.all);
+  assert.match(all.stdout, /A key is already set in VS Code/);
+  const after = JSON.parse(fs.readFileSync(chatModelsFile(home), 'utf8'));
+  assert.deepEqual(after[0], mine);
+  assert.equal(after[1].apiKey, '${input:chat.lm.secret.ab12}');
+  assert.deepEqual(after[1].models.map((m) => m.id), ['claude-haiku-4-5-20251001', 'deepseek-v4-flash', 'gpt-6-luna', 'kimi-k3']);
+
+  const d = await runCli(['doctor', 'copilot'], { home });
+  assert.equal(d.code, 0, d.all);
+  assert.match(d.stdout, /VS Code: a key is set in VS Code/);
+  assert.match(d.stdout, /^VS Code: group=yes models=4 key=set non_evolink=0 gemini=0$/m);
+
+  const rr = await runCli(['reset', 'copilot', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.match(rr.stdout, /The key VS Code saved in its keychain stays there/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(chatModelsFile(home), 'utf8')), [mine], 'only our group goes');
+});
+
+test('setup copilot: no desktop VS Code, the Remote-SSH hint, dry run, doctor without a key or with a plain key, plain reset', async () => {
+  const none = tmpHome();
+  const n = await runCli(['setup', 'copilot', '--yes'], { home: none, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.equal(n.code, 3, n.all);
+  assert.match(n.all, /No desktop VS Code user folder found/);
+  fs.mkdirSync(path.join(none, '.vscode-server'));
+  const remote = await runCli(['setup', 'copilot', '--yes'], { home: none, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.match(remote.all, /run this there, not on the Remote-SSH side/);
+
+  const home = tmpHome();
+  fs.mkdirSync(vscodeUserDir(home), { recursive: true });
+  const dry = await runCli(['setup', 'copilot', '--yes', '--dry-run'], { home, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  assert.equal(dry.code, 0, dry.all);
+  assert.match(dry.stdout, /Preview only/);
+  assert.ok(!fs.existsSync(chatModelsFile(home)));
+
+  await runCli(['setup', 'copilot', '--yes', '--no-test'], { home, env: { EVOLINK_API_KEY: CHAT_KEY } });
+  const d = await runCli(['doctor', 'copilot'], { home });
+  assert.equal(d.code, 1, d.all);
+  assert.match(d.stdout, /no key pasted in VS Code yet/);
+  assert.match(d.stdout, /^VS Code: group=yes models=4 key=missing/m);
+  const g = JSON.parse(fs.readFileSync(chatModelsFile(home), 'utf8'));
+  g[0].apiKey = 'sk-plain-key-in-the-file';
+  fs.writeFileSync(chatModelsFile(home), JSON.stringify(g));
+  const d2 = await runCli(['doctor', 'copilot'], { home });
+  assert.match(d2.stdout, /the file holds a plain key, which VS Code ignores/);
+
+  // Created by setup and holding nothing else: a plain reset deletes the file.
+  g[0].apiKey = undefined;
+  fs.writeFileSync(chatModelsFile(home), JSON.stringify(g));
+  const rr = await runCli(['reset', '--yes', '--json'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.ok(JSON.parse(rr.stdout).ok);
+  assert.ok(!fs.existsSync(chatModelsFile(home)));
 });

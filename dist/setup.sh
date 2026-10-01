@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code and Codex (macOS / Linux), version 0.3.0
+# EvoLink one-command setup for Claude Code and Codex (macOS / Linux), version 0.4.0
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
@@ -13,8 +13,8 @@
 set -u
 
 evolink_main() {
-  local version="0.3.0"
-  local expected_sha="1820c571b51008990ef57d1e16fc88ad5bc0ee29cf1f252ffb17f255f2e58176"
+  local version="0.4.0"
+  local expected_sha="968024cf5782267d4f0c63a6cdb904ec5d21edc68b2a48f52babe34d259d1c10"
   local home_dir="${EVOLINK_HOME:-$HOME/.evolink}"
   local zh=0
   case "${LC_ALL:-${LC_MESSAGES:-${LANG:-}}}" in zh* | *_CN* | *_TW* | *_HK*) zh=1 ;; esac
@@ -74,7 +74,7 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.3.0';
+export const VERSION = '0.4.0';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
@@ -1304,8 +1304,9 @@ async function cmdSetup(opts) {
   if (opts.json && !opts.yes) throw new CliError(L('--json 需要和 --yes 一起用（不能交互）。', '--json requires --yes (no prompts).'), EXIT.USAGE);
   const target = opts._[1] || 'claude-code';
   if (CODEX_TARGETS.includes(target)) return cmdSetupCodex(opts);
+  if (COPILOT_TARGETS.includes(target)) return cmdSetupCopilot(opts);
   if (!['claude-code', 'claude'].includes(target)) {
-    throw new CliError(L(`暂不支持 ${target}，目前支持 claude-code 和 codex。`, `${target} is not supported yet; claude-code and codex are.`), EXIT.USAGE);
+    throw new CliError(L(`暂不支持 ${target}，目前支持 claude-code、codex 和 copilot。`, `${target} is not supported yet; claude-code, codex and copilot are.`), EXIT.USAGE);
   }
   const result = { command: 'setup', version: VERSION, ok: false, warnings: [] };
   const baseNorm = normalizeBaseUrl(opts.baseUrl || process.env.EVOLINK_BASE_URL || DEFAULT_BASE_URL);
@@ -1613,6 +1614,12 @@ async function obtainAndCheckKey(opts, interactive, base, existingKey, { tool = 
         return { key, check: null };
       }
       const check = await checkKey(base, key);
+      if (check.ok && tool === 'copilot') {
+        const chat = copilotModelIds(check.ids, { all: true }).models.length;
+        ui.ok(L(`Key 有效（${maskKey(key)}）· 可用模型 ${check.count} 个，其中可以在 Chat 里用的 ${chat} 个`, `Key is valid (${maskKey(key)}) · ${check.count} models, ${chat} usable in Chat`));
+        printBalance(check.balance);
+        return { key, check };
+      }
       if (check.ok && tool === 'codex') {
         const gpt = codexModelIds(check.ids).length;
         ui.ok(L(`Key 有效（${maskKey(key)}）· 可用模型 ${check.count} 个，其中 GPT ${gpt} 个`, `Key is valid (${maskKey(key)}) · ${check.count} models, ${gpt} GPT`));
@@ -3276,12 +3283,399 @@ async function resetCodex(opts) {
 }
 
 // ---------------------------------------------------------------------------
+// VS Code Chat (Copilot) custom endpoint: `evolink setup copilot` adds an "EvoLink" provider group to VS Code's
+// chatLanguageModels.json. VS Code takes the group's key only from its own secret storage: a key written into the file
+// is ignored (VS Code 1.140 source and UI test, 10-01), so the key is pasted once in VS Code ("Update API Key").
+// Needs no GitHub sign-in and no Copilot plan; VS Code picks changes to the file up without a reload.
+
+const COPILOT_TARGETS = ['copilot', 'vscode-chat'];
+const COPILOT_GROUP = 'EvoLink';
+const COPILOT_VENDOR = 'customendpoint';
+// Desktop editors with the built-in chat and its custom endpoint provider (the settings live on the local machine,
+// also in a Remote-SSH window).
+const COPILOT_EDITORS = [
+  { name: 'VS Code', app: 'Code' },
+  { name: 'VS Code Insiders', app: 'Code - Insiders' },
+];
+// Output cap per model. VS Code sends it with every request, and EvoLink holds credit against it up front.
+export const COPILOT_MAX_OUTPUT = 32000;
+// Gemini fails in Agent mode: the gateway passes the "$comment" keys in Copilot's tool schemas on to Gemini, which
+// rejects them with a 400 (10-01). Left out until the gateway strips them.
+const COPILOT_SKIP = /^gemini-/i;
+const COPILOT_FAMILIES = /^(claude-|gpt-\d|deepseek-|kimi-|glm-|qwen|grok-|doubao-seed-)/i;
+const COPILOT_NOT_CHAT = /(image|seededit|voice|tts|audio|embed|whisper|i2i|vision-exp)/i;
+const COPILOT_PATHS = { messages: '/v1/messages', responses: '/v1/responses', 'chat-completions': '/v1/chat/completions' };
+
+// Offered by default (the ones this key has); --all-models adds every other chat model.
+export const RECOMMENDED_COPILOT_MODELS = [
+  'claude-opus-5-5',
+  'claude-sonnet-5-5',
+  'claude-haiku-4-5-20251001',
+  'gpt-6.1-sol',
+  'gpt-6-astra',
+  'gpt-6-luna',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
+  'kimi-k3',
+  'glm-5.3',
+  'qwen3.8-max',
+  'grok-4.7',
+  'doubao-seed-2.0-pro',
+  'doubao-seed-2.0-code',
+];
+
+// Claude speaks the Messages API, GPT the Responses API, everything else Chat Completions (each tested 10-01).
+export const copilotApiType = (id) => (/^claude-/i.test(id) ? 'messages' : /^gpt-/i.test(id) ? 'responses' : 'chat-completions');
+
+const NAME_WORDS = { gpt: 'GPT', glm: 'GLM', deepseek: 'DeepSeek', kimi: 'Kimi', grok: 'Grok', doubao: 'Doubao', claude: 'Claude', seed: 'Seed' };
+// claude-sonnet-5-5 → "Claude Sonnet 5.5 (EvoLink)"; gpt-6.1-sol → "GPT-6.1 Sol (EvoLink)".
+export function copilotModelName(id) {
+  const out = [];
+  for (const p of String(id).replace(/-\d{8}$/, '').split('-')) {
+    if (/^\d+$/.test(p) && out.length && /\d$/.test(out[out.length - 1])) out[out.length - 1] += `.${p}`;
+    else if (/^\d/.test(p)) out.push(p);
+    else out.push(NAME_WORDS[p.toLowerCase()] || p[0].toUpperCase() + p.slice(1));
+  }
+  return `${out.join(' ').replace(/^GPT (\d)/, 'GPT-$1')} (EvoLink)`;
+}
+
+// Chat models of this key, recommended ones first unless `all`; `held` lists the Gemini models left out (COPILOT_SKIP).
+export function copilotModelIds(ids, { all = false } = {}) {
+  const chat = [...ids].filter((id) => (COPILOT_FAMILIES.test(id) || COPILOT_SKIP.test(id)) && !COPILOT_NOT_CHAT.test(id));
+  const usable = chat.filter((id) => !COPILOT_SKIP.test(id)).sort();
+  const held = chat.filter((id) => COPILOT_SKIP.test(id)).sort();
+  if (all) return { models: usable, held };
+  const picked = RECOMMENDED_COPILOT_MODELS.filter((id) => usable.includes(id));
+  return { models: picked.length ? picked : usable, held };
+}
+
+// One model in the provider group. contextWindow comes from the public price list when it has it.
+export function copilotModelEntry(id, base, contextWindow) {
+  const apiType = copilotApiType(id);
+  const window = Number(contextWindow) > COPILOT_MAX_OUTPUT * 2 ? Number(contextWindow) : 128000;
+  const entry = {
+    id,
+    name: copilotModelName(id),
+    url: `${base}${COPILOT_PATHS[apiType]}`,
+    apiType,
+    toolCalling: true,
+    vision: /^(claude|gpt)-/i.test(id),
+    contextWindow: window,
+    maxInputTokens: window - COPILOT_MAX_OUTPUT,
+    maxOutputTokens: COPILOT_MAX_OUTPUT,
+  };
+  // Kimi accepts only temperature 1; Chat sends its own sampling values otherwise (400, 10-01). null leaves top_p out.
+  if (/^kimi-/i.test(id)) entry.modelOptions = { temperature: 1, top_p: null };
+  return entry;
+}
+
+// The EvoLink group written into chatLanguageModels.json (a JSON array of provider groups). Everything else in the
+// file stays; an existing EvoLink group keeps its key reference and settings, only its model list is replaced.
+export function planCopilotFile(raw, models) {
+  let groups = [];
+  if (raw !== null && raw !== undefined && raw.trim()) {
+    const parsed = JSON.parse(stripJsonComments(raw.replace(/^\uFEFF/, '')).replace(/,(\s*[}\]])/g, '$1'));
+    if (!Array.isArray(parsed)) throw new Error('not a JSON array');
+    groups = parsed;
+  }
+  const i = groups.findIndex((g) => isPlainObject(g) && g.vendor === COPILOT_VENDOR && g.name === COPILOT_GROUP);
+  const before = i >= 0 ? groups[i] : null;
+  const group = { ...(before || { name: COPILOT_GROUP, vendor: COPILOT_VENDOR }), models };
+  if (i >= 0) groups[i] = group;
+  else groups.push(group);
+  // VS Code writes this file with tabs.
+  const text = `${JSON.stringify(groups, null, '\t')}\n`;
+  return { text, before, groupExisted: i >= 0, hasKey: copilotKeySet(group), changed: text !== raw };
+}
+
+// VS Code keeps the key in its secret storage and writes "${input:chat.lm.secret.…}" into the file.
+export const copilotKeySet = (group) => typeof group?.apiKey === 'string' && /^\$\{input:[^}]+\}$/.test(group.apiKey);
+
+// Reverse planCopilotFile: put back the group that was there before setup, or remove ours.
+export function planCopilotRestore(raw, rec) {
+  const groups = JSON.parse(stripJsonComments(String(raw).replace(/^\uFEFF/, '')).replace(/,(\s*[}\]])/g, '$1'));
+  if (!Array.isArray(groups)) throw new Error('not a JSON array');
+  const i = groups.findIndex((g) => isPlainObject(g) && g.vendor === COPILOT_VENDOR && g.name === COPILOT_GROUP);
+  if (i < 0) return { changed: false };
+  const keyWasSet = copilotKeySet(groups[i]);
+  if (rec.groupExisted && rec.before) groups[i] = JSON.parse(rec.before);
+  else groups.splice(i, 1);
+  if (!rec.existed && !groups.length) return { changed: true, remove: true, keyWasSet };
+  return { changed: true, text: `${JSON.stringify(groups, null, '\t')}\n`, keyWasSet };
+}
+
+export function copilotFiles() {
+  return COPILOT_EDITORS.map((ed) => {
+    const dir = path.dirname(editorSettingsPath(ed.app));
+    return { name: ed.name, dir, file: path.join(dir, 'chatLanguageModels.json') };
+  }).filter((x) => isDir(x.dir));
+}
+
+// Context windows from the public price list (no key needed); empty when it cannot be read.
+async function contextWindows(base) {
+  const r = await http('GET', `${base}/web/api/models/pricing`, { timeout: 20000 });
+  const out = new Map();
+  for (const it of r.json?.data || []) if (it?.model_name && Number(it.context_window) > 0) out.set(it.model_name, Number(it.context_window));
+  return out;
+}
+
+async function testChatCompletions(base, key, model) {
+  const r = await http('POST', `${base}/v1/chat/completions`, { key, timeout: 90000, body: { model, max_tokens: 16, messages: [{ role: 'user', content: 'ping' }] } });
+  return r.ok ? { ok: true, model, ms: r.ms } : { ok: false, model, failure: describeFailure(r), ms: r.ms };
+}
+
+const copilotPasteSteps = () => [
+  L('在 VS Code 里打开右侧的 Chat，点模型列表 → "Manage Models..."', 'In VS Code, open Chat, click the model list → "Manage Models..."'),
+  L(`在 "${COPILOT_GROUP}" 这一组上点右键 → "Update API Key"，粘贴你的 EvoLink Key（只需一次，VS Code 会存进系统钥匙串）`, `Right-click the "${COPILOT_GROUP}" group → "Update API Key" and paste your EvoLink key (once; VS Code keeps it in the system keychain)`),
+  L('回到 Chat，在模型列表里选一个带 (EvoLink) 的模型开始对话', 'Back in Chat, pick a model marked (EvoLink) and start chatting'),
+];
+
+async function cmdSetupCopilot(opts) {
+  const interactive = !opts.yes && !opts.json;
+  const result = { command: 'setup', target: 'copilot', version: VERSION, ok: false, warnings: [] };
+  const baseNorm = normalizeBaseUrl(opts.baseUrl || process.env.EVOLINK_BASE_URL || DEFAULT_BASE_URL);
+  if (baseNorm.error) throw new CliError(L('接口地址格式不对，应类似 https://direct.evolink.ai', 'Invalid base URL; expected something like https://direct.evolink.ai'), EXIT.USAGE);
+  const base = baseNorm.url;
+  ui.title(L(`EvoLink 一键配置 · VS Code Chat（Copilot）  v${VERSION}`, `EvoLink setup · VS Code Chat (Copilot)  v${VERSION}`));
+  ui.print(ui.dim(L('在 VS Code 内置的 Chat 里加一组 EvoLink 模型，不需要登录 GitHub，也不需要 Copilot 订阅。改之前自动备份，随时可以撤销。', "Adds a group of EvoLink models to VS Code's built-in Chat; no GitHub sign-in or Copilot plan needed. Everything is backed up first and can be undone.")));
+
+  // [1/4] environment
+  ui.step(1, 4, L('检查环境', 'Environment'));
+  ui.ok(`${osLabel()} · Node ${process.versions.node}`);
+  const targets = copilotFiles();
+  if (!targets.length) {
+    const remote = !!process.env.VSCODE_IPC_HOOK_CLI || isDir(path.join(os.homedir(), '.vscode-server'));
+    throw new CliError(
+      remote
+        ? L('Chat 的模型配置保存在你本机的 VS Code 里：请在本机（不是 Remote-SSH 的远端）运行这条命令。', "Chat's model settings live in the VS Code on your own computer: run this there, not on the Remote-SSH side.")
+        : L('没有找到桌面版 VS Code 的用户目录：先装好 VS Code 并打开一次，再运行这条命令。', 'No desktop VS Code user folder found: install VS Code and open it once, then run this again.'),
+      EXIT.NOT_INSTALLED,
+    );
+  }
+  for (const t of targets) ui.ok(`${t.name}  ${ui.dim(tildify(t.file))}`);
+  result.editors = targets.map((t) => t.name);
+
+  // [2/4] key (only to see which models it can use: VS Code takes the key from its own keychain)
+  ui.step(2, 4, L('API Key', 'API key'));
+  const { key, check } = await obtainAndCheckKey(opts, interactive, base, existingCodexKey(codexPaths()), { tool: 'copilot' });
+  result.key = maskKey(key);
+  const ids = check?.ids || new Set();
+
+  // [3/4] models
+  ui.step(3, 4, L('模型', 'Models'));
+  const { models: chosen, held } = copilotModelIds(ids, { all: !!opts.allModels });
+  if (!chosen.length) throw new CliError(L('这把 Key 没有开通可以在 Chat 里用的文本模型；请在控制台调整 Key 的模型范围。', 'This key has no chat models for VS Code; adjust the key in the dashboard.'), EXIT.AUTH);
+  const windows = opts.skipChecks ? new Map() : await contextWindows(base);
+  const models = chosen.map((id) => copilotModelEntry(id, base, windows.get(id)));
+  ui.ok(L(`${models.length} 个模型${opts.allModels ? '（全部）' : '（推荐的；要全部加上：--all-models）'}`, `${models.length} models${opts.allModels ? ' (all)' : ' (recommended; add all with --all-models)'}`));
+  const size = (n) => (n >= 1e6 ? `${+(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}K`);
+  for (const m of models) ui.print(`    ${m.name.padEnd(36)}${ui.dim(`${m.apiType} · ${size(m.contextWindow)}`)}`);
+  if (held.length) ui.info(L(`暂不加入 Gemini（${held.length} 个）：网关转发 Chat 的工具参数时会被 Gemini 拒绝，等网关修复后再加`, `Gemini (${held.length}) is left out for now: the gateway passes Chat's tool parameters on in a form Gemini rejects; it will be added once that is fixed`));
+  result.models = models.map((m) => m.id);
+
+  // [4/4] write
+  ui.step(4, 4, L('写入', 'Apply'));
+  const plans = [];
+  for (const t of targets) {
+    const existed = isFile(t.file);
+    const raw = existed ? fs.readFileSync(t.file, 'utf8') : null;
+    let p;
+    try {
+      p = planCopilotFile(raw, models);
+    } catch (e) {
+      throw new CliError(L(`${tildify(t.file)} 不是有效的 JSON（${e.message}），没法安全地修改；请先修好或删掉它。`, `${tildify(t.file)} is not valid JSON (${e.message}), so it cannot be edited safely; fix or delete it first.`), EXIT.CONFIG);
+    }
+    plans.push({ ...t, ...p, existed });
+    const tag = !existed ? L('（新建）', '(new file)') : p.changed ? L('（修改，原文件先备份）', '(changed; backed up first)') : L('（无需改动）', '(unchanged)');
+    ui.print(`  ${tildify(t.file)}  ${tag}`);
+    ui.print(ui.dim(`    ${p.groupExisted ? L(`更新 "${COPILOT_GROUP}" 这一组的模型列表，保留已经设置的 Key`, `updates the model list of the "${COPILOT_GROUP}" group; a key already set stays`) : L(`新加一组 "${COPILOT_GROUP}"；其他提供方不动`, `adds the "${COPILOT_GROUP}" group; other providers stay as they are`)}`));
+  }
+  result.changes = plans.map((p) => ({ file: p.file, action: !p.existed ? 'create' : p.changed ? 'modify' : 'keep', keySet: p.hasKey }));
+  if (opts.dryRun) {
+    ui.print('');
+    ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
+    result.ok = true;
+    result.dryRun = true;
+    return finish(result, opts);
+  }
+  const pending = plans.filter((p) => p.changed);
+  if (!pending.length) ui.ok(L('配置已经是最新的，不需要改动。', 'Already up to date; nothing to change.'));
+  else if (interactive && !(await confirm(L('确认写入？', 'Apply these changes?'), true))) throw new CancelledError();
+  if (pending.length) {
+    const state = loadState();
+    const cp = (state.copilot ||= { files: {} });
+    const backup = newBackupSession();
+    for (const p of pending) {
+      if (p.existed) backupFile(backup, p.file, 'chatLanguageModels.json');
+      writeAtomic(p.file, p.text, { mode: 0o644 });
+      if (!cp.files[p.file]) cp.files[p.file] = { existed: p.existed, groupExisted: p.groupExisted, before: p.before ? JSON.stringify(p.before) : null };
+      ui.ok(L(`已写入 ${tildify(p.file)}`, `Wrote ${tildify(p.file)}`));
+    }
+    cp.updatedAt = new Date().toISOString();
+    saveState(state);
+    pruneBackups();
+    if (backup.files.length) result.backupDir = backup.dir;
+  }
+
+  // One tiny request per API type, to prove the key and the gateway side.
+  if (!opts.skipChecks && opts.test !== false && ids.size) {
+    const byType = new Map();
+    // The cheapest of each kind when the key has it.
+    const prefer = ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'deepseek-v4-flash'];
+    const rank = (id) => (prefer.includes(id) ? prefer.indexOf(id) : prefer.length);
+    for (const m of [...models].sort((a, b) => rank(a.id) - rank(b.id))) if (!byType.has(m.apiType)) byType.set(m.apiType, m.id);
+    result.tests = [];
+    for (const [type, model] of byType) {
+      const t = type === 'messages' ? await testMessage(base, key, model) : type === 'responses' ? await testResponses(base, key, model) : await testChatCompletions(base, key, model);
+      result.tests.push(t.ok ? { ok: true, model, type } : { ok: false, model, type, error: t.failure });
+      if (t.ok) ui.ok(L(`测试通过：${model}（${type}，${t.ms} ms）`, `Test passed: ${model} (${type}, ${t.ms} ms)`));
+      else for (const line of failureLines(t.failure, base)) ui.err(line);
+    }
+  }
+  result.ok = !(result.tests || []).some((t) => !t.ok);
+  result.keySet = plans.every((p) => p.hasKey);
+
+  const cmd = sandboxPrefix(sandboxHome()) + commandHint(sandboxHome());
+  ui.print('');
+  ui.title(`${ui.mark('ok')} ${L('配置完成', 'All set')}`);
+  if (result.keySet) ui.print(`  ${L('VS Code 里已经设置过 Key，直接在 Chat 的模型列表里选带 (EvoLink) 的模型即可。', 'A key is already set in VS Code: pick a model marked (EvoLink) in the Chat model list.')}`);
+  else {
+    ui.print(`  ${L('最后一步（只需一次）：VS Code 只从自己的钥匙串读 Key，工具没法替你写进去。', 'One last step (once): VS Code reads the key only from its own keychain, so this tool cannot put it there.')}`);
+    copilotPasteSteps().forEach((line, i) => ui.print(`  ${i + 1}. ${line}`));
+  }
+  ui.print(`  ${ui.mark('dot')} ${L('不用重启 VS Code：它会自动读到新的模型列表。', 'No restart needed: VS Code picks the new model list up by itself.')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('Agent 模式每轮都会带上很长的系统提示和工具说明：一句简单的话也要约 2 万个输入 token；只聊天可以切到 Ask 模式。', 'Agent mode sends a long system prompt and tool list every turn: even a one-line question costs about 20K input tokens; switch to Ask mode for plain chat.')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('VS Code 提示 "Set BYOK utility models" 时，可以选一个便宜的 EvoLink 模型（如 DeepSeek V4 Flash）做标题、摘要这类辅助工作；不设也能正常聊天。', 'If VS Code asks to "Set BYOK utility models", a cheap EvoLink model (such as DeepSeek V4 Flash) can do titles and summaries; chat works without it.')}`);
+  ui.print(`  ${ui.mark('dot')} ${L('Chat 的设置跟着 VS Code 的默认配置文件走；用了别的 Profile 的话，要在那个 Profile 里另外添加。', "This goes into VS Code's default profile; other profiles need their own setup.")}`);
+  ui.print('');
+  ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset copilot`);
+  ui.print(`  ${L('遇到问题：运行 ', 'Having trouble? Run ')}${cmd} doctor copilot${L('，把输出发给客服（Key 会自动隐去）', ' and send the output to support (your key is hidden)')}`);
+  return finish(result, opts, result.ok ? EXIT.OK : EXIT.AUTH);
+}
+
+async function cmdDoctorCopilot(opts) {
+  const report = { command: 'doctor', target: 'copilot', version: VERSION, problems: [], warnings: [], summary: [] };
+  const sandbox = sandboxHome();
+  const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
+  const problem = (s) => {
+    report.problems.push(s);
+    ui.err(s);
+  };
+  const warn = (s) => {
+    report.warnings.push(s);
+    ui.warn(s);
+  };
+  ui.title(L(`EvoLink 诊断 · VS Code Chat v${VERSION}`, `EvoLink doctor · VS Code Chat v${VERSION}`));
+  ui.step(1, 2, L('环境', 'Environment'));
+  const osl = osLabel();
+  ui.ok(`${osl} · Node ${process.versions.node}`);
+  const targets = copilotFiles();
+  if (!targets.length) problem(L('没有找到桌面版 VS Code 的用户目录（要在装了 VS Code 的电脑上运行）', 'No desktop VS Code user folder found (run this on the computer with VS Code)'));
+  report.summary.push(`evolink-doctor ${VERSION} copilot | ${osl} | node ${process.versions.node} | editors ${targets.map((t) => t.name).join(',') || 'none'}`);
+
+  ui.step(2, 2, L('配置', 'Configuration'));
+  for (const t of targets) {
+    if (!isFile(t.file)) {
+      problem(L(`${t.name}：${tildify(t.file)} 不存在，还没配置过（运行 ${cmd} setup copilot）`, `${t.name}: ${tildify(t.file)} does not exist; run ${cmd} setup copilot`));
+      report.summary.push(`${t.name}: file=no`);
+      continue;
+    }
+    let groups;
+    try {
+      groups = JSON.parse(stripJsonComments(fs.readFileSync(t.file, 'utf8').replace(/^\uFEFF/, '')).replace(/,(\s*[}\]])/g, '$1'));
+    } catch (e) {
+      problem(L(`${t.name}：${tildify(t.file)} 不是有效的 JSON（${e.message}）`, `${t.name}: ${tildify(t.file)} is not valid JSON (${e.message})`));
+      report.summary.push(`${t.name}: file=invalid`);
+      continue;
+    }
+    const g = Array.isArray(groups) ? groups.find((x) => isPlainObject(x) && x.vendor === COPILOT_VENDOR && x.name === COPILOT_GROUP) : null;
+    if (!g) {
+      problem(L(`${t.name}：没有 "${COPILOT_GROUP}" 这一组（运行 ${cmd} setup copilot）`, `${t.name}: no "${COPILOT_GROUP}" group; run ${cmd} setup copilot`));
+      report.summary.push(`${t.name}: group=no`);
+      continue;
+    }
+    const models = Array.isArray(g.models) ? g.models : [];
+    ui.ok(L(`${t.name}：${models.length} 个 EvoLink 模型  ${ui.dim(tildify(t.file))}`, `${t.name}: ${models.length} EvoLink models  ${ui.dim(tildify(t.file))}`));
+    // Model URLs end in the API path (/v1/messages …); the base address is what identifies EvoLink.
+    const notEvolink = models.filter((m) => !isEvolinkUrl(String(m?.url || '').replace(/\/v1\/(messages|responses|chat\/completions)\/?$/, '')));
+    if (notEvolink.length) problem(L(`${t.name}：${notEvolink.length} 个模型的地址不是 EvoLink（${notEvolink.map((m) => m.id).join(', ')}）`, `${t.name}: ${notEvolink.length} model(s) do not point at EvoLink (${notEvolink.map((m) => m.id).join(', ')})`));
+    const gemini = models.filter((m) => /^gemini-/i.test(String(m?.id)));
+    if (gemini.length) warn(L(`${t.name}：Gemini 模型在 Agent 模式下会被拒绝（网关转发工具参数的问题，等修复）`, `${t.name}: Gemini models are rejected in Agent mode (a gateway issue with tool parameters, pending a fix)`));
+    const keySet = copilotKeySet(g);
+    if (keySet) ui.ok(L(`${t.name}：已在 VS Code 里设置 Key（存在系统钥匙串，这里看不到内容）`, `${t.name}: a key is set in VS Code (kept in the system keychain; not visible here)`));
+    else if (typeof g.apiKey === 'string' && g.apiKey) problem(L(`${t.name}：文件里直接写了 Key，VS Code 不会用它；请在 VS Code 里用 "Update API Key" 重新粘贴，并把文件里的 Key 删掉`, `${t.name}: the file holds a plain key, which VS Code ignores; paste it with "Update API Key" in VS Code and remove it from the file`));
+    else {
+      problem(L(`${t.name}：还没在 VS Code 里粘贴 Key，EvoLink 的模型用不了`, `${t.name}: no key pasted in VS Code yet, so the EvoLink models cannot be used`));
+      copilotPasteSteps().forEach((line, i) => ui.sub(`${i + 1}. ${line}`));
+    }
+    report.summary.push(`${t.name}: group=yes models=${models.length} key=${keySet ? 'set' : g.apiKey ? 'plain' : 'missing'} non_evolink=${notEvolink.length} gemini=${gemini.length}`);
+  }
+  ui.print('');
+  if (report.problems.length) ui.title(`${ui.mark('err')} ${L(`发现 ${report.problems.length} 个问题（见上方 ✗）`, `${report.problems.length} problem(s) found (marked above)`)}`);
+  else ui.title(`${ui.mark('ok')} ${L('没有发现问题', 'No problems found')}`);
+  ui.print('');
+  ui.print(ui.dim(L('—— 以下内容可以直接发给客服（Key 已隐去）——', '--- Send the lines below to support (key hidden) ---')));
+  for (const line of report.summary) ui.print(line);
+  if (report.problems.length) ui.print(`problems: ${report.problems.length}`);
+  if (opts.json) process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  return report.problems.length ? EXIT.ERROR : EXIT.OK;
+}
+
+async function resetCopilot(opts) {
+  const interactive = !opts.yes && !opts.json;
+  const state = loadState();
+  const cp = state.copilot;
+  ui.title(L(`EvoLink 撤销配置 · VS Code Chat v${VERSION}`, `EvoLink reset · VS Code Chat v${VERSION}`));
+  if (!cp || !Object.keys(cp.files || {}).length) {
+    ui.info(L('没有找到 evolink setup copilot 的改动记录，无需撤销。', 'No changes recorded by evolink setup copilot; nothing to undo.'));
+    return { result: { ok: true, changes: [] }, code: EXIT.OK };
+  }
+  const actions = [];
+  for (const [file, rec] of Object.entries(cp.files)) {
+    if (!isFile(file)) continue;
+    try {
+      const p = planCopilotRestore(fs.readFileSync(file, 'utf8'), rec);
+      if (p.changed) actions.push({ file, ...p });
+    } catch (e) {
+      ui.warn(L(`${tildify(file)} 现在不是有效的 JSON（${e.message}），没法自动撤销；改动前的副本在 ~/.evolink/backups/ 里。`, `${tildify(file)} is not valid JSON now (${e.message}), so it cannot be undone automatically; the copy from before setup is in ~/.evolink/backups/.`));
+    }
+  }
+  ui.print('');
+  for (const a of actions) ui.print(`  ${tildify(a.file)}  ${a.remove ? L('删除（由 setup 新建）', 'deleted (created by setup)') : L(`去掉 "${COPILOT_GROUP}" 这一组（setup 之前就有的话还原成原来的样子）`, `the "${COPILOT_GROUP}" group goes (or is put back as it was before setup)`)}`);
+  if (actions.some((a) => a.keyWasSet)) ui.info(L('VS Code 钥匙串里保存的 Key 不会跟着删除；要删的话，先在 VS Code 的 Language Models 页面里删掉这一组，再撤销。', "The key VS Code saved in its keychain stays there; to remove it too, delete the group in VS Code's Language Models page before undoing."));
+  if (!actions.length) {
+    ui.ok(L('没有需要撤销的内容。', 'Nothing to undo.'));
+    if (!opts.dryRun) {
+      delete state.copilot;
+      saveState(state);
+    }
+    return { result: { ok: true, changes: [] }, code: EXIT.OK };
+  }
+  if (opts.dryRun) {
+    ui.info(L('这是预览（--dry-run），没有写入任何文件。', 'Preview only (--dry-run); nothing was written.'));
+    return { result: { ok: true, dryRun: true }, code: EXIT.OK };
+  }
+  if (interactive && !(await confirm(L('确认撤销？', 'Undo these changes?'), true))) throw new CancelledError();
+  const backup = newBackupSession();
+  for (const a of actions) {
+    backupFile(backup, a.file, 'chatLanguageModels.json');
+    if (a.remove) fs.unlinkSync(a.file);
+    else writeAtomic(a.file, a.text, { mode: 0o644 });
+  }
+  delete state.copilot;
+  saveState(state);
+  ui.ok(L(`已撤销。改动前的文件备份在 ${tildify(backup.dir)}`, `Undone. Backups are in ${tildify(backup.dir)}`));
+  return { result: { ok: true, backupDir: backup.dir, restored: actions.length }, code: EXIT.OK };
+}
+
+// ---------------------------------------------------------------------------
 // doctor
 
 async function cmdDoctor(opts) {
   const target = opts._[1];
   if (CODEX_TARGETS.includes(target)) return cmdDoctorCodex(opts);
-  if (target && !['claude-code', 'claude'].includes(target)) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex）`, `Unknown target ${target} (claude-code, codex)`), EXIT.USAGE);
+  if (COPILOT_TARGETS.includes(target)) return cmdDoctorCopilot(opts);
+  if (target && !['claude-code', 'claude'].includes(target)) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex、copilot）`, `Unknown target ${target} (claude-code, codex, copilot)`), EXIT.USAGE);
   const report = { command: 'doctor', version: VERSION, problems: [], warnings: [], summary: [] };
   const sandbox = sandboxHome();
   const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
@@ -3446,12 +3840,13 @@ async function cmdReset(opts) {
   const target = opts._[1] || null;
   const codex = !target || CODEX_TARGETS.includes(target);
   const claude = !target || ['claude-code', 'claude'].includes(target);
-  if (!codex && !claude) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex）`, `Unknown target ${target} (claude-code, codex)`), EXIT.USAGE);
+  const copilot = !target || COPILOT_TARGETS.includes(target);
+  if (!codex && !claude && !copilot) throw new CliError(L(`不认识 ${target}（可用：claude-code、codex、copilot）`, `Unknown target ${target} (claude-code, codex, copilot)`), EXIT.USAGE);
   // Without a target, undo everything setup recorded; with nothing recorded at all, the Claude Code part says so.
   const state = loadState();
   const parts = {};
   let code = EXIT.OK;
-  if (claude && (target || state.claudeCode || !state.codex)) {
+  if (claude && (target || state.claudeCode || (!state.codex && !state.copilot))) {
     const r = await resetClaude(opts);
     parts.claudeCode = r.result;
     code = code || r.code;
@@ -3460,6 +3855,12 @@ async function cmdReset(opts) {
     if (parts.claudeCode) ui.print('');
     const r = await resetCodex(opts);
     parts.codex = r.result;
+    code = code || r.code;
+  }
+  if (copilot && (target || state.copilot)) {
+    if (Object.keys(parts).length) ui.print('');
+    const r = await resetCopilot(opts);
+    parts.copilot = r.result;
     code = code || r.code;
   }
   const names = Object.keys(parts);
@@ -3557,7 +3958,7 @@ async function resetClaude(opts) {
 // ---------------------------------------------------------------------------
 // CLI entry
 
-const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode', 'pin-sonnet', 'install-extension']);
+const BOOL_FLAGS = new Set(['yes', 'dry-run', 'json', 'help', 'version', 'install', 'test', 'onboarding', 'key-stdin', 'skip-checks', 'replace-invalid', 'vscode', 'disable-nonessential-traffic', 'auto-mode', 'pin-sonnet', 'install-extension', 'all-models']);
 const VALUE_FLAGS = new Set(['model', 'max-output-tokens', 'base-url', 'registry', 'trust', 'lang']);
 const camel = (s) => s.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
 
@@ -3601,8 +4002,9 @@ function helpText() {
   evolink [setup]      配置 Claude Code（默认命令）
   evolink setup codex  配置 Codex 命令行：新建独立配置档，用 codex -p evolink 启动，不动你原来的 config.toml
   evolink setup codex --vscode  配置 VS Code 等编辑器里的 Codex 扩展：修改 config.toml（终端里直接运行 codex 也会走 EvoLink），默认顺便装上扩展
-  evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex 用 evolink doctor codex
-  evolink reset        撤销 setup 做的改动（只撤销 Codex：evolink reset codex）
+  evolink setup copilot  在 VS Code 内置的 Chat 里加一组 EvoLink 模型（不需要 GitHub 账号）；Key 要在 VS Code 里粘贴一次
+  evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex、Chat 用 evolink doctor codex / copilot
+  evolink reset        撤销 setup 做的改动（只撤销某一项：evolink reset codex / copilot）
 
 常用选项：
   --model <id>         默认模型，如 claude-sonnet-5（Codex 如 gpt-6-sol）；default 表示跟随 Claude Code 默认
@@ -3617,6 +4019,7 @@ function helpText() {
   --no-install         没装 Claude Code（或 Codex）时不自动安装
   --install-extension  顺便给 VS Code / Cursor 等编辑器装上 Claude Code 扩展（默认不装：终端里的 claude 用不到它）
   --no-install-extension  setup codex --vscode 时不装 Codex 扩展（默认会装：没有扩展这个模式用不了）
+  --all-models         setup copilot 时加入这把 Key 能用的全部聊天模型（默认只加推荐的十几个）
   --no-onboarding      不修改 ~/.claude.json
   --no-vscode          不修改编辑器里 Claude Code 扩展的设置
   --no-test            不发测试请求
@@ -3635,8 +4038,9 @@ Usage:
   evolink [setup]      configure Claude Code (default)
   evolink setup codex  configure the Codex CLI: a separate profile, started with codex -p evolink; your config.toml is left alone
   evolink setup codex --vscode  configure the Codex extension in VS Code and similar editors: changes config.toml (a plain codex then uses EvoLink too) and installs the extension
-  evolink doctor       diagnose the setup; output is safe to send to support (Codex: evolink doctor codex)
-  evolink reset        undo what setup changed (Codex only: evolink reset codex)
+  evolink setup copilot  add a group of EvoLink models to VS Code's built-in Chat (no GitHub account needed); paste the key once in VS Code
+  evolink doctor       diagnose the setup; output is safe to send to support (Codex / Chat: evolink doctor codex / copilot)
+  evolink reset        undo what setup changed (one part only: evolink reset codex / copilot)
 
 Options:
   --model <id>         default model, e.g. claude-sonnet-5 (Codex: gpt-6-sol); "default" = Claude Code's own default
@@ -3651,6 +4055,7 @@ Options:
   --no-install         do not install Claude Code (or Codex) when missing
   --install-extension  also install the Claude Code extension into VS Code, Cursor and similar editors (off by default: the terminal claude does not need it)
   --no-install-extension  with setup codex --vscode, do not install the Codex extension (installed by default: the mode needs it)
+  --all-models         with setup copilot, add every chat model this key can use (only the recommended dozen or so by default)
   --no-onboarding      do not touch ~/.claude.json
   --no-vscode          do not touch editor settings for the Claude Code extension
   --no-test            skip the test request
