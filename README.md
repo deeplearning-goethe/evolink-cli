@@ -1,6 +1,6 @@
 # EvoLink CLI（`evolink`）
 
-图片、视频和音频生成 CLI 的首版候选位于 [packages/media-cli](packages/media-cli/README.md)，通过浏览器登录，使用独立命令 `evolink-media`。现有 `evolink` 配置工具保留。
+图片、视频和音频生成 CLI 已发布为 [@evolinkai/media-cli 0.1.0](https://www.npmjs.com/package/@evolinkai/media-cli)，通过浏览器登录，使用独立命令 `evolink-media`。安装和用法见 [packages/media-cli](packages/media-cli/README.md)，需要 Node.js 22+。现有 `evolink` 配置工具保留。
 
 [![CI](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml)
 

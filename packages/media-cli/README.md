@@ -6,7 +6,7 @@ This is a separate package from the repository's existing `@evolinkai/cli` confi
 
 ## Status and installation
 
-Version 0.1.0 is a development candidate. The package name `@evolinkai/media-cli` is provisional and has not been published. Use the commands below only after its release is confirmed.
+Version 0.1.0 is available on [npm](https://www.npmjs.com/package/@evolinkai/media-cli) and as a [GitHub Release](https://github.com/deeplearning-goethe/evolink-cli/releases/tag/media-cli-v0.1.0). Install the package, sign in, install the bundled skill and verify the connection:
 
 ```sh
 npm install -g @evolinkai/media-cli
