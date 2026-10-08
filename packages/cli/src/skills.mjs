@@ -5,11 +5,17 @@ import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { requireThat } from './errors.mjs';
 
+const AGENT_DIRS = {
+  codex: '.agents', 'claude-code': '.claude', cursor: '.agents',
+  gemini: '.agents', opencode: '.agents', copilot: '.agents',
+  openclaw: '.openclaw', hermes: '.hermes',
+};
+
 export async function installSkill({ home = os.homedir(), agent = 'all' } = {}) {
-  requireThat(['all', 'codex', 'claude-code', 'cursor'].includes(agent), 'invalid_agent', 'Choose all, codex, claude-code or cursor.');
+  requireThat(agent === 'all' || Object.hasOwn(AGENT_DIRS, agent), 'invalid_agent', 'Choose all, codex, claude-code, cursor, gemini, opencode, copilot, openclaw or hermes.');
   const source = fileURLToPath(new URL('../skills/evolink-cli/SKILL.md', import.meta.url));
   const content = await fs.readFile(source, 'utf8');
-  const dirs = agent === 'all' ? ['.agents', '.claude'] : [agent === 'claude-code' ? '.claude' : '.agents'];
+  const dirs = agent === 'all' ? [...new Set(Object.values(AGENT_DIRS))] : [AGENT_DIRS[agent]];
   const files = [];
   // Check all destinations before updating any of them.
   for (const dir of dirs) {

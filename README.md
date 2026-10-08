@@ -1,12 +1,16 @@
 # EvoLink CLI（`evolink`）
 
-图片、视频和音频生成 CLI 已发布为 [@evolinkai/media-cli 0.1.0](https://www.npmjs.com/package/@evolinkai/media-cli)，通过浏览器登录，使用独立命令 `evolink-media`。安装和用法见 [packages/media-cli](packages/media-cli/README.md)，需要 Node.js 22+。现有 `evolink` 配置工具保留。
+图片、视频和音频生成 CLI 的统一入口为 `@evolinkai/cli` 和 `evolink`，通过 `evolink auth login` 浏览器登录。安装和用法见 [packages/cli](packages/cli/README.md)，需要 Node.js 22+。已发布的旧名称 [@evolinkai/media-cli 0.1.0](https://www.npmjs.com/package/@evolinkai/media-cli) 仍可用。
+
+## 历史文本配置工具（v0.4.0）
+
+下方保留旧工具的说明。根包是私有开发工作区，根目录脚本保留原行为，开发用命令名为 `evolink-config`。正式的 `evolink` 命令由 `packages/cli` 提供；现有 CDN 安装脚本仍是旧工具。
 
 [![CI](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml)
 
 一条命令把 Claude Code 或 Codex 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **测试阶段**：v0.4.0，支持 Claude Code、Codex 命令行、VS Code 等编辑器里的 Codex 扩展，以及 VS Code 内置的 Chat（Copilot 自定义端点）。npm 包 `@evolinkai/cli` 发布后可用 `npx -y @evolinkai/cli`；发布前请用下面的一行命令。
+> **历史版本**：v0.4.0。下方 CDN 安装脚本用于旧文本配置工具；统一 npm 生成 CLI 的接入说明见上方 `packages/cli`。
 
 ## 用法
 

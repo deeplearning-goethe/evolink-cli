@@ -37,7 +37,7 @@ export class Media {
       created_at: this.now(), expires_at: this.now() + 15 * 60_000, state: 'quoted', client_request_id: `cli-${randomUUID()}` };
     await this.state.write('quotes', id, stored);
     return { ...quote, quote_id: id, input: input.input || {}, max_cost_usd: effectiveCap, cap_source: max_cost_usd !== undefined ? 'user' : effectiveCap !== undefined ? 'quote' : undefined, expires_at: new Date(stored.expires_at).toISOString(),
-      requires_confirmation: true, next_step: `After the user approves, run evolink-media generate ${quote.type} --quote ${id} --confirm.` };
+      requires_confirmation: true, next_step: `After the user approves, run evolink generate ${quote.type} --quote ${id} --confirm.` };
   }
   async load(id) {
     const quote = await this.state.read('quotes', id);
@@ -71,7 +71,7 @@ export class Media {
         quote.state = e.details?.charged === 'no' ? 'refused' : 'outcome_unknown';
         await this.state.write('quotes', id, quote);
         throw new CliError(e.code || 'outcome_unknown', e.message, { ...(e.details || {}), quote_id: id, client_request_id: quote.client_request_id,
-          recovery: `evolink-media tasks resume --quote ${id}` }, e.exitCode);
+          recovery: `evolink tasks resume --quote ${id}` }, e.exitCode);
       }
       quote.state = 'submitted';
       quote.task_id = result.task_id;

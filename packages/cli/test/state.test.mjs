@@ -5,8 +5,30 @@ import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { State } from '../src/state.mjs';
+import { Vault } from '../src/auth.mjs';
 
 const moduleURL = new URL('../src/state.mjs', import.meta.url).href;
+
+test('renamed command retains default and legacy state and credential identity', () => {
+  const current = process.env.EVOLINK_CLI_HOME;
+  const legacy = process.env.EVOLINK_MEDIA_HOME;
+  try {
+    delete process.env.EVOLINK_CLI_HOME;
+    delete process.env.EVOLINK_MEDIA_HOME;
+    const original = new State(path.join(os.homedir(), '.evolink-media'));
+    assert.equal(new State().home, original.home);
+    const server = new URL('https://mcp.evolink.ai/mcp');
+    assert.equal(new Vault(server, new State()).account, new Vault(server, original).account);
+    process.env.EVOLINK_MEDIA_HOME = path.join(os.tmpdir(), 'legacy-cli-state');
+    assert.equal(new State().home, process.env.EVOLINK_MEDIA_HOME);
+    process.env.EVOLINK_CLI_HOME = path.join(os.tmpdir(), 'renamed-cli-state');
+    assert.equal(new State().home, process.env.EVOLINK_CLI_HOME);
+  } finally {
+    if (current === undefined) delete process.env.EVOLINK_CLI_HOME; else process.env.EVOLINK_CLI_HOME = current;
+    if (legacy === undefined) delete process.env.EVOLINK_MEDIA_HOME; else process.env.EVOLINK_MEDIA_HOME = legacy;
+  }
+});
 
 test('separate processes recover a dead owner and keep subsequent operations exclusive', async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-lock-'));

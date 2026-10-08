@@ -16,7 +16,8 @@ export const hash = value => createHash('sha256').update(canonical(value)).diges
 export const validID = id => typeof id === 'string' && /^[a-zA-Z0-9._-]{1,96}$/.test(id) && !id.includes('..');
 
 export class State {
-  constructor(home = process.env.EVOLINK_MEDIA_HOME || path.join(os.homedir(), '.evolink-media')) {
+  // Retain the original storage location so renaming the command preserves sessions and request IDs.
+  constructor(home = process.env.EVOLINK_CLI_HOME || process.env.EVOLINK_MEDIA_HOME || path.join(os.homedir(), '.evolink-media')) {
     this.home = path.resolve(home);
   }
   file(group, id) {

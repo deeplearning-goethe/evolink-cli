@@ -14,10 +14,10 @@ import { upload, download } from '../src/files.mjs';
 import { publicURL } from '../src/network.mjs';
 import { installSkill } from '../src/skills.mjs';
 
-const bin = fileURLToPath(new URL('../bin/evolink-media.mjs', import.meta.url));
+const bin = fileURLToPath(new URL('../bin/evolink.mjs', import.meta.url));
 async function cli(f, home, args, token = 'fixture-command-token') {
   const child = spawn(process.execPath, [bin, ...args, '--server', f.server.href, '--json', '--token-stdin'],
-    { env: { ...process.env, EVOLINK_MEDIA_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
+    { env: { ...process.env, EVOLINK_CLI_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
   child.stdin.end(token);
   let stdout = '', stderr = '';
   child.stdout.on('data', b => { stdout += b; }); child.stderr.on('data', b => { stderr += b; });
@@ -58,7 +58,7 @@ test('real CLI processes: discovery, quote, approval, generation, result and ori
   }
   const list = await cli(f, home, ['tasks', 'list', '--since', '30m']); assert.equal(list.view.tasks.length, 3);
   assert.equal(f.downloads.length, 3);
-  assert.ok(f.downloads.every(h => !h.authorization && !h.cookie && h['user-agent'].startsWith('EvoLinkMediaCLI/')));
+  assert.ok(f.downloads.every(h => !h.authorization && !h.cookie && h['user-agent'].startsWith('EvoLinkCLI/')));
 });
 
 test('lost paid reply: persisted journal and replay recover exactly one task', async t => {
@@ -136,7 +136,7 @@ function randomID() { return '00000000-0000-4000-8000-000000000000'; }
 test('skill installation uses bundled content and protects another skill', async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-skill-')); t.after(() => fs.rm(home, { recursive: true, force: true }));
   const first = await installSkill({ home }); assert.equal(first.updated, false);
-  assert.equal(first.installations.length, 2);
+  assert.equal(first.installations.length, 4);
   assert.equal(await fs.readFile(first.installations[0].path, 'utf8'), await fs.readFile(first.installations[1].path, 'utf8'));
   assert.equal((await installSkill({ home })).updated, true);
   await fs.writeFile(first.path, 'a different user skill');
@@ -145,4 +145,20 @@ test('skill installation uses bundled content and protects another skill', async
   const other = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-skill-one-')); t.after(() => fs.rm(other, { recursive: true, force: true }));
   const selected = await installSkill({ home: other, agent: 'claude-code' });
   assert.equal(selected.installations.length, 1); assert.ok(selected.path.includes('.claude'));
+  for (const [agent, directory] of [['codex', '.agents'], ['cursor', '.agents'], ['gemini', '.agents'], ['opencode', '.agents'],
+    ['copilot', '.agents'], ['openclaw', '.openclaw'], ['hermes', '.hermes']]) {
+    const installed = await installSkill({ home: other, agent });
+    assert.equal(installed.installations.length, 1);
+    assert.equal(installed.path, path.join(other, directory, 'skills/evolink-cli/SKILL.md'));
+  }
+  await assert.rejects(installSkill({ home: other, agent: 'unknown' }), { code: 'invalid_agent' });
+  // An unrelated skill at a later destination prevents updating any earlier file.
+  const protectedHome = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-skill-conflict-'));
+  t.after(() => fs.rm(protectedHome, { recursive: true, force: true }));
+  const installed = await installSkill({ home: protectedHome });
+  const last = installed.installations.at(-1).path;
+  await fs.writeFile(last, 'another skill');
+  await fs.writeFile(installed.path, '---\nname: evolink-cli\n---\n<!-- evolink-media-cli-owned -->\nprevious version');
+  await assert.rejects(installSkill({ home: protectedHome }), { code: 'skill_conflict' });
+  assert.ok((await fs.readFile(installed.path, 'utf8')).endsWith('previous version'));
 });

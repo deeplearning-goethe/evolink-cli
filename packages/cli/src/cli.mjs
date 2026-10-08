@@ -9,7 +9,7 @@ import { upload, download } from './files.mjs';
 import { installSkill } from './skills.mjs';
 import { CliError, requireThat, errorView } from './errors.mjs';
 
-const HELP = `EvoLink Media CLI 0.1.0 (Node.js 22+)
+const HELP = `EvoLink CLI 0.5.0 (Node.js 22+)
 
   auth login [--no-browser]       Sign in and approve in your browser
   auth status | auth logout      Check or revoke this CLI session
@@ -24,10 +24,12 @@ const HELP = `EvoLink Media CLI 0.1.0 (Node.js 22+)
   upload FILE [--upload-path FOLDER]
   uploads get ID                 Recover a lost upload result (free)
   download TASK_ID --output FILE [--index N]
-  skills install [--agent NAME]  Install for all, codex, claude-code or cursor
+  skills install [--agent NAME]  Install the bundled skill for coding agents
   doctor                         Check runtime, login and connection (free)
 
 Options: --json, --server URL, --token-stdin, --help, --version
+Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
+        openclaw, hermes.
 Input: --input JSON or --input-file FILE, plus optional --prompt TEXT.
 Quotes expire in 15 minutes. --confirm is only for an already approved quote.
 Spending caps protect the estimate at submission, not final settlement.
@@ -56,9 +58,9 @@ export function validateCommand(args, options) {
     upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index'], 'skills install': [2, 'agent'], doctor: [1],
   };
   const route = routes[`${command} ${action}`] || routes[command];
-  requireThat(route && args.length === route[0], 'unknown_command', 'Unknown command or argument count. Run evolink-media --help.');
+  requireThat(route && args.length === route[0], 'unknown_command', 'Unknown command or argument count. Run evolink --help.');
   const allowed = new Set(['json', 'server', 'token-stdin', ...route.slice(1)]);
-  requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink-media --help.');
+  requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink --help.');
   if (options.timeout !== undefined) number(options.timeout, 'timeout', 1, 86400, true);
   if (options.type !== undefined) requireThat(['image', 'video', 'audio', ...(command === 'models' ? ['all'] : [])].includes(options.type), 'invalid_type', 'Unsupported media type.');
   if (options.status !== undefined) requireThat(['processing', 'completed', 'failed', 'cancelled'].includes(options.status), 'invalid_status', 'Unsupported task status.');
@@ -127,7 +129,7 @@ export async function dispatch(positionals, options, { state, server, credential
     const balance = await mcp.call('check_balance');
     return { node: process.version, server: server.href, auth: status, connection_verified: balance.ok === true };
   }
-  throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink-media --help.');
+  throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
 function publicView(data) {
@@ -154,8 +156,8 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
   try {
     let positionals;
     try { ({ values: options, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })); }
-    catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink-media --help.'); }
-    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.1.0' }) + '\n' : '0.1.0\n'); return; }
+    catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
+    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.0' }) + '\n' : '0.5.0\n'); return; }
     if (options.help || !positionals.length) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help: HELP }) + '\n' : HELP); return; }
     validateCommand(positionals, options);
     const server = serverURL(options.server);

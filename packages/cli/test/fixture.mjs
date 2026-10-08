@@ -72,7 +72,7 @@ export async function fixture() {
       }
       if (url.pathname.startsWith('/assets/')) {
         state.downloads.push(req.headers);
-        if (!req.headers['user-agent']?.startsWith('EvoLinkMediaCLI/')) { send(403, { error: 'user_agent_required' }); return; }
+        if (!req.headers['user-agent']?.startsWith('EvoLinkCLI/')) { send(403, { error: 'user_agent_required' }); return; }
         res.writeHead(200, { 'Content-Type': 'image/png', ...(state.chunkedDownload ? {} : { 'Content-Length': state.bytes.length }) });
         res.write(state.bytes.subarray(0, 4)); res.end(state.bytes.subarray(4)); return;
       }

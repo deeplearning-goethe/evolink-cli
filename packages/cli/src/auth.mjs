@@ -11,6 +11,7 @@ export class Vault {
   async entry() {
     try {
       const { Entry } = await import('@napi-rs/keyring');
+      // Keep the credential service identity stable across the public command rename.
       return new Entry('EvoLink Media CLI', this.account, { linux: { store: 'secret-service' } });
     } catch { throw this.unavailable(); }
   }
@@ -42,7 +43,7 @@ export class OAuthProvider {
     this.oauthState = randomBytes(32).toString('base64url');
   }
   get clientMetadata() {
-    return { client_name: 'EvoLink Media CLI', application_type: 'native', redirect_uris: [String(this.redirectUrl)],
+    return { client_name: 'EvoLink CLI', application_type: 'native', redirect_uris: [String(this.redirectUrl)],
       token_endpoint_auth_method: 'none', grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope: 'mcp offline_access' };
   }
   state() { return this.oauthState; }
@@ -62,7 +63,7 @@ export class OAuthProvider {
   async saveCodeVerifier(value) { this.verifier = value; }
   async codeVerifier() { requireThat(this.verifier, 'login_expired', 'Start login again.'); return this.verifier; }
   async redirectToAuthorization(url) {
-    if (!this.redirect) throw new CliError('login_required', 'Run evolink-media auth login, then retry this command.');
+    if (!this.redirect) throw new CliError('login_required', 'Run evolink auth login, then retry this command.');
     await this.redirect(url);
   }
   async invalidateCredentials(scope) {
@@ -126,7 +127,7 @@ export class Credentials {
     }
     return this.lock(async () => {
       let saved = await this.vault.read();
-      requireThat(saved?.tokens, 'login_required', 'Run evolink-media auth login.');
+      requireThat(saved?.tokens, 'login_required', 'Run evolink auth login.');
       if (force || saved.expires_at <= Date.now() + 60_000) {
         await auth(this.provider(), { serverUrl: this.server, scope: 'mcp offline_access', fetchFn: this.fetchFn });
         saved = await this.vault.read();

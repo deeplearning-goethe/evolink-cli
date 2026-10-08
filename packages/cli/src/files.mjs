@@ -39,7 +39,7 @@ export async function upload(file, { mcp, state, server, signal, upload_path, fe
     if (result.state === 'done') return result;
     throw new CliError('upload_pending', failure || 'The upload is still being processed.', { upload_id: prepared.upload_id, state: result.state });
   } catch (e) {
-    throw new CliError(e.code || 'upload_unknown', e.message || failure, { upload_id: prepared.upload_id, next_step: `evolink-media uploads get ${prepared.upload_id}` });
+    throw new CliError(e.code || 'upload_unknown', e.message || failure, { upload_id: prepared.upload_id, next_step: `evolink uploads get ${prepared.upload_id}` });
   }
 }
 

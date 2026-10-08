@@ -1,11 +1,11 @@
-name: Media CLI
+name: EvoLink CLI
 
 on:
   pull_request:
-    paths: ['packages/media-cli/**', '.github/workflows/media-cli.yml']
+    paths: ['packages/cli/**', '.github/workflows/cli.yml']
   push:
-    branches: [main, feat/media-cli]
-    paths: ['packages/media-cli/**', '.github/workflows/media-cli.yml']
+    branches: [main, feat/media-cli, feat/cli-branding]
+    paths: ['packages/cli/**', '.github/workflows/cli.yml']
   workflow_dispatch:
 
 permissions:
@@ -22,14 +22,14 @@ jobs:
     timeout-minutes: 15
     defaults:
       run:
-        working-directory: packages/media-cli
+        working-directory: packages/cli
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-          cache-dependency-path: packages/media-cli/package-lock.json
+          cache-dependency-path: packages/cli/package-lock.json
       - run: npm ci --ignore-scripts
       - run: npm run check
       - run: npm test
@@ -37,5 +37,5 @@ jobs:
       - run: npm pack --ignore-scripts
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: media-cli-${{ matrix.os }}-node${{ matrix.node }}
-          path: packages/media-cli/*.tgz
+          name: evolink-cli-${{ matrix.os }}-node${{ matrix.node }}
+          path: packages/cli/*.tgz
