@@ -1,0 +1,22 @@
+{
+  "name": "@evolinkai/media-cli",
+  "version": "0.1.0",
+  "description": "Generate images, video and audio with EvoLink, with browser login and quoted submissions.",
+  "type": "module",
+  "license": "MIT",
+  "engines": { "node": ">=22" },
+  "bin": { "evolink-media": "bin/evolink-media.mjs" },
+  "files": ["bin", "src", "skills", "README.md", "LICENSE"],
+  "repository": { "type": "git", "url": "git+https://github.com/deeplearning-goethe/evolink-cli.git", "directory": "packages/media-cli" },
+  "publishConfig": { "access": "public" },
+  "scripts": {
+    "test": "node --test test/*.test.mjs",
+    "test:mutations": "node test/mutations.mjs",
+    "check": "node --check bin/evolink-media.mjs && node --check src/cli.mjs",
+    "prepublishOnly": "npm run check && npm test && npm run test:mutations"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
+    "@napi-rs/keyring": "2.1.0"
+  }
+}

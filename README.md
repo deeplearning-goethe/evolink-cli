@@ -1,5 +1,7 @@
 # EvoLink CLI（`evolink`）
 
+图片、视频和音频生成 CLI 的首版候选位于 [packages/media-cli](packages/media-cli/README.md)，通过浏览器登录，使用独立命令 `evolink-media`。现有 `evolink` 配置工具保留。
+
 [![CI](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml)
 
 一条命令把 Claude Code 或 Codex 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
