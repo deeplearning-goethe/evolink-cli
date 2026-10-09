@@ -3,9 +3,9 @@ import * as fs from 'node:fs/promises';
 import { State } from './state.mjs';
 import { serverURL } from './network.mjs';
 import { Credentials } from './auth.mjs';
-import { Mcp } from './mcp.mjs';
+import { Api } from './api.mjs';
 import { Media } from './media.mjs';
-import { upload, download, downloadAll } from './files.mjs';
+import { upload, download, downloadAll, getUpload } from './files.mjs';
 import { commandHelp } from './help.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { doctor } from './doctor.mjs';
@@ -26,8 +26,8 @@ Read recent tasks across your EvoLink account (free), newest first.
   --type TYPE      image|video|audio; omit to include all media types
   --since TIME     Creation time: ISO 8601, Unix seconds, or 30m, 2h, 1d
   --until TIME     Inclusive creation-time upper bound; same formats as since
-  --model MODEL    Exact model ID (requires the updated MCP service)
-  --page N         Page number, 1-100000 (default 1; updated MCP service)
+  --model MODEL    Exact model ID
+  --page N         Page number, 1-100000 (default 1)
   --limit N        Integer from 1 to 50 (default 20)
   --json           Return one JSON envelope on stdout
 
@@ -69,7 +69,7 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
                                  Summarize retained task costs; not a bill (free)
   tasks resume --quote ID         Recover using the original request ID
   upload FILE [--upload-path FOLDER]
-  uploads get ID                 Recover a lost upload result (free)
+  uploads get ID                 Read a saved upload receipt (free)
   download TASK_ID --output FILE [--index N]
   download TASK_ID --all --output-dir DIR [--template NAME] [--resume]
   skills install [--agent NAME] [--replace-modified]
@@ -77,7 +77,9 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   skills status [--agent NAME]   Check installed skill content and CLI version
   doctor [--agent NAME]          Check prerequisites, connection, models and skills (free)
 
-Options: --json, --server URL, --token-stdin, --help, --version
+Options: --json, --server RESOURCE_URL, --api-url URL, --files-url URL,
+         --token-stdin, --help, --version
+The CLI calls the platform API directly. --server identifies the OAuth resource.
 Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
         openclaw, hermes.
 Input: --input JSON or --input-file FILE, plus optional --prompt TEXT.
@@ -86,7 +88,7 @@ Task list types: image, video, audio; omit --type to include all types.
 Task list example: evolink tasks list --status processing --json
 Run evolink tasks list --help for filter details and recovery caveats.
 Each command accepts --help --json for its machine-readable command reference.
-New model/docs/usage and page/model/until filters require the updated MCP service.
+Model/docs/usage capabilities come from the bundled shared platform module.
 After upgrading the package, run evolink skills install to refresh its skill.
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
@@ -96,7 +98,7 @@ Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
 
-const OPTIONS = Object.fromEntries(['server', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
+const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
   'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
 for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
@@ -123,7 +125,7 @@ export function validateCommand(args, options) {
   };
   const route = routes[`${command} ${action}`] || routes[command];
   requireThat(route && args.length === route[0], 'unknown_command', 'Unknown command or argument count. Run evolink --help.');
-  const allowed = new Set(['json', 'server', 'token-stdin', ...route.slice(1)]);
+  const allowed = new Set(['json', 'server', 'api-url', 'files-url', 'token-stdin', ...route.slice(1)]);
   requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink --help.');
   if (options.agent !== undefined) validateAgent(options.agent);
   if (options.timeout !== undefined) number(options.timeout, 'timeout', command === 'setup' || command === 'auth' ? 30 : 1,
@@ -182,30 +184,31 @@ async function estimateArgs(options) {
   return { model: options.model, input, ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
-export async function dispatch(positionals, options, { state, server, credentials, mcp, signal, progress, skillHome }) {
+export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome }) {
+  client = mcp;
   const [command, action, id] = positionals;
-  const media = new Media({ mcp, state, server });
+  const media = new Media({ client, state, server });
   if (command === 'auth') {
     if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
     if (action === 'status') return credentials.status();
     if (action === 'logout') return credentials.logout();
   }
-  if (command === 'balance') return mcp.call('check_balance');
+  if (command === 'balance') return client.call('check_balance');
   if (command === 'models') {
-    if (action === 'show' && id) return mcp.call('get_model', { model: id });
+    if (action === 'show' && id) return client.call('get_model', { model: id });
     if (action === 'schema' && id) {
-      const model = await mcp.call('get_model', { model: id });
-      requireThat(model.input_schema, 'schema_unavailable', 'The service has no versioned input schema for this model. Use models show for documented parameters; ask for the MCP service update if needed.');
+      const model = await client.call('get_model', { model: id });
+      requireThat(model.input_schema, 'schema_unavailable', 'The service has no versioned input schema for this model. Use models show for documented parameters; update the CLI if needed.');
       return model;
     }
-    if (action === 'search') return mcp.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20,
+    if (action === 'search') return client.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20,
       ...(options.page !== undefined ? { page: Number(options.page) } : {}) },
       options.page !== undefined ? { requireCapability: true, requiredInputs: ['page'] } : undefined);
-    if (action === 'recommend') return mcp.call('recommend_models', { type: options.type, query: options.query,
+    if (action === 'recommend') return client.call('recommend_models', { type: options.type, query: options.query,
       references: options.references ? references(options.references) : [], limit: number(options.limit, 'limit', 1, 10, true) || 3 }, { requireCapability: true });
   }
-  if (command === 'docs') return mcp.call('search_docs', { query: options.query, type: options.type || 'all', limit: number(options.limit, 'limit', 1, 20, true) || 5 }, { requireCapability: true });
-  if (command === 'usage') return mcp.call('get_task_usage', { since: options.since || '30d', until: options.until, model: options.model, type: options.type,
+  if (command === 'docs') return client.call('search_docs', { query: options.query, type: options.type || 'all', limit: number(options.limit, 'limit', 1, 20, true) || 5 }, { requireCapability: true });
+  if (command === 'usage') return client.call('get_task_usage', { since: options.since || '30d', until: options.until, model: options.model, type: options.type,
     max_pages: number(options['max-pages'], 'max-pages', 1, 20, true) || 5 }, { requireCapability: true });
   if (command === 'estimate') return media.estimate(await estimateArgs(options));
   if (command === 'generate') {
@@ -219,33 +222,34 @@ export async function dispatch(positionals, options, { state, server, credential
     return result;
   }
   if (command === 'tasks') {
-    if (action === 'get' && id) return mcp.call('get_task', { task_id: id, wait_seconds: 0 });
+    if (action === 'get' && id) return client.call('get_task', { task_id: id, wait_seconds: 0 });
     if (action === 'wait' && id) return media.wait(id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress });
     if (action === 'resume' && options.quote) return media.resume(options.quote);
-    if (action === 'batch') return mcp.call('list_tasks', { task_ids: taskIds(options.ids) });
+    if (action === 'batch') return client.call('list_tasks', { task_ids: taskIds(options.ids) });
     if (action === 'list') {
       const added = Object.fromEntries(['model', 'until', 'page'].filter(key => options[key] !== undefined).map(key => [key, key === 'page' ? Number(options[key]) : options[key]]));
-      return mcp.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20, ...added },
+      return client.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20, ...added },
         Object.keys(added).length ? { requireCapability: true, requiredInputs: Object.keys(added) } : undefined);
     }
   }
-  if (command === 'upload' && action) return upload(action, { mcp, state, server, signal, upload_path: options['upload-path'] });
+  if (command === 'upload' && action) return upload(action, { client, state, server, signal, upload_path: options['upload-path'] });
   if (command === 'uploads' && action === 'get' && id) {
-    const result = await mcp.call('get_upload', { upload_id: id });
+    if (client.uploadFile) return getUpload(id, { client, state, server });
+    const result = await client.call('get_upload', { upload_id: id });
     // A waiting upload may contain a bearer-like one-time URL; do not expose it.
     const { upload_url, text, ...view } = result;
     return { ...view, text: upload_url ? 'The upload is waiting for its original one-time PUT. No address is exposed by this recovery query.' : text };
   }
   if (command === 'download' && action) {
-    if (options.all) return downloadAll(action, options['output-dir'], { mcp, server, state, signal, template: options.template, resume: options.resume });
+    if (options.all) return downloadAll(action, options['output-dir'], { client, server, state, signal, template: options.template, resume: options.resume });
     requireThat(options.output, 'missing_output', 'Pass --output with a new local file path.');
-    return download(action, options.output, { mcp, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
+    return download(action, options.output, { client, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
   }
   if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent, replaceModified: options['replace-modified'] });
   if (command === 'skills' && action === 'status') return skillStatus({ home: skillHome, agent: options.agent });
-  if (command === 'setup') return setup({ state, server, credentials, mcp, agent: options.agent, skillHome,
+  if (command === 'setup') return setup({ state, server, credentials, client, agent: options.agent, skillHome,
     noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
-  if (command === 'doctor') return doctor({ state, server, credentials, mcp, agent: options.agent, skillHome });
+  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
@@ -285,8 +289,8 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const state = new State();
     const token = options['token-stdin'] ? await stdinToken(io.stdin) : undefined;
     const credentials = new Credentials({ server, state, token });
-    const mcp = new Mcp(credentials, { signal: controller.signal });
-    const result = publicView(await dispatch(positionals, options, { state, server, credentials, mcp, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
+    const client = new Api(credentials, { signal: controller.signal, apiUrl: options['api-url'], filesUrl: options['files-url'] });
+    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
     const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
     if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;

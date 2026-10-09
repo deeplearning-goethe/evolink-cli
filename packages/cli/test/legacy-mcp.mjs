@@ -1,7 +1,8 @@
-import { CLI_VERSION } from './version.mjs';
+// Legacy transport fixture for CLI 0.6.0 state compatibility tests only.
+import { CLI_VERSION } from '../src/version.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
-import { CliError, requireThat, safeMessage } from './errors.mjs';
+import { CliError, requireThat, safeMessage } from '../src/errors.mjs';
 
 export class Mcp {
   constructor(credentials, { signal } = {}) { this.credentials = credentials; this.signal = signal; }

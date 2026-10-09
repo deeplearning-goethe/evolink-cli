@@ -2,7 +2,7 @@
 
 Read only when comparing models, retrieving schemas, searching model references, querying known task batches or downloading several results.
 
-Use `<command> --help --json` for a machine-readable command description, option enums, bounds and defaults. Help is local and needs no login. Discovery extensions and new list filters require the updated MCP service. `capability_unavailable` means the service does not advertise the tool or input field; report the required service update. Do not silently remove a requested filter.
+Use `<command> --help --json` for a machine-readable command description, option enums, bounds and defaults. Help is local and needs no login. Discovery extensions and new list filters come from the bundled shared platform module. `capability_unavailable` means the installed CLI lacks the operation or input field; report the required CLI update. Do not silently remove a requested filter.
 
 ## Model discovery
 

@@ -9,6 +9,7 @@ import { dispatch, validateCommand } from '../src/cli.mjs';
 import { State } from '../src/state.mjs';
 import { downloadAll, downloadNames } from '../src/files.mjs';
 import { fixture } from './fixture.mjs';
+import { Mcp } from './legacy-mcp.mjs';
 
 const bin = fileURLToPath(new URL('../bin/evolink.mjs', import.meta.url));
 async function homeFor(t) {
@@ -59,31 +60,13 @@ test('seed 20261009: new page/model/until combinations are forwarded without los
   }
 });
 
-test('updated CLI refuses missing service tools and missing page schema before calling a tool', async t => {
-  const home = await homeFor(t); const f = await fixture(); t.after(f.close);
-  for (const args of [['usage'], ['docs', 'search', '--query', 'voice'], ['tasks', 'list', '--page', '2']]) {
-    const result = await cli(home, args, f.server);
-    assert.equal(result.code, 1); assert.equal(result.view.error.code, 'capability_unavailable');
-    assert.equal(result.view.error.details.request_sent, false);
+test('legacy MCP adapter refuses unsupported capabilities before business tool calls', async t => {
+  const f = await fixture(); t.after(f.close);
+  const remote = new Mcp({ server: f.server, access: async () => ({ access_token: 'fixture-only-token', binding: 'test' }) });
+  for (const [name, args, requiredInputs] of [['get_task_usage', {}, []], ['search_docs', { query: 'voice' }, []], ['list_tasks', { page: 2 }, ['page']]]) {
+    await assert.rejects(remote.call(name, args, { requireCapability: true, requiredInputs }), error => error.code === 'capability_unavailable' && error.details.request_sent === false);
   }
-  f.tools = [{ name: 'list_tasks', inputSchema: { type: 'object', properties: {} } }];
-  assert.equal((await cli(home, ['tasks', 'list', '--page', '2'], f.server)).view.error.code, 'capability_unavailable');
   assert.equal(f.calls.length, 0); assert.equal(f.paid.size, 0);
-});
-
-test('real CLI executes advertised discovery, usage, pagination and legacy batch queries', async t => {
-  const home = await homeFor(t); const f = await fixture(); t.after(f.close);
-  f.tools = ['get_task_usage', 'recommend_models', 'search_docs', 'list_tasks'].map(name => ({ name, inputSchema: { type: 'object', properties: { page: {}, model: {}, until: {} } } }));
-  f.responses = {
-    get_task_usage: args => ({ scope: 'account_retained_task_summary', is_bill: false, args }),
-    recommend_models: args => ({ models: [], args }), search_docs: args => ({ documents: [], args }),
-  };
-  for (const args of [['usage', '--max-pages', '2'], ['models', 'recommend', '--type', 'video', '--references', 'image,audio'], ['docs', 'search', '--query', 'voice'],
-    ['tasks', 'list', '--page', '3', '--model', 'a-model'], ['tasks', 'batch', '--ids', 'task-one,task-two,task-one']]) {
-    const result = await cli(home, args, f.server); assert.equal(result.code, 0, JSON.stringify(result));
-  }
-  assert.deepEqual(f.calls.at(-1), { name: 'list_tasks', args: { task_ids: ['task-one', 'task-two'] } });
-  assert.equal(f.paid.size, 0);
 });
 
 test('invalid new enum, range and mutually exclusive options are rejected locally', () => {

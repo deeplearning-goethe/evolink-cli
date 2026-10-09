@@ -13,13 +13,13 @@ const COMMANDS = {
   setup: ['[options]', 'Reuse or finish login, install and verify the skill. Free.', { agent, ...login }],
   'auth login': ['[options]', 'Browser OAuth login. Keep the command running until the callback completes.', login],
   'auth status': ['', 'Check this CLI login without spending money.', {}],
-  'auth logout': ['', 'Revoke this CLI session.', {}],
-  balance: ['', 'Read account balance and the calling MCP key limits. Free.', {}],
+  'auth logout': ['', 'Revoke this CLI session; other OAuth sessions retain access.', {}],
+  balance: ['', 'Read account balance and the shared CLI/MCP OAuth key limits. Free.', {}],
   'models search': ['[options]', 'Search currently available models; search order is not a quality ranking.', { query: string('Search keywords'), type: allMedia, limit: integer(1, 50, 20), page: integer(1, 100000, 1) }],
   'models show': ['MODEL', 'Read documented parameters, example input, reference fields and pricing. Free.', {}],
-  'models schema': ['MODEL', 'Read versioned input and generation-submission response schemas. The response schema may omit final task outputs; runtime constraints also apply. Requires updated MCP.', {}],
-  'models recommend': ['--type TYPE [options]', 'Compare documented available alternatives with selection reasons. Unit rates are not total quotes. Requires updated MCP.', { type: media, query: string('Search keywords; every term must match'), references: string('Comma-separated image,video,audio'), limit: integer(1, 10, 3) }],
-  'docs search': ['--query TEXT [options]', 'Search versioned official model reference excerpts, not the live full website. Requires updated MCP.', { query: string('Required model reference keywords'), type: allMedia, limit: integer(1, 20, 5) }],
+  'models schema': ['MODEL', 'Read versioned input and generation-submission response schemas. The response schema may omit final task outputs; runtime constraints also apply.', {}],
+  'models recommend': ['--type TYPE [options]', 'Compare documented available alternatives with selection reasons. Unit rates are not total quotes.', { type: media, query: string('Search keywords; every term must match'), references: string('Comma-separated image,video,audio'), limit: integer(1, 10, 3) }],
+  'docs search': ['--query TEXT [options]', 'Search versioned official model reference excerpts, not the live full website.', { query: string('Required model reference keywords'), type: allMedia, limit: integer(1, 20, 5) }],
   estimate: ['--model MODEL --input-file FILE [options]', 'Prepare a 15-minute quote. Show cost uncertainties and obtain user approval. max-cost-usd checks the submission estimate; it does not cap final settlement.', {
     model: string('Required model ID'), input: string('JSON object; mutually exclusive with input-file'), 'input-file': string('Local JSON file; mutually exclusive with input'), prompt: string('Optional prompt'),
     'max-cost-usd': { type: 'number', exclusive_minimum: 0, maximum: 10000 }, 'media-seconds': { type: 'number', exclusive_minimum: 0, maximum: 3600 },
@@ -31,11 +31,11 @@ const COMMANDS = {
     status: choice(['processing', 'completed', 'failed', 'cancelled']), type: media, since: time, until: time, model: string('Exact model ID'), page: integer(1, 100000, 1), limit: integer(1, 50, 20),
   }],
   'tasks resume': ['--quote ID', 'Recover an uncertain submission with the original request ID. Use generate for an approved quote that has never been submitted.', { quote: string('Original quote ID') }],
-  usage: ['[options]', 'Summarize reported completed-task credits by creation time. Account-wide retained tasks; bounded scan with coverage and missing-cost metadata. Excludes payments/refunds and pending reservations. Not a bill or final budget. Requires updated MCP.', {
+  usage: ['[options]', 'Summarize reported completed-task credits by creation time. Account-wide retained tasks; bounded scan with coverage and missing-cost metadata. Excludes payments/refunds and pending reservations. Not a bill or final budget.', {
     since: { ...time, default: '30d' }, until: time, model: string('Exact model ID'), type: media, 'max-pages': integer(1, 20, 5),
   }],
   upload: ['FILE [options]', 'Upload one readable local reference. Free. One-time upload addresses must not be exposed.', { 'upload-path': string('Optional upload folder') }],
-  'uploads get': ['UPLOAD_ID', 'Recover upload state without exposing its one-time address. Free.', {}],
+  'uploads get': ['UPLOAD_ID', 'Read a saved upload receipt. An unknown result cannot be recovered by request ID; this command never uploads again. Free.', {}],
   download: ['TASK_ID --output FILE | --all --output-dir DIR [options]', 'Download original media, verify content and preserve existing files. --all writes recovery receipts; --resume verifies prior SHA-256 hashes and downloads the remainder. Partial delivery exits nonzero and never regenerates.', {
     output: string('New file path, for a single result'), index: integer(1, 50, 1), all: flag, 'output-dir': string('Directory, required with all'),
     template: { ...string('Filename placeholders: {task_id}, {index}, {kind}, {ext}; no directories'), default: '{task_id}-{index}.{ext}' }, resume: flag,
@@ -63,6 +63,6 @@ export function commandHelp(positionals) {
   const usage = `evolink ${name}${argumentsText ? ` ${argumentsText}` : ''}`;
   const help = [`Usage: ${usage}`, '', description, '',
     ...Object.entries(options).map(([key, spec]) => `  --${key}  ${spec.allowed_values ? spec.allowed_values.join('|') : spec.description || spec.type}${spec.minimum !== undefined ? `; ${spec.minimum}-${spec.maximum}` : ''}${spec.default !== undefined ? ` (default ${spec.default})` : ''}`),
-    '', 'Connection/output options: --server URL, --token-stdin, --json, --help.', 'This help query needs no login and sends no request.', ''].join('\n');
+    '', 'Connection/output options: --server RESOURCE_URL, --api-url URL, --files-url URL, --token-stdin, --json, --help.', 'This help query needs no login and sends no request.', ''].join('\n');
   return { command: name, usage, description, options, help };
 }

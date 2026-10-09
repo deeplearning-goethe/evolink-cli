@@ -7,6 +7,8 @@ import { CLI_VERSION } from './version.mjs';
 
 export const SERVER = 'https://mcp.evolink.ai/mcp';
 export const ISSUER = 'https://passport.evolink.ai';
+export const API = 'https://api.evolink.ai';
+export const FILES = 'https://files-api.evolink.ai';
 export const USER_AGENT = `EvoLinkCLI/${CLI_VERSION}`;
 export const loopback = url => url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
 
@@ -19,7 +21,7 @@ export function serverURL(value = SERVER) {
 }
 
 export function authFetch(server, fetchFn = fetch) {
-  const origins = new Set([server.origin, server.href === SERVER ? ISSUER : server.origin]);
+  const origins = new Set([server.href === SERVER ? ISSUER : server.origin]);
   return async (input, options = {}) => {
     const url = new URL(input instanceof Request ? input.url : input);
     requireThat(origins.has(url.origin) && !url.username && !url.password, 'untrusted_auth_server', 'The login endpoint is outside the configured EvoLink service.');
@@ -27,6 +29,15 @@ export function authFetch(server, fetchFn = fetch) {
     headers.set('User-Agent', USER_AGENT);
     return fetchFn(input, { ...options, headers, redirect: 'error', signal: options.signal || AbortSignal.timeout(30_000) });
   };
+}
+
+export function serviceURL(value, production, resource) {
+  let url;
+  try { url = new URL(value); } catch { throw new CliError('invalid_api_url', 'Invalid platform service URL.'); }
+  requireThat(!url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
+    && (url.origin === production || loopback(resource) && loopback(url)),
+    'invalid_api_url', 'Use the EvoLink production service, or an explicit loopback service with a loopback test resource.');
+  return url;
 }
 
 const blocked = new net.BlockList();

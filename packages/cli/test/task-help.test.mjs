@@ -116,15 +116,15 @@ test('real CLI forwards valid filters; pending and failed task outcomes remain s
   const home = await homeFor(t);
   const f = await fixture(); t.after(f.close);
   f.tasks.set('queued-task', { task_id: 'queued-task', status: 'pending', type: 'video' });
-  f.tasks.set('failed-task', { task_id: 'failed-task', status: 'failed', type: 'image' });
+  f.tasks.set('failed-task', { task_id: 'failed-task', status: 'failed', type: 'video' });
   for (const status of [undefined, ...statuses]) {
     const result = await cli(home, ['tasks', 'list', ...(status ? ['--status', status] : []), '--type', 'video', '--since', '30m', '--limit', '50'],
       { server: f.server, token: 'fixture-task-help-token' });
     assert.equal(result.code, 0); assert.equal(result.view.ok, true);
     assert.equal(f.calls.at(-1).name, 'list_tasks');
-    assert.deepEqual(f.calls.at(-1).args, { ...(status ? { status } : {}), type: 'video', since: '30m', limit: 50 });
-    // The fixture records filters but deliberately returns both response states unchanged.
-    assert.deepEqual(result.view.tasks.map(task => task.status), ['pending', 'failed']);
+    assert.deepEqual(f.calls.at(-1).args, { ...(status ? { status } : {}), type: 'video', page: 1, limit: 50 });
+    const expected = status === undefined ? ['pending', 'failed'] : status === 'processing' ? ['pending'] : status === 'failed' ? ['failed'] : [];
+    assert.deepEqual(result.view.tasks.map(task => task.status), expected);
   }
   assert.equal(f.paid.size, 0);
 });
