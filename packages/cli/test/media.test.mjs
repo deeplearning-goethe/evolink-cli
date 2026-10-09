@@ -114,3 +114,16 @@ test('invalid command options fail before any task is submitted', () => {
   assert.throws(() => validateCommand(['balance'], { confirm: true }));
   assert.throws(() => validateCommand(['tasks', 'get', 'id', 'extra'], {}));
 });
+
+
+test('charged=no without verified submission evidence cannot refuse recovery', async t => {
+  const { media, mcp, state } = await context(t);
+  const quote = await media.estimate({ model: 'image', input: { prompt: 'test' } });
+  const original = mcp.call.bind(mcp);
+  mcp.call = async (name, args) => {
+    if (name.startsWith('generate_')) throw Object.assign(new Error('ambiguous rejection'), { details: { charged: 'no' } });
+    return original(name, args);
+  };
+  await assert.rejects(media.generate('image', quote.quote_id, { confirmed: true }), error => error.details.charged === 'unknown');
+  assert.equal((await state.read('quotes', quote.quote_id)).state, 'outcome_unknown');
+});

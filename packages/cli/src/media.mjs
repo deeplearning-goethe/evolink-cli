@@ -100,9 +100,9 @@ export class Media {
         result = await this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id });
         requireThat(typeof result.task_id === 'string' && result.task_id.length > 0, 'outcome_unknown', 'The submission returned no task ID. Recover with the original quote.');
       } catch (e) {
-        quote.state = e.details?.charged === 'no' ? 'refused' : 'outcome_unknown';
+        quote.state = e.details?.charged === 'no' && ['not_submitted', 'rejected'].includes(e.details?.submission_state) ? 'refused' : 'outcome_unknown';
         await this.state.write('quotes', id, quote);
-        throw new CliError(e.code || 'outcome_unknown', e.message, { ...(e.details || {}), quote_id: id, client_request_id: quote.client_request_id,
+        throw new CliError(e.code || 'outcome_unknown', e.message, { ...(e.details || {}), ...(quote.state === 'outcome_unknown' ? { charged: 'unknown', submission_state: 'outcome_unknown' } : {}), quote_id: id, client_request_id: quote.client_request_id,
           recovery: `evolink tasks resume --quote ${id}` }, e.exitCode);
       }
       quote.state = 'submitted';

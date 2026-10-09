@@ -113,6 +113,40 @@ test('a lost upload reply stays unknown and a recovery read never uploads again'
   assert.equal(f.uploadHeaders.length, 1);
 });
 
+test('lost direct upload replies recover the original receipt without another POST', async t => {
+  const { f, home, client, state } = await context(t); f.loseRestUploadReply = true; f.receiptSupport = true;
+  const file = path.join(home, 'reference.png'); await fs.writeFile(file, f.bytes);
+  let id;
+  await assert.rejects(upload(file, { client, state, server: f.server }), error => { id = error.details.upload_id; return error.code === 'upload_unknown'; });
+  assert.equal(f.uploadHeaders[0]['x-evo-upload-id'], id);
+  f.receiptFailure = true;
+  await assert.rejects(getUpload(id, { client, state, server: f.server }), error => error.code === 'upload_unknown' && error.details.upload_id === id);
+  f.receiptFailure = false;
+  const result = await getUpload(id, { client, state, server: f.server });
+  assert.equal(result.state, 'done'); assert.equal(result.file_id, 'fixture-file');
+  assert.equal(f.uploadHeaders.length, 1); assert.equal(f.mcpRequests || 0, 0);
+  const saved = await fs.readFile(state.file('uploads', id), 'utf8');
+  assert.equal(saved.includes('evup_'), false); assert.equal(saved.includes('fixture-direct-access'), false);
+});
+
+test('new CLI grants use advertised official identity while saved DCR sessions still refresh', async t => {
+  const { f, credentials, vault } = await context(t); credentials.token = undefined;
+  await credentials.login({ browser: url => fetch(url) });
+  assert.equal(f.clients.length, 1);
+  f.firstPartyMedia = true; f.noRegistrationEndpoint = true; vault.value.expires_at = 0;
+  await credentials.access(); assert.equal(f.refreshCount, 1);
+  // Switching identity happens only on a new grant, never on refresh/recovery.
+  await credentials.login({ browser: url => fetch(url) });
+  assert.equal(f.clients.length, 1);
+  assert.equal([...f.refreshes.values()].at(-1), 'evolink-cli');
+  vault.value.expires_at = 0; await credentials.access(); assert.equal(f.refreshCount, 2);
+  f.firstPartyMedia = false; f.noRegistrationEndpoint = false;
+  await credentials.login({ browser: url => fetch(url) });
+  assert.equal(f.clients.length, 2);
+  assert.match([...f.refreshes.values()].at(-1), /^dcr_/);
+  await credentials.logout(); assert.equal(f.mcpRequests || 0, 0);
+});
+
 test('saved task recovery from a pre-split quote only reads the original task', async t => {
   const { f, media, state } = await context(t);
   const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'test' } });
@@ -248,4 +282,32 @@ test('REST capability commands use local discovery and gateway task APIs while M
   assert.equal(delivery.ok, true); assert.equal(delivery.files.length, 1);
   assert.ok((await downloadAll('task-direct-0', path.join(home, 'delivery'), { ...opts, resume: true })).files[0].verified_existing);
   assert.equal(f.mcpRequests || 0, 0); assert.equal(f.paid.size, 0);
+});
+
+
+test('ambiguous paid responses retain the original quote and independent accepted ledger', async t => {
+  for (const kind of ['image', 'video', 'audio']) for (const fault of ['503', 'body', 'malformed']) {
+    const { f, state, credentials } = await context(t);
+    const ledger = new Set(); let broken = true;
+    const client = new Api(credentials, { fetchFn: async (url, options) => {
+      if (new URL(url).pathname === `/v1/${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audios'}/generations`) {
+        ledger.add(new Headers(options.headers).get('idempotency-key'));
+        if (broken) {
+          if (fault === '503') return new Response(JSON.stringify({ error: { code: 'service_unavailable', message: 'Bearer sk-synthetic secret.upstream.test' } }), { status: 503 });
+          if (fault === 'body') return { ok: true, headers: new Headers(), text: async () => { throw new Error('secret.upstream.test'); } };
+          return new Response('{}');
+        }
+      }
+      return fetch(url, options);
+    } });
+    const media = new Media({ client, state, server: f.server });
+    const quote = await media.estimate({ model: `fixture-${kind}`, input: { prompt: 'test' } });
+    await assert.rejects(media.generate(kind, quote.quote_id, { confirmed: true }), error => error.details.charged === 'unknown');
+    const saved = await state.read('quotes', quote.quote_id);
+    assert.equal(saved.state, 'outcome_unknown'); assert.equal(ledger.size, 1);
+    broken = false;
+    const recovered = await media.resume(quote.quote_id);
+    assert.equal(recovered.client_request_id, saved.client_request_id);
+    assert.equal(ledger.size, 1); assert.equal(f.paid.size, 1);
+  }
 });
