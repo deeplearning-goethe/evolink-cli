@@ -26,7 +26,21 @@ The same setup prompt can be used in coding assistants with terminal access:
 >
 > 媒体生成默认使用 EvoLink，每次付费任务先报价，等我明确确认后再生成。
 
+For an installation preflight in a POSIX shell, treat an absent command as an expected first-time setup state:
+
+```sh
+if command -v evolink >/dev/null 2>&1; then
+  evolink --version
+else
+  printf '%s\n' 'EvoLink CLI is not installed or not on PATH.'
+fi
+```
+
+Check Node.js and npm separately when installation is needed. In PowerShell, use `Get-Command evolink -ErrorAction SilentlyContinue` inside an `if`. If installation already succeeded, check PATH and the active Node/npm installation. Do not suppress actual version, runtime or installation failures with `|| true`. `auth status --json` returning `ok: true` and `authenticated: false` means sign-in is needed; an error should be resolved before login.
+
 The skill is bundled with the package. By default it installs into `~/.agents/skills/evolink-cli` (Codex, Cursor, Gemini CLI, OpenCode and Copilot CLI), `~/.claude/skills/evolink-cli` (Claude Code), `~/.openclaw/skills/evolink-cli` (OpenClaw) and `~/.hermes/skills/evolink-cli` (Hermes). Select one with `skills install --agent NAME`; run `--help` for the supported names. Verify discovery in the assistant rather than treating a written skill file as proof of integration. Browser-only chat assistants should keep using the hosted MCP connection. See [Claude Code skill locations](https://code.claude.com/docs/en/skills) and [Cursor skill locations](https://cursor.com/docs/skills).
+
+After upgrading the npm package, run `evolink skills install` again to refresh the installed skill copies, then verify that the assistant discovers the updated skill. Open a new conversation only if discovery does not refresh. Fix reusable guidance in `skills/evolink-cli/SKILL.md` in this package; editing only a local installed copy will not distribute the fix.
 
 ## Quoted generation
 
@@ -49,13 +63,28 @@ For video/audio, choose the corresponding generation command and a model's docum
 ```sh
 evolink tasks get TASK_ID --json
 evolink tasks list --since 30m --type video --json
+evolink tasks list --status processing --json
+evolink tasks list --status completed --type video --limit 50 --json
 evolink tasks resume --quote QUOTE_ID --json
 evolink upload /absolute/reference.mp4 --json
 evolink uploads get UPLOAD_ID --json
 evolink download TASK_ID --output /absolute/result.mp4 --index 1 --json
 ```
 
-The CLI persists the request ID before paid submission. Recovery reuses that ID; it never silently submits with a new one. After an expired uncertain quote, inspect recent tasks before considering another paid submission. Ctrl-C stops local waiting, not generation. Task links expire after 24 hours.
+Task-list filters are case-sensitive:
+
+| Option | Allowed values | When omitted |
+| --- | --- | --- |
+| `--status` | `processing`, `completed`, `failed`, `cancelled` | Recent tasks across all states |
+| `--type` | `image`, `video`, `audio` | All media types |
+| `--since` | ISO 8601, Unix seconds, or a relative time such as `30m`, `2h`, `1d` | No creation-time filter |
+| `--limit` | Integer from 1 to 50 | 20 |
+
+`processing` includes queued tasks. Do not use `pending`, `queued`, `canceled` or `all` as a status filter. A task response can report `pending`; response statuses and accepted list filters are separate contracts. `cancelled` lets you read that state; this CLI does not provide a cancellation command. Run `evolink tasks list --help` for details, or add `--json` for its machine-readable help envelope.
+
+An invalid status is rejected locally before login or an MCP request. The `invalid_status` error includes `param`, the supplied `value`, `allowed_values`, `queued_filter`, `request_sent: false` and a recovery `next_step`. Correct the free query rather than creating another paid task. A successful query with an empty list, or a task whose `status` is `failed`, is not a failed CLI invocation.
+
+The CLI persists the request ID before paid submission. Recovery reuses that ID; it never silently submits with a new one. For an uncertain submission, omit `--status` so completed or failed tasks remain visible. Lists are account-wide, newest first and limited to the returned recent batch; `--since` filters that batch rather than searching all history. An empty list does not prove no task was created. Keep the original IDs and use `tasks get` or `tasks resume` as appropriate; after an expired uncertain quote, inspect recent tasks before considering another paid submission. Ctrl-C stops local waiting, not generation. Task links expire after 24 hours.
 
 Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, stream at most 1 GiB per result, and refuse to overwrite existing files. These commands transfer originals and do not alter the generated content or guarantee host inline previews.
 

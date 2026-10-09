@@ -21,6 +21,11 @@ const mutants = [
   ['callback-state', 'src/auth.mjs', "url.searchParams.get('state') !== state", 'false'],
   ['logout-retention', 'src/auth.mjs', "requireThat(response.ok, 'logout_failed'", "requireThat(true, 'logout_failed'"],
   ['download-ua', 'src/network.mjs', "headers: { 'User-Agent': USER_AGENT }, signal:", "headers: {}, signal:"],
+  ['status-filter-validation', 'src/cli.mjs', 'TASK_STATUS_FILTERS.includes(options.status)', 'true'],
+  ['status-pending-alias', 'src/cli.mjs', "Object.freeze(['processing', 'completed', 'failed', 'cancelled'])", "Object.freeze(['processing', 'completed', 'failed', 'cancelled', 'pending'])"],
+  ['status-error-values', 'src/cli.mjs', 'allowed_values: TASK_STATUS_FILTERS', 'allowed_values: []'],
+  ['status-filter-forwarding', 'src/cli.mjs', 'status: options.status, since:', 'status: undefined, since:'],
+  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : HELP', '? HELP : HELP'],
 ];
 
 let killed = 0;
@@ -33,8 +38,9 @@ for (const [name, file, before, after] of mutants) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const tests = ['media.test.mjs', 'auth.test.mjs', 'e2e.test.mjs'].map(n => path.join(home, 'test', n));
-    const run = spawnSync(process.execPath, ['--test', ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });
+    const tests = (name.startsWith('status-') || name === 'task-specific-help'
+      ? ['task-help.test.mjs'] : ['media.test.mjs', 'auth.test.mjs', 'e2e.test.mjs']).map(n => path.join(home, 'test', n));
+    const run = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });
     const output = `${run.stdout || ''}\n${run.stderr || ''}`;
     if (run.status !== 0 && !run.error && !output.includes('SyntaxError:')) { killed++; console.log(`DETECTED ${name}`); }
     else { console.error(`SURVIVED ${name}\n${output.slice(-2000)}`); process.exitCode = 1; }
