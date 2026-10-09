@@ -5,7 +5,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { fixture } from './fixture.mjs';
+import { fixture, mediaSamples } from './fixture.mjs';
 import { State } from '../src/state.mjs';
 import { Credentials } from '../src/auth.mjs';
 import { Mcp } from '../src/mcp.mjs';
@@ -40,6 +40,7 @@ test('real CLI processes: discovery, quote, approval, generation, result and ori
   assert.equal((await cli(f, home, ['models', 'search', '--query', 'image', '--type', 'image'])).view.models[0].id, 'fixture-image');
   assert.equal((await cli(f, home, ['models', 'show', 'fixture-image'])).view.model, 'fixture-image');
   for (const kind of ['image', 'video', 'audio']) {
+    f.bytes = mediaSamples[kind].bytes; f.contentType = mediaSamples[kind].type;
     const q = await cli(f, home, ['estimate', '--model', `fixture-${kind}`, '--input', JSON.stringify({ prompt: 'one output', quality: 'high', n: 2 }), '--max-cost-usd', '0.10']);
     assert.equal(q.view.ok, true); assert.equal(q.view.requires_confirmation, true);
     assert.ok(!q.view._binding); assert.ok(!JSON.stringify(q.view).includes('iVBORw0'));
@@ -135,10 +136,10 @@ function randomID() { return '00000000-0000-4000-8000-000000000000'; }
 
 test('skill installation uses bundled content and protects another skill', async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-skill-')); t.after(() => fs.rm(home, { recursive: true, force: true }));
-  const first = await installSkill({ home }); assert.equal(first.updated, false);
+  const first = await installSkill({ home }); assert.equal(first.updated, true);
   assert.equal(first.installations.length, 4);
   assert.equal(await fs.readFile(first.installations[0].path, 'utf8'), await fs.readFile(first.installations[1].path, 'utf8'));
-  assert.equal((await installSkill({ home })).updated, true);
+  assert.equal((await installSkill({ home })).updated, false);
   await fs.writeFile(first.path, 'a different user skill');
   await assert.rejects(installSkill({ home }), { code: 'skill_conflict' });
   assert.equal(await fs.readFile(first.path, 'utf8'), 'a different user skill');

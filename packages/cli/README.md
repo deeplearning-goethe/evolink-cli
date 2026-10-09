@@ -42,6 +42,32 @@ The skill is bundled with the package. By default it installs into `~/.agents/sk
 
 After upgrading the npm package, run `evolink skills install` again to refresh the installed skill copies, then verify that the assistant discovers the updated skill. Open a new conversation only if discovery does not refresh. Fix reusable guidance in `skills/evolink-cli/SKILL.md` in this package; editing only a local installed copy will not distribute the fix.
 
+## Setup and skill updates
+
+Starting with CLI 0.6.0, use the selected assistant's name:
+
+```sh
+evolink setup --agent codex --json
+evolink skills status --agent codex --json
+evolink doctor --agent codex --json
+```
+
+`setup` checks Node.js, writable state and credential storage, synchronizes the selected skill, reuses an existing login only after checking the real account connection, and verifies model discovery. When needed it waits for browser approval. Repeating setup reuses completed steps; connection errors do not automatically trigger a new login. Checks submit no paid media tasks. The default agent is `all`; use `--agent` to install only for the assistant you are using. Commands sharing a state directory serialize setup; skill writes also serialize across state directories in the same home.
+
+CLI checks cannot prove that the assistant has loaded a skill. A successful result leaves `assistant_discovery: not_checked`; ask the assistant to confirm discovery in the current conversation. Reopen only when the assistant cannot refresh. A failed stage returns its error and a setup recovery command without erasing completed installations.
+
+`auth login` and `setup` accept `--timeout SECONDS` (30–900, default 180). Keep the login process running until it reports completion. If it times out or is interrupted, start a new login and open the new link. The local callback page acknowledges receipt and returns you to the assistant for verification; it does not claim the account connection was verified. Repeated callbacks are refused and the browser page clears the authorization query from its visible URL.
+
+The installer copies SKILL.md and its bundled references, records their hashes and CLI version, and skips identical installations. `skills status` distinguishes missing, current, outdated, legacy, unmanaged, modified and conflicting installations. The unmodified published 0.5.0 or 0.5.1 skill migrates automatically. Local changes are preserved by default. Only after choosing to replace those changes, run:
+
+```sh
+evolink skills install --agent codex --replace-modified --json
+```
+
+Replacement backs up the previous skill directory under `~/.evolink-media/skill-backups/`, outside assistant discovery folders. Untracked user assets are preserved, and an installation failure rolls back completed directory swaps. Unowned skills, damaged manifests and symbolic-link destinations require resolving the conflict first. After upgrading the CLI, run `skills status` and `skills install` to synchronize its bundle; npm upgrades do not automatically update assistant skill folders.
+
+For an idempotent installation prompt, check Node.js 22+ and `evolink --version` before installing; reuse a suitable installed CLI. In a released version supporting `setup`, use it with the current assistant's name. With older versions, retain the four separate setup steps above, reuse a working login, and explicitly verify balance, model discovery and assistant skill discovery. Installation authorization does not authorize a paid test generation.
+
 ## Quoted generation
 
 ```sh
@@ -57,6 +83,8 @@ evolink download TASK_ID --output /absolute/result.png --json
 For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
 `--max-cost-usd` is an estimate-based submission guard, not a final-settlement guarantee. A complete estimate automatically uses its quoted maximum as this guard unless the user supplied a cap. Incomplete or unknown totals cannot use it. `--media-seconds` is a pricing hint, never a model parameter. Token-billed and unknown-duration models require explicit acceptance of their billing uncertainty; a missing price is refused.
+
+A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
 
 ## Tasks and files
 
@@ -86,13 +114,17 @@ An invalid status is rejected locally before login or an MCP request. The `inval
 
 The CLI persists the request ID before paid submission. Recovery reuses that ID; it never silently submits with a new one. For an uncertain submission, omit `--status` so completed or failed tasks remain visible. Lists are account-wide, newest first and limited to the returned recent batch; `--since` filters that batch rather than searching all history. An empty list does not prove no task was created. Keep the original IDs and use `tasks get` or `tasks resume` as appropriate; after an expired uncertain quote, inspect recent tasks before considering another paid submission. Ctrl-C stops local waiting, not generation. Task links expire after 24 hours.
 
-Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, stream at most 1 GiB per result, and refuse to overwrite existing files. These commands transfer originals and do not alter the generated content or guarantee host inline previews.
+Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
 
 ## Authentication and state
 
 Login uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
 
 Tokens are stored only in the OS credential store. Linux requires a running Secret Service keyring; the CLI does not silently fall back to an in-memory kernel store or plaintext credential files. A one-command OAuth access token can be passed through stdin with `--token-stdin`, never as a command argument. `auth logout` revokes this session and preserves the account's shared MCP key.
+
+Run `evolink doctor --json` to check Node.js, writable local state, credential storage, saved login, balance connectivity and model discovery. Add `--agent NAME` to check installed skills. It reports failed and skipped checks together and exits nonzero until the connection is verified. On Linux, run login and later commands in the same unlocked Secret Service/D-Bus session. A keyring package alone does not start or unlock that session.
+
+On an SSH host, the OAuth loopback callback belongs to the host running the CLI. If you open the link on your own computer, forward its callback port: run `evolink auth login --no-browser` remotely, read the `127.0.0.1:PORT` in the printed link's `redirect_uri`, then use a second local terminal with `ssh -N -L PORT:127.0.0.1:PORT USER@HOST` before opening that link. Keep both commands alive until approval finishes (the login waits up to three minutes). Otherwise run the CLI locally. `--no-browser` prints a link but does not forward it. Device-code login is not provided.
 
 Quotes, request IDs and non-secret public client metadata retain the existing `~/.evolink-media` location so an upgrade can reuse saved requests and the OS-stored login. `EVOLINK_CLI_HOME` selects an isolated state directory; the original `EVOLINK_MEDIA_HOME` remains supported. The credential-service identity and skill ownership marker also remain stable across the command rename. Browser links are printed on stderr. Tokens and PKCE verifiers are not printed. Never include credentials in bug reports.
 

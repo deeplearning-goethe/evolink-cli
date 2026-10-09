@@ -6,8 +6,11 @@ import { Credentials } from './auth.mjs';
 import { Mcp } from './mcp.mjs';
 import { Media } from './media.mjs';
 import { upload, download } from './files.mjs';
-import { installSkill } from './skills.mjs';
-import { CliError, requireThat, errorView } from './errors.mjs';
+import { installSkill, skillStatus, validateAgent } from './skills.mjs';
+import { doctor } from './doctor.mjs';
+import { setup } from './setup.mjs';
+import { CLI_VERSION } from './version.mjs';
+import { CliError, requireThat, errorView, localFile } from './errors.mjs';
 
 const TASK_STATUS_FILTERS = Object.freeze(['processing', 'completed', 'failed', 'cancelled']);
 const TASK_STATUS_HELP = `Allowed task status filters: ${TASK_STATUS_FILTERS.join(', ')}.
@@ -38,9 +41,12 @@ Examples:
   evolink tasks list --since 30m --json
 `;
 
-const HELP = `EvoLink CLI 0.5.1 (Node.js 22+)
+const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
 
-  auth login [--no-browser]       Sign in and approve in your browser
+  setup [--agent NAME] [--no-browser] [--timeout SECONDS]
+                                 Reuse or finish login, install skills and verify (free)
+  auth login [--no-browser] [--timeout SECONDS]
+                                 Sign in; keep this command running for the callback
   auth status | auth logout      Check or revoke this CLI session
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
@@ -53,8 +59,10 @@ const HELP = `EvoLink CLI 0.5.1 (Node.js 22+)
   upload FILE [--upload-path FOLDER]
   uploads get ID                 Recover a lost upload result (free)
   download TASK_ID --output FILE [--index N]
-  skills install [--agent NAME]  Install the bundled skill for coding agents
-  doctor                         Check runtime, login and connection (free)
+  skills install [--agent NAME] [--replace-modified]
+                                 Install or update; back up replaced files
+  skills status [--agent NAME]   Check installed skill content and CLI version
+  doctor [--agent NAME]          Check prerequisites, connection, models and skills (free)
 
 Options: --json, --server URL, --token-stdin, --help, --version
 Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
@@ -65,6 +73,9 @@ Task list types: image, video, audio; omit --type to include all types.
 Task list example: evolink tasks list --status processing --json
 Run evolink tasks list --help for filter details and recovery caveats.
 After upgrading the package, run evolink skills install to refresh its skill.
+
+Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
+The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
 Quotes expire in 15 minutes. --confirm is only for an already approved quote.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
@@ -72,7 +83,7 @@ Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 
 const OPTIONS = Object.fromEntries(['server', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
   'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'output', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
-for (const k of ['json', 'token-stdin', 'no-browser', 'confirm', 'wait', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
+for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
 function number(value, name, min, max, integer = false) {
   if (value === undefined) return undefined;
@@ -84,18 +95,23 @@ function number(value, name, min, max, integer = false) {
 export function validateCommand(args, options) {
   const [command, action] = args;
   const routes = {
-    'auth login': [2, 'no-browser'], 'auth status': [2], 'auth logout': [2], balance: [1],
+    setup: [1, 'agent', 'no-browser', 'timeout'],
+    'auth login': [2, 'no-browser', 'timeout'], 'auth status': [2], 'auth logout': [2], balance: [1],
     'models search': [2, 'query', 'type', 'limit'], 'models show': [3],
     estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd'],
     'generate image': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate video': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate audio': [2, 'quote', 'confirm', 'wait', 'timeout'],
     'tasks get': [3], 'tasks wait': [3, 'timeout'], 'tasks list': [2, 'type', 'status', 'since', 'limit'], 'tasks resume': [2, 'quote'],
-    upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index'], 'skills install': [2, 'agent'], doctor: [1],
+    upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index'],
+    'skills install': [2, 'agent', 'replace-modified'], 'skills status': [2, 'agent'], doctor: [1, 'agent'],
   };
   const route = routes[`${command} ${action}`] || routes[command];
   requireThat(route && args.length === route[0], 'unknown_command', 'Unknown command or argument count. Run evolink --help.');
   const allowed = new Set(['json', 'server', 'token-stdin', ...route.slice(1)]);
   requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink --help.');
-  if (options.timeout !== undefined) number(options.timeout, 'timeout', 1, 86400, true);
+  if (options.agent !== undefined) validateAgent(options.agent);
+  if (options.timeout !== undefined) number(options.timeout, 'timeout', command === 'setup' || command === 'auth' ? 30 : 1,
+    command === 'setup' || command === 'auth' ? 900 : 86400, true);
+  requireThat(!(command === 'setup' && options['token-stdin']), 'invalid_option', 'setup uses the saved OS login. Use balance or doctor for a one-command stdin token.');
   if (options.type !== undefined) requireThat(['image', 'video', 'audio', ...(command === 'models' ? ['all'] : [])].includes(options.type), 'invalid_type', 'Unsupported media type.');
   if (options.status !== undefined) requireThat(TASK_STATUS_FILTERS.includes(options.status), 'invalid_status',
     `Unsupported task status filter. ${TASK_STATUS_HELP}`, {
@@ -109,8 +125,9 @@ async function estimateArgs(options) {
   requireThat(options.model, 'missing_model', 'Pass --model.');
   requireThat(!(options.input && options['input-file']), 'invalid_input', 'Choose --input or --input-file.');
   let input = {};
-  try { input = JSON.parse(options['input-file'] ? await fs.readFile(options['input-file'], 'utf8') : options.input || '{}'); }
-  catch { throw new CliError('invalid_input', 'The input must be a JSON object or a readable JSON file.'); }
+  const raw = options['input-file'] ? await localFile(() => fs.readFile(options['input-file'], 'utf8'), { file: options['input-file'] }) : options.input || '{}';
+  try { input = JSON.parse(raw); }
+  catch { throw new CliError('invalid_input', 'The input must contain valid JSON.'); }
   requireThat(input && typeof input === 'object' && !Array.isArray(input), 'invalid_input', 'The model input must be a JSON object.');
   if (options.prompt !== undefined) {
     requireThat(input.prompt === undefined || input.prompt === options.prompt, 'invalid_input', 'prompt was supplied twice with different values.');
@@ -125,7 +142,7 @@ export async function dispatch(positionals, options, { state, server, credential
   const [command, action, id] = positionals;
   const media = new Media({ mcp, state, server });
   if (command === 'auth') {
-    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], signal, progress });
+    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
     if (action === 'status') return credentials.status();
     if (action === 'logout') return credentials.logout();
   }
@@ -162,12 +179,11 @@ export async function dispatch(positionals, options, { state, server, credential
     requireThat(options.output, 'missing_output', 'Pass --output with a new local file path.');
     return download(action, options.output, { mcp, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
   }
-  if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent });
-  if (command === 'doctor') {
-    const status = await credentials.status();
-    const balance = await mcp.call('check_balance');
-    return { node: process.version, server: server.href, auth: status, connection_verified: balance.ok === true };
-  }
+  if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent, replaceModified: options['replace-modified'] });
+  if (command === 'skills' && action === 'status') return skillStatus({ home: skillHome, agent: options.agent });
+  if (command === 'setup') return setup({ state, server, credentials, mcp, agent: options.agent, skillHome,
+    noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
+  if (command === 'doctor') return doctor({ state, server, credentials, mcp, agent: options.agent, skillHome });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
@@ -196,7 +212,7 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     let positionals;
     try { ({ values: options, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })); }
     catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
-    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.1' }) + '\n' : '0.5.1\n'); return; }
+    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: CLI_VERSION }) + '\n' : CLI_VERSION + '\n'); return; }
     if (options.help || !positionals.length) {
       const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : HELP;
       io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help }) + '\n' : help); return;
@@ -208,8 +224,9 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const credentials = new Credentials({ server, state, token });
     const mcp = new Mcp(credentials, { signal: controller.signal });
     const result = publicView(await dispatch(positionals, options, { state, server, credentials, mcp, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
-    const view = { schema_version: 1, ...result, ok: true };
+    const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
+    if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;
   } catch (error) {
     const view = { schema_version: 1, ok: false, error: errorView(error) };
     (options.json ? io.stdout : io.stderr).write(options.json ? JSON.stringify(view) + '\n' : `${view.error.code}: ${view.error.message}\n${view.error.details ? JSON.stringify(view.error.details, null, 2) + '\n' : ''}`);
