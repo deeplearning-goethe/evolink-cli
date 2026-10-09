@@ -148,4 +148,8 @@ CLI command validation does not grant the assistant permission to run a command.
 }
 ```
 
-See [Gemini MCP configuration and OAuth](https://geminicli.com/docs/tools/mcp-server/). A cloud terminal test does not prove desktop inline previews, browser handoff on another machine or permission defaults in every host.
+Run `gemini mcp list` from the intended project directory. If EvoLink is `Disabled` because the folder is untrusted, review that folder using Gemini's normal trust dialog or `/permissions`; do not disable folder-trust checks globally. `Connected` confirms discovery, so also verify a real read-only model or balance call.
+
+Headless mode exposes only tools permitted by its policy. In Gemini CLI 0.63.0, a scoped MCP rule uses `mcpName`, not `serverName`; allow only the tools needed for the chosen workflow. For example, a quote-only policy can allow `search_models`, `get_model`, `estimate_cost`, `check_balance` and `get_task` on `evolink`. Generation still requires the user's quote approval and the host's normal tool permission. Do not silently add a generation allow rule or treat a successful process exit without EvoLink tool calls as acceptance.
+
+See [Gemini trusted folders](https://geminicli.com/docs/cli/trusted-folders/) and [Gemini MCP configuration and OAuth](https://geminicli.com/docs/tools/mcp-server/). A cloud terminal test does not prove desktop inline previews, browser handoff on another machine or permission defaults in every host.
