@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { CliError } from '../src/errors.mjs';
+import { restFixture } from './fixture-rest.mjs';
 
 export class MemoryVault {
   async read() { return this.value; }
@@ -26,6 +27,7 @@ export async function fixture() {
       const url = new URL(req.url, state.origin);
       const send = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
       if (url.pathname.startsWith('/.well-known/oauth-protected-resource')) {
+        state.protectedDiscoveryCalls = (state.protectedDiscoveryCalls || 0) + 1;
         send(200, { resource: `${state.origin}/mcp`, authorization_servers: [state.origin], scopes_supported: ['mcp'] }); return;
       }
       if (url.pathname === '/.well-known/oauth-authorization-server') {
@@ -46,6 +48,7 @@ export async function fixture() {
       }
       const chunks = []; for await (const chunk of req) chunks.push(chunk);
       const body = Buffer.concat(chunks);
+      if (await restFixture(state, req, res, url, body, send)) return;
       if (url.pathname === '/oauth/register') {
         const data = JSON.parse(body);
         if (data.token_endpoint_auth_method !== 'none' || data.application_type !== 'native') { send(400, { error: 'invalid_client_metadata' }); return; }
@@ -66,7 +69,7 @@ export async function fixture() {
           state.refreshes.delete(data.get('refresh_token')); state.refreshCount++;
         }
         const refresh_token = `fixture-refresh-${randomUUID()}`; state.refreshes.set(refresh_token, true);
-        send(200, { access_token: `fixture-access-${randomUUID()}`, refresh_token, token_type: 'Bearer', expires_in: 3600, scope: 'mcp offline_access' }); return;
+        send(200, { access_token: `fixture-access-${randomUUID()}`, ...(state.omitRefresh ? {} : { refresh_token }), token_type: 'Bearer', expires_in: 3600, scope: state.tokenScope || 'mcp offline_access' }); return;
       }
       if (url.pathname === '/oauth/revoke') { send(state.revokeFails ? 503 : 200, {}); return; }
       if (url.pathname.startsWith('/uploads/')) {
@@ -84,6 +87,8 @@ export async function fixture() {
         res.write(state.bytes.subarray(0, 4)); res.end(state.bytes.subarray(4)); return;
       }
       if (url.pathname !== '/mcp') { send(404, {}); return; }
+      state.mcpRequests = (state.mcpRequests || 0) + 1;
+      if (state.mcpUnavailable) { send(503, {}); return; }
       if (req.method !== 'POST') { send(405, {}); return; }
       if (!req.headers.authorization?.startsWith('Bearer ')) { send(401, {}); return; }
       const message = JSON.parse(body);

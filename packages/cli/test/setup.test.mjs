@@ -10,7 +10,7 @@ import { doctor } from '../src/doctor.mjs';
 import { skillStatus, installSkill } from '../src/skills.mjs';
 import { State } from '../src/state.mjs';
 import { Credentials, callbackListener } from '../src/auth.mjs';
-import { Mcp } from '../src/mcp.mjs';
+import { Mcp } from './legacy-mcp.mjs';
 import { CliError } from '../src/errors.mjs';
 import { fixture, MemoryVault } from './fixture.mjs';
 import { validateCommand } from '../src/cli.mjs';

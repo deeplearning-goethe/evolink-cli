@@ -4,11 +4,27 @@
   "description": "Generate images, video and audio with EvoLink, with browser login and quoted submissions.",
   "type": "module",
   "license": "MIT",
-  "engines": { "node": ">=22" },
-  "bin": { "evolink": "bin/evolink.mjs" },
-  "files": ["bin", "src", "skills", "README.md", "LICENSE"],
-  "repository": { "type": "git", "url": "git+https://github.com/deeplearning-goethe/evolink-cli.git", "directory": "packages/cli" },
-  "publishConfig": { "access": "public" },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "evolink": "bin/evolink.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/deeplearning-goethe/evolink-cli.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "test": "node --test test/*.test.mjs",
     "test:mutations": "node test/mutations.mjs",
@@ -16,7 +32,10 @@
     "prepublishOnly": "npm run check && npm test && npm run test:mutations"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "@napi-rs/keyring": "2.1.0"
+    "@napi-rs/keyring": "2.1.0",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1"
   }
 }

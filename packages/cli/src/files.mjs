@@ -12,14 +12,16 @@ const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
   '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.flac': 'audio/flac', '.ogg': 'audio/ogg', '.opus': 'audio/ogg',
   '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.webm': 'video/webm' };
 
-export async function upload(file, { mcp, state, server, signal, upload_path, fetchFn = fetch }) {
+export async function upload(file, { client, mcp = client, state, server, signal, upload_path, fetchFn = fetch }) {
+  client = mcp;
   const full = path.resolve(file);
   const stat = await localFile(() => fs.stat(full), { file: full });
   requireThat(stat.isFile() && stat.size > 0 && stat.size <= 95 * 1024 * 1024, 'invalid_file', 'Uploads must be regular files between 1 byte and 95 MB.');
   const type = MIME[path.extname(full).toLowerCase()];
   requireThat(type, 'unsupported_file', 'This file format is not supported. Use JPEG, PNG, GIF, WebP, supported audio, MP4, MOV or WebM.');
   await localFile(() => fs.access(full, constants.R_OK), { file: full });
-  const prepared = await mcp.call('prepare_upload', { file_name: path.basename(full), ...(upload_path ? { upload_path } : {}) });
+  if (client.uploadFile) return directUpload(full, stat.size, type, { client, state, server, upload_path });
+  const prepared = await client.call('prepare_upload', { file_name: path.basename(full), ...(upload_path ? { upload_path } : {}) });
   requireThat(stat.size <= prepared.max_bytes, 'file_too_large', 'This file exceeds the upload limit.');
   const destination = new URL(prepared.upload_url);
   requireThat(destination.origin === server.origin && destination.pathname === `/uploads/${prepared.upload_id}` && !destination.username && !destination.password,
@@ -37,7 +39,7 @@ export async function upload(file, { mcp, state, server, signal, upload_path, fe
   } catch { failure = 'The upload connection was interrupted.'; }
   finally { body.destroy(); }
   try {
-    const result = await mcp.call('get_upload', { upload_id: prepared.upload_id });
+    const result = await client.call('get_upload', { upload_id: prepared.upload_id });
     if (result.state === 'done') return result;
     throw new CliError('upload_pending', failure || 'The upload is still being processed.', { upload_id: prepared.upload_id, state: result.state });
   } catch (e) {
@@ -45,14 +47,55 @@ export async function upload(file, { mcp, state, server, signal, upload_path, fe
   }
 }
 
-export async function download(taskId, output, { mcp, server, index = 1, signal, maxBytes = 1024 ** 3, fetchFn }) {
+async function directUpload(file, size, mime, { client, state, server, upload_path }) {
+  const access = await client.credentials.access();
+  const upload_id = `cli-up-${randomUUID()}`;
+  const journal = { upload_id, backend: 'platform', server: server.href, api_origin: client.apiUrl.origin, binding: access.binding,
+    file_name: path.basename(file), size_bytes: size, state: 'uploading' };
+  await state.write('uploads', upload_id, journal);
+  const source = createReadStream(file);
+  try {
+    const result = await client.uploadFile(source, size, mime, path.basename(file), upload_path);
+    const data = result?.data;
+    requireThat(result?.success === true && typeof data?.file_id === 'string' && typeof data?.file_url === 'string',
+      'upload_unknown', 'The file service returned no verified upload result.');
+    const url = new URL(data.file_url);
+    requireThat(!url.username && !url.password && !url.hash && (url.protocol === 'https:' || loopback(server) && url.origin === server.origin),
+      'invalid_upload_result', 'The file service returned an invalid public reference URL.');
+    journal.state = 'done';
+    // Store an allowlisted receipt, never a token or a signed upload address.
+    journal.result = { ok: true, upload_id, state: 'done', file_id: data.file_id, file_url: data.file_url,
+      file_name: data.file_name, size_bytes: data.file_size, mime_type: data.mime_type, expires_at: data.expires_at };
+    await state.write('uploads', upload_id, journal);
+    return journal.result;
+  } catch (error) {
+    journal.state = 'outcome_unknown';
+    await state.write('uploads', upload_id, journal);
+    throw new CliError(error.code || 'upload_unknown', error.message || 'The upload outcome is unknown.', {
+      upload_id, state: journal.state, next_step: `evolink uploads get ${upload_id}` }, error.exitCode);
+  } finally { source.destroy(); }
+}
+
+export async function getUpload(id, { client, state, server }) {
+  const journal = await state.read('uploads', id);
+  requireThat(journal?.server === server.href, 'upload_not_found', 'No upload receipt exists for this login resource.');
+  requireThat(journal.backend === 'platform', 'legacy_upload', 'This upload used CLI 0.6.0 and the MCP upload proxy. Recover it with that version; the direct API client cannot query an old proxy slot.', { upload_id: id });
+  requireThat(journal.api_origin === client.apiUrl.origin && journal.binding === (await client.credentials.access()).binding,
+    'upload_session_changed', 'This receipt belongs to a different platform or login.');
+  if (journal.state === 'done') return journal.result;
+  return { ok: true, upload_id: id, state: 'outcome_unknown', result_verified: false,
+    text: 'No completed receipt was saved. The file service currently cannot look up an upload by client request ID. Check your files before uploading again; this command does not retry the upload.' };
+}
+
+export async function download(taskId, output, { client, mcp = client, server, index = 1, signal, maxBytes = 1024 ** 3, fetchFn }) {
+  client = mcp;
   const target = path.resolve(output);
   const parent = await localFile(() => fs.stat(path.dirname(target)), { file: target, missing: 'output_directory_missing' });
   requireThat(parent.isDirectory(), 'path_not_directory', 'The output parent is not a directory. Choose a valid file path.');
   await localFile(() => fs.access(path.dirname(target), constants.W_OK), { file: target });
   try { await fs.lstat(target); throw new CliError('file_exists', 'The output file already exists. Choose another path.'); }
   catch (e) { if (e.code !== 'ENOENT') throw fileError(e, { file: target }); }
-  const task = await mcp.call('get_task', { task_id: taskId, wait_seconds: 0 });
+  const task = await client.call('get_task', { task_id: taskId, wait_seconds: 0 });
   requireThat(task.status === 'completed', 'task_not_ready', 'Wait for the task to complete before downloading.');
   const result = task.results?.[index - 1];
   requireThat(Number.isInteger(index) && index > 0 && result?.url, 'result_not_found', 'The requested result index does not exist.');

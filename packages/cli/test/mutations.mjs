@@ -7,6 +7,13 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['rest-origin', 'src/api.mjs', 'origins.has(url.origin)', 'true'],
+  ['file-credential-isolation', 'src/api.mjs', "authorization.startsWith('Bearer evup_')", 'true'],
+  ['rest-fresh-price', 'src/api.mjs', "freshPricing: name === 'estimate_cost'", 'freshPricing: false'],
+  ['quote-api-origin', 'src/media.mjs', '!quote.api_origin || quote.api_origin === this.client.apiUrl?.origin', 'true'],
+  ['oauth-metadata-origin', 'src/oauth.mjs', 'endpoint.origin === issuer', 'true'],
+  ['oauth-token-scope', 'src/oauth.mjs', "(!value.scope || value.scope.split(' ').includes('mcp'))", 'true'],
+  ['oauth-new-grant-refresh', 'src/oauth.mjs', "parameters.grant_type === 'refresh_token' ? prior?.refresh_token : undefined", 'prior?.refresh_token'],
   ['approval', 'src/media.mjs', 'requireThat(confirmed || resume,', 'requireThat(true,'],
   ['fresh-price', 'src/media.mjs', 'priceFingerprint(fresh) === quote.fingerprint', 'true'],
   ['cap-direction', 'src/media.mjs', 'quote.estimate.max_usd <= cap', 'quote.estimate.max_usd >= cap'],
@@ -17,11 +24,11 @@ const mutants = [
   ['daily-limit', 'src/media.mjs', 'quote.enough_daily_limit !== false', 'true'],
   ['input-validation-cap', 'src/media.mjs', 'quote.input_valid === true', 'true'],
   ['estimated-price-range', 'src/media.mjs', 'Number.isFinite(max_usd) && max_usd >= 0', 'true'],
-  ['request-id', 'src/media.mjs', 'this.mcp.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id })', 'this.mcp.call(`generate_${kind}`, { ...quote.args, client_request_id: randomUUID() })'],
+  ['request-id', 'src/media.mjs', 'this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id })', 'this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: randomUUID() })'],
   ['journal', 'src/media.mjs', "quote.state = 'submitting';", "quote.state = 'quoted';"],
   ['never-submitted-recovery', 'src/media.mjs', "'submission_not_started'", "'submission_already_started'"],
   ['refused-recovery', 'src/media.mjs', "quote.state !== 'refused'", 'true'],
-  ['login-binding', 'src/media.mjs', 'quote.binding === (await this.mcp.credentials.access()).binding', 'true'],
+  ['login-binding', 'src/media.mjs', 'quote.binding === (await this.client.credentials.access()).binding', 'true'],
   ['expiry', 'src/media.mjs', 'this.now() <= quote.expires_at', 'true'],
   ['input-binding', 'src/media.mjs', 'quote.args_hash === hash(quote.args)', 'true'],
   ['callback-state', 'src/auth.mjs', "url.searchParams.get('state') !== state", 'false'],
@@ -59,7 +66,8 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name === 'callback-state' ? ['auth.test.mjs']
+    const files = ['rest-origin', 'file-credential-isolation', 'rest-fresh-price', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
+      : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']
       : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']

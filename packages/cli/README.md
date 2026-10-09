@@ -1,6 +1,6 @@
 # EvoLink CLI
 
-Generate images, video, music and speech through the existing EvoLink MCP service. The CLI provides browser login, model discovery, quotes, task recovery, reference uploads and original-result downloads.
+Generate images, video, music and speech directly through the EvoLink platform API. This is an unreleased development change; public CLI 0.6.0 uses the hosted MCP transport. The CLI provides browser login, model discovery, quotes, task recovery, reference uploads and original-result downloads.
 
 The package connects to the hosted EvoLink service using the assistant's terminal. Requires Node.js 22+.
 
@@ -110,15 +110,15 @@ Task-list filters are case-sensitive:
 
 `processing` includes queued tasks. Do not use `pending`, `queued`, `canceled` or `all` as a status filter. A task response can report `pending`; response statuses and accepted list filters are separate contracts. `cancelled` lets you read that state; this CLI does not provide a cancellation command. Run `evolink tasks list --help` for details, or add `--json` for its machine-readable help envelope.
 
-An invalid status is rejected locally before login or an MCP request. The `invalid_status` error includes `param`, the supplied `value`, `allowed_values`, `queued_filter`, `request_sent: false` and a recovery `next_step`. Correct the free query rather than creating another paid task. A successful query with an empty list, or a task whose `status` is `failed`, is not a failed CLI invocation.
+An invalid status is rejected locally before login or a platform request. The `invalid_status` error includes `param`, the supplied `value`, `allowed_values`, `queued_filter`, `request_sent: false` and a recovery `next_step`. Correct the free query rather than creating another paid task. A successful query with an empty list, or a task whose `status` is `failed`, is not a failed CLI invocation.
 
 The CLI persists the request ID before paid submission. Recovery reuses that ID; it never silently submits with a new one. For an uncertain submission, omit `--status` so completed or failed tasks remain visible. Lists are account-wide, newest first and limited to the returned recent batch; `--since` filters that batch rather than searching all history. An empty list does not prove no task was created. Keep the original IDs and use `tasks get` or `tasks resume` as appropriate; after an expired uncertain quote, inspect recent tasks before considering another paid submission. Ctrl-C stops local waiting, not generation. Task links expire after 24 hours.
 
-Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
+Uploads stream up to 95 MiB directly to the file service using a short-lived upload token issued by the platform. The OAuth access token is never sent to the file service. `uploads get` reads a saved local receipt. A lost response without a saved receipt reports `outcome_unknown` and `result_verified: false`; it does not retry or claim that a result was recovered. The file service has no lookup by client request ID. Legacy proxy slots can be recovered with CLI 0.6.0. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
 
 ## Authentication and state
 
-Login uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
+Login discovers Passport directly and uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
 
 Tokens are stored only in the OS credential store. Linux requires a running Secret Service keyring; the CLI does not silently fall back to an in-memory kernel store or plaintext credential files. A one-command OAuth access token can be passed through stdin with `--token-stdin`, never as a command argument. `auth logout` revokes this session and preserves the account's shared MCP key.
 
@@ -135,3 +135,11 @@ All machine-readable commands accept `--json`. Stdout contains one envelope with
 Run installation and tests on the test cloud host, not the development Mac. In this package directory: `npm ci`, `npm test`, `npm run test:mutations`, and `npm pack`. Tests use loopback fixtures and never spend production credits. Real paid acceptance requires a separate quote and user approval.
 
 Development starts in `deeplearning-goethe/evolink-cli`. After acceptance, repository management will arrange migration to `Evolink-AI/evolink-cli`. Keep package/bin names and service identity stable; update repository metadata, publishing permissions and installation links during migration.
+
+## Platform and MCP paths
+
+The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Independent permissions and platform-owned media estimates are separate follow-up work.
+
+The CLI vendors the reviewed shared platform module from the MCP repository with a SHA-256 source/artifact manifest in `src/platform/source.json`. Refresh it on the test host using `scripts/sync-platform-client.mjs`; never edit generated files. The MCP SDK is a development dependency for compatibility fixtures only. No extra package or MCP plugin installation is needed by CLI users.
+
+`--server` retains the OAuth resource identity for existing saved logins and quotes. `--api-url` and `--files-url` accept the official endpoints; loopback overrides require a loopback test resource. No credential-bearing redirects or automatic MCP fallback are allowed. Quotes with a recorded API origin cannot be submitted to a different origin.

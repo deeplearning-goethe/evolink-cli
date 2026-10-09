@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { fixture, mediaSamples } from './fixture.mjs';
 import { State } from '../src/state.mjs';
-import { Mcp } from '../src/mcp.mjs';
+import { Mcp } from './legacy-mcp.mjs';
 import { Credentials } from '../src/auth.mjs';
 import { download, upload } from '../src/files.mjs';
 import { doctor } from '../src/doctor.mjs';
@@ -41,17 +41,18 @@ async function setup(t) {
 
 test('failed quote returns a blocked flow with the original cap and creates no saved quote or task', async t => {
   const { f, home, cli } = await setup(t);
-  for (const [model, input, failure, code] of [
-    ['fixture-image', {}, true, 'estimate_unavailable'],
+  for (const [model, input, failure, code, balance = 1000] of [
+    ['fixture-image', { prompt: 'test' }, true, 'uncheckable_cap'],
     ['fixture-image', { invalid: true }, false, 'invalid_input'],
-    ['fixture-image', { insufficient: true }, false, 'insufficient_balance'],
-    ['fixture-token-image', {}, false, 'uncheckable_cap'],
-    ['fixture-partial-image', {}, false, 'uncheckable_cap'],
-    ['fixture-image', { n: 100 }, false, 'cost_exceeds_cap'],
+    ['fixture-image', { prompt: 'test' }, false, 'insufficient_balance', 0],
+    ['fixture-token-image', { prompt: 'test' }, false, 'uncheckable_cap'],
+    ['fixture-partial-video', { prompt: 'test', duration: 5, video_urls: ['https://example.com/reference.mp4'] }, false, 'uncheckable_cap'],
+    ['fixture-image', { prompt: 'test', n: 10 }, false, 'cost_exceeds_cap'],
   ]) {
     f.estimateFailure = failure;
+    f.balanceCredits = balance;
     const result = await cli(['estimate', '--model', model, '--input', JSON.stringify(input), '--max-cost-usd', '0.05']);
-    assert.equal(result.code, 1); assert.equal(result.view.ok, false); assert.equal(result.view.error.code, code);
+    assert.equal(result.code, 1, model); assert.equal(result.view.ok, false); assert.equal(result.view.error.code, code);
     assert.equal(result.view.error.details.submission_allowed, false);
     assert.equal(result.view.error.details.max_cost_usd, 0.05);
     assert.equal(result.view.quote_id, undefined);

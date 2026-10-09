@@ -5,8 +5,9 @@ import { CLI_VERSION } from './version.mjs';
 
 const LOGIN_ERRORS = new Set(['login_required', 'invalid_session', 'login_expired']);
 
-export async function setup({ state, server, credentials, mcp, agent = 'all', skillHome, noBrowser = false,
+export async function setup({ state, server, credentials, client, mcp = client, agent = 'all', skillHome, noBrowser = false,
   timeout = 180_000, signal, progress = () => {}, version, platform }) {
+  client = mcp;
   validateAgent(agent);
   return state.lock('setup', async () => {
     const steps = [];
@@ -27,7 +28,7 @@ export async function setup({ state, server, credentials, mcp, agent = 'all', sk
       let needsLogin = !preflight.auth.authenticated;
       if (!needsLogin) {
         try {
-          const balance = await mcp.call('check_balance');
+          const balance = await client.call('check_balance');
           requireThat(balance.ok === true, 'connection_failed', 'Balance verification failed. Retry the connection check.');
           connected = true;
         } catch (error) {
@@ -43,13 +44,13 @@ export async function setup({ state, server, credentials, mcp, agent = 'all', sk
       steps.push({ name: 'login', status: 'passed', reused: !needsLogin });
       phase = 'connection';
       if (!connected) {
-        const balance = await mcp.call('check_balance');
+        const balance = await client.call('check_balance');
         requireThat(balance.ok === true, 'connection_failed', 'Balance verification failed. Retry evolink balance --json.');
         connected = true;
       }
       steps.push({ name: 'connection', status: 'passed', verified: true });
       phase = 'models';
-      await verifyModels(mcp); models = true;
+      await verifyModels(client); models = true;
       steps.push({ name: 'models', status: 'passed', verified: true });
       phase = 'skills';
       const status = await skillStatus({ home: skillHome, agent });

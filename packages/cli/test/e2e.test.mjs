@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { fixture, mediaSamples } from './fixture.mjs';
 import { State } from '../src/state.mjs';
 import { Credentials } from '../src/auth.mjs';
-import { Mcp } from '../src/mcp.mjs';
+import { Mcp } from './legacy-mcp.mjs';
 import { Media } from '../src/media.mjs';
 import { upload, download } from '../src/files.mjs';
 import { publicURL } from '../src/network.mjs';
@@ -36,12 +36,12 @@ async function context(t) {
 
 test('real CLI processes: discovery, quote, approval, generation, result and original download', async t => {
   const { f, home } = await context(t);
-  assert.equal((await cli(f, home, ['balance'])).view.balance_credits, 1000);
+  assert.equal((await cli(f, home, ['balance'])).view.account_balance_credits, 1000);
   assert.equal((await cli(f, home, ['models', 'search', '--query', 'image', '--type', 'image'])).view.models[0].id, 'fixture-image');
   assert.equal((await cli(f, home, ['models', 'show', 'fixture-image'])).view.model, 'fixture-image');
   for (const kind of ['image', 'video', 'audio']) {
     f.bytes = mediaSamples[kind].bytes; f.contentType = mediaSamples[kind].type;
-    const q = await cli(f, home, ['estimate', '--model', `fixture-${kind}`, '--input', JSON.stringify({ prompt: 'one output', quality: 'high', n: 2 }), '--max-cost-usd', '0.10']);
+    const q = await cli(f, home, ['estimate', '--model', `fixture-${kind}`, '--input', JSON.stringify({ prompt: 'one output', ...(kind === 'image' ? { quality: 'high', n: 2 } : {}) }), '--max-cost-usd', '0.10']);
     assert.equal(q.view.ok, true); assert.equal(q.view.requires_confirmation, true);
     assert.ok(!q.view._binding); assert.ok(!JSON.stringify(q.view).includes('iVBORw0'));
     const before = f.paid.size;
@@ -102,8 +102,9 @@ test('one-time reference upload streams bytes without forwarding OAuth credentia
   const recovered = await upload(file, { mcp, state, server: f.server });
   assert.equal(recovered.state, 'done'); assert.equal(f.uploadHeaders.length, 2);
   const prepared = await mcp.call('prepare_upload', { file_name: 'waiting.png' });
+  await state.write('uploads', prepared.upload_id, { upload_id: prepared.upload_id, server: f.server.href });
   const waiting = await cli(f, home, ['uploads', 'get', prepared.upload_id]);
-  assert.equal(waiting.view.state, 'waiting');
+  assert.equal(waiting.view.error.code, 'legacy_upload');
   assert.ok(!JSON.stringify(waiting).includes('one-time-fixture-token'));
 });
 

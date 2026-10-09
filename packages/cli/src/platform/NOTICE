@@ -1,0 +1,6 @@
+EvoLink platform operations
+Copyright 2024 EvoLink AI
+
+Derived from Evolink-AI/evolink-mcp, baseline 60cccbd.
+Modified for shared CLI REST and MCP operation execution.
+Licensed under Apache-2.0; see LICENSE.

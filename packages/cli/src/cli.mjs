@@ -3,9 +3,9 @@ import * as fs from 'node:fs/promises';
 import { State } from './state.mjs';
 import { serverURL } from './network.mjs';
 import { Credentials } from './auth.mjs';
-import { Mcp } from './mcp.mjs';
+import { Api } from './api.mjs';
 import { Media } from './media.mjs';
-import { upload, download } from './files.mjs';
+import { upload, download, getUpload } from './files.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { doctor } from './doctor.mjs';
 import { setup } from './setup.mjs';
@@ -64,7 +64,9 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   skills status [--agent NAME]   Check installed skill content and CLI version
   doctor [--agent NAME]          Check prerequisites, connection, models and skills (free)
 
-Options: --json, --server URL, --token-stdin, --help, --version
+Options: --json, --server RESOURCE_URL, --api-url URL, --files-url URL,
+         --token-stdin, --help, --version
+The CLI calls the platform API directly. --server identifies the OAuth resource.
 Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
         openclaw, hermes.
 Input: --input JSON or --input-file FILE, plus optional --prompt TEXT.
@@ -81,7 +83,7 @@ Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
 
-const OPTIONS = Object.fromEntries(['server', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
+const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
   'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'output', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
 for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
@@ -106,7 +108,7 @@ export function validateCommand(args, options) {
   };
   const route = routes[`${command} ${action}`] || routes[command];
   requireThat(route && args.length === route[0], 'unknown_command', 'Unknown command or argument count. Run evolink --help.');
-  const allowed = new Set(['json', 'server', 'token-stdin', ...route.slice(1)]);
+  const allowed = new Set(['json', 'server', 'api-url', 'files-url', 'token-stdin', ...route.slice(1)]);
   requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink --help.');
   if (options.agent !== undefined) validateAgent(options.agent);
   if (options.timeout !== undefined) number(options.timeout, 'timeout', command === 'setup' || command === 'auth' ? 30 : 1,
@@ -138,18 +140,19 @@ async function estimateArgs(options) {
   return { model: options.model, input, ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
-export async function dispatch(positionals, options, { state, server, credentials, mcp, signal, progress, skillHome }) {
+export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome }) {
+  client = mcp;
   const [command, action, id] = positionals;
-  const media = new Media({ mcp, state, server });
+  const media = new Media({ client, state, server });
   if (command === 'auth') {
     if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
     if (action === 'status') return credentials.status();
     if (action === 'logout') return credentials.logout();
   }
-  if (command === 'balance') return mcp.call('check_balance');
+  if (command === 'balance') return client.call('check_balance');
   if (command === 'models') {
-    if (action === 'show' && id) return mcp.call('get_model', { model: id });
-    if (action === 'search') return mcp.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
+    if (action === 'show' && id) return client.call('get_model', { model: id });
+    if (action === 'search') return client.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
   }
   if (command === 'estimate') return media.estimate(await estimateArgs(options));
   if (command === 'generate') {
@@ -163,27 +166,28 @@ export async function dispatch(positionals, options, { state, server, credential
     return result;
   }
   if (command === 'tasks') {
-    if (action === 'get' && id) return mcp.call('get_task', { task_id: id, wait_seconds: 0 });
+    if (action === 'get' && id) return client.call('get_task', { task_id: id, wait_seconds: 0 });
     if (action === 'wait' && id) return media.wait(id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress });
     if (action === 'resume' && options.quote) return media.resume(options.quote);
-    if (action === 'list') return mcp.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
+    if (action === 'list') return client.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
   }
-  if (command === 'upload' && action) return upload(action, { mcp, state, server, signal, upload_path: options['upload-path'] });
+  if (command === 'upload' && action) return upload(action, { client, state, server, signal, upload_path: options['upload-path'] });
   if (command === 'uploads' && action === 'get' && id) {
-    const result = await mcp.call('get_upload', { upload_id: id });
+    if (client.uploadFile) return getUpload(id, { client, state, server });
+    const result = await client.call('get_upload', { upload_id: id });
     // A waiting upload may contain a bearer-like one-time URL; do not expose it.
     const { upload_url, text, ...view } = result;
     return { ...view, text: upload_url ? 'The upload is waiting for its original one-time PUT. No address is exposed by this recovery query.' : text };
   }
   if (command === 'download' && action) {
     requireThat(options.output, 'missing_output', 'Pass --output with a new local file path.');
-    return download(action, options.output, { mcp, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
+    return download(action, options.output, { client, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
   }
   if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent, replaceModified: options['replace-modified'] });
   if (command === 'skills' && action === 'status') return skillStatus({ home: skillHome, agent: options.agent });
-  if (command === 'setup') return setup({ state, server, credentials, mcp, agent: options.agent, skillHome,
+  if (command === 'setup') return setup({ state, server, credentials, client, agent: options.agent, skillHome,
     noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
-  if (command === 'doctor') return doctor({ state, server, credentials, mcp, agent: options.agent, skillHome });
+  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
@@ -222,8 +226,8 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const state = new State();
     const token = options['token-stdin'] ? await stdinToken(io.stdin) : undefined;
     const credentials = new Credentials({ server, state, token });
-    const mcp = new Mcp(credentials, { signal: controller.signal });
-    const result = publicView(await dispatch(positionals, options, { state, server, credentials, mcp, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
+    const client = new Api(credentials, { signal: controller.signal, apiUrl: options['api-url'], filesUrl: options['files-url'] });
+    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
     const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
     if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;

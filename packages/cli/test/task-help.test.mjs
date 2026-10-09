@@ -122,7 +122,7 @@ test('real CLI forwards valid filters; pending and failed task outcomes remain s
       { server: f.server, token: 'fixture-task-help-token' });
     assert.equal(result.code, 0); assert.equal(result.view.ok, true);
     assert.equal(f.calls.at(-1).name, 'list_tasks');
-    assert.deepEqual(f.calls.at(-1).args, { ...(status ? { status } : {}), type: 'video', since: '30m', limit: 50 });
+    assert.deepEqual(f.calls.at(-1).args, { ...(status ? { status } : {}), type: 'video', limit: 50 });
     // The fixture records filters but deliberately returns both response states unchanged.
     assert.deepEqual(result.view.tasks.map(task => task.status), ['pending', 'failed']);
   }

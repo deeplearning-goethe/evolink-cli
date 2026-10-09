@@ -38,12 +38,12 @@ export function checkEstimate(quote, cap) {
 }
 
 export class Media {
-  constructor({ mcp, state, server, now = Date.now }) { this.mcp = mcp; this.state = state; this.server = server.href; this.now = now; }
+  constructor({ client, mcp = client, state, server, now = Date.now }) { this.client = mcp; this.state = state; this.server = server.href; this.now = now; }
   async estimate(args) {
     const { max_cost_usd, ...input } = args;
     let quote;
     try {
-      quote = await this.mcp.call('estimate_cost', input);
+      quote = await this.client.call('estimate_cost', input);
       checkEstimate(quote, max_cost_usd);
       requireThat(['image', 'video', 'audio'].includes(quote.type), 'unsupported_model', 'This model is not a media generation model.');
     } catch (error) { throw quoteError(error, max_cost_usd); }
@@ -53,6 +53,7 @@ export class Media {
     const id = randomUUID();
     const argsToSubmit = { ...input, model: quote.model, ...(effectiveCap !== undefined ? { max_cost_usd: effectiveCap } : {}) };
     const stored = { id, server: this.server, binding: quote._binding, args: argsToSubmit,
+      ...(this.client.apiUrl ? { backend: 'platform', api_origin: this.client.apiUrl.origin } : {}),
       type: quote.type, args_hash: hash(argsToSubmit), fingerprint: priceFingerprint(quote), estimate: quote.estimate,
       created_at: this.now(), expires_at: this.now() + 15 * 60_000, state: 'quoted', client_request_id: `cli-${randomUUID()}` };
     await this.state.write('quotes', id, stored);
@@ -62,7 +63,8 @@ export class Media {
   async load(id) {
     const quote = await this.state.read('quotes', id);
     requireThat(quote?.server === this.server, 'quote_not_found', 'This quote does not exist for the current server.');
-    requireThat(quote.binding === (await this.mcp.credentials.access()).binding, 'quote_session_changed', 'This quote belongs to a different login. Estimate again in the current session.');
+    requireThat(!quote.api_origin || quote.api_origin === this.client.apiUrl?.origin, 'quote_platform_changed', 'This quote belongs to a different platform API.');
+    requireThat(quote.binding === (await this.client.credentials.access()).binding, 'quote_session_changed', 'This quote belongs to a different login. Estimate again in the current session.');
     requireThat(quote.args_hash === hash(quote.args), 'quote_changed', 'The saved request changed. Estimate again.');
     return quote;
   }
@@ -72,7 +74,7 @@ export class Media {
     return this.state.lock(`quote-${id}`, async () => {
       const quote = await this.load(id);
       requireThat(quote.type === kind, 'quote_type_mismatch', 'Use the media type shown in the saved quote.');
-      if (quote.task_id) return { ...await this.mcp.call('get_task', { task_id: quote.task_id, wait_seconds: 0 }), quote_id: id, recovered: true };
+      if (quote.task_id) return { ...await this.client.call('get_task', { task_id: quote.task_id, wait_seconds: 0 }), quote_id: id, recovered: true };
       requireThat(quote.state !== 'refused', 'submission_refused',
         'EvoLink refused this submission and reported no charge. Resolve the original error, estimate again with the same budget, and obtain approval for the new quote.',
         { quote_id: id, client_request_id: quote.client_request_id, charged: 'no', submission_allowed: false });
@@ -86,7 +88,7 @@ export class Media {
       const { max_cost_usd, ...checkArgs } = quote.args;
       let fresh;
       try {
-        fresh = await this.mcp.call('estimate_cost', checkArgs);
+        fresh = await this.client.call('estimate_cost', checkArgs);
         requireThat(priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
         checkEstimate(fresh, max_cost_usd);
       } catch (error) { throw quoteError(error, max_cost_usd); }
@@ -95,7 +97,7 @@ export class Media {
       await this.state.write('quotes', id, quote);
       let result;
       try {
-        result = await this.mcp.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id });
+        result = await this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id });
         requireThat(typeof result.task_id === 'string' && result.task_id.length > 0, 'outcome_unknown', 'The submission returned no task ID. Recover with the original quote.');
       } catch (e) {
         quote.state = e.details?.charged === 'no' ? 'refused' : 'outcome_unknown';
@@ -118,7 +120,7 @@ export class Media {
     for (;;) {
       if (signal?.aborted) throw new CliError('interrupted', 'Stopped waiting locally. The EvoLink task continues.', { task_id: taskId }, 130);
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      const task = await this.mcp.call('get_task', { task_id: taskId, wait_seconds: Math.min(30, remaining) });
+      const task = await this.client.call('get_task', { task_id: taskId, wait_seconds: Math.min(30, remaining) });
       if (task.status === 'completed') return task;
       if (['failed', 'cancelled'].includes(task.status)) throw new CliError('task_failed', 'The generation task did not complete.', { task });
       progress(`${task.task_id}: ${task.status}${task.progress !== undefined ? ` (${task.progress}%)` : ''}`);

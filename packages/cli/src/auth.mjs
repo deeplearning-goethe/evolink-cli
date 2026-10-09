@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { auth } from '@modelcontextprotocol/sdk/client/auth.js';
+import { authorize, refresh, metadata } from './oauth.mjs';
 import { hash } from './state.mjs';
 import { authFetch, ISSUER, SERVER } from './network.mjs';
 import { CliError, requireThat } from './errors.mjs';
@@ -138,7 +138,7 @@ export class Credentials {
       let saved = await this.vault.read();
       requireThat(saved?.tokens, 'login_required', 'Run evolink auth login.');
       if (force || saved.expires_at <= Date.now() + 60_000) {
-        await auth(this.provider(), { serverUrl: this.server, scope: 'mcp offline_access', fetchFn: this.fetchFn });
+        await refresh(this.provider(), this.fetchFn);
         saved = await this.vault.read();
       }
       const issuer = this.server.href === SERVER ? ISSUER : this.server.origin;
@@ -169,12 +169,12 @@ export class Credentials {
         }
       };
       try {
-        let result = await auth(provider, { serverUrl: this.server, scope: 'mcp offline_access', fetchFn: this.fetchFn });
+        let result = await authorize(provider, this.fetchFn);
         if (result === 'REDIRECT') {
           provider.newLogin = true;
           const authorizationCode = await listener.code;
           progress('Login: browser approval received; completing secure login.');
-          result = await auth(provider, { serverUrl: this.server, scope: 'mcp offline_access', authorizationCode, fetchFn: this.fetchFn });
+          result = await authorize(provider, this.fetchFn, authorizationCode);
         }
         requireThat(result === 'AUTHORIZED', 'login_failed', 'Login could not finish.');
         progress('Login: complete. Verify the connection with evolink balance --json.');
@@ -196,9 +196,8 @@ export class Credentials {
         const client = await provider.clientInformation();
         const issuer = this.server.href === SERVER ? ISSUER : this.server.origin;
         requireThat(saved.tokens.issuer === issuer && client?.issuer === issuer, 'invalid_session', 'This session belongs to a different service.');
-        const metadata = await this.fetchFn(`${issuer}/.well-known/oauth-authorization-server`).then(r => r.json());
-        requireThat(metadata.issuer === issuer && metadata.revocation_endpoint, 'logout_failed', 'The service did not provide a session revocation endpoint.');
-        const response = await this.fetchFn(metadata.revocation_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        const discovery = await metadata(this.server, this.fetchFn);
+        const response = await this.fetchFn(discovery.revocation_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
           body: new URLSearchParams({ client_id: client.client_id, token: saved.tokens.refresh_token || saved.tokens.access_token,
             token_type_hint: saved.tokens.refresh_token ? 'refresh_token' : 'access_token' }) });
         requireThat(response.ok, 'logout_failed', 'Session revocation failed. Local credentials were retained so logout can be retried.');
