@@ -33,7 +33,18 @@ const mutants = [
   ['download-media-header', 'src/media-content.mjs', 'kinds.includes(kind)', 'true'],
   ['quote-error-budget', 'src/media.mjs', '...(cap !== undefined ? { max_cost_usd: cap } : {})', '...{}'],
   ['doctor-prerequisites', 'src/doctor.mjs', 'runtime && storage && login', 'true'],
-  ['doctor-exit-code', 'src/cli.mjs', 'if (!view.ok) process.exitCode = 1;', 'if (!view.ok) process.exitCode = 0;'],
+  ['skill-modified', 'src/skills.mjs', '!modified || replaceModified', 'true'],
+  ['model-verification', 'src/doctor.mjs', 'result.models.length > 0', 'true'],
+  ['setup-network-login', 'src/setup.mjs', '!LOGIN_ERRORS.has(error.code)', 'false'],
+  ['callback-reuse', 'src/auth.mjs', 'if (settled)', 'if (false)'],
+  ['doctor-exit-code', 'src/cli.mjs', "if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;", 'if (!view.ok) process.exitCode = 0;'],
+  ['status-filter-validation', 'src/cli.mjs', 'TASK_STATUS_FILTERS.includes(options.status)', 'true'],
+  ['status-pending-alias', 'src/cli.mjs', "Object.freeze(['processing', 'completed', 'failed', 'cancelled'])", "Object.freeze(['processing', 'completed', 'failed', 'cancelled', 'pending'])"],
+  ['status-error-values', 'src/cli.mjs', 'allowed_values: TASK_STATUS_FILTERS', 'allowed_values: []'],
+  ['status-filter-forwarding', 'src/cli.mjs', 'status: options.status, since:', 'status: undefined, since:'],
+  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : HELP', '? HELP : HELP'],
+  ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
+  ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
 ];
 
 let killed = 0;
@@ -48,7 +59,11 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name === 'callback-state' ? ['auth.test.mjs'] : ['media.test.mjs', 'auth.test.mjs', 'e2e.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs'];
+    const files = name === 'callback-state' ? ['auth.test.mjs']
+      : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
+      : name.startsWith('lock-') ? ['state.test.mjs']
+      : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']
+      : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = name === 'callback-state' ? ['--test-name-pattern=callback rejects wrong state'] : [];
     const run = spawnSync(process.execPath, ['--test', ...selection, ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });

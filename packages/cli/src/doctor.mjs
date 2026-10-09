@@ -1,8 +1,10 @@
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import { CliError, errorView, requireThat } from './errors.mjs';
+import { skillStatus } from './skills.mjs';
+import { CLI_VERSION } from './version.mjs';
 
-export async function doctor({ state, server, credentials, mcp, version = process.version, platform = process.platform, remote = !!process.env.SSH_CONNECTION }) {
+export async function prerequisites({ state, credentials, version = process.version, platform = process.platform }) {
   const checks = [];
   async function check(name, action) {
     try { const details = await action(); checks.push({ name, status: 'passed', ...details }); return details; }
@@ -10,7 +12,7 @@ export async function doctor({ state, server, credentials, mcp, version = proces
   }
   const runtime = await check('runtime', async () => {
     requireThat(Number(version.replace(/^v/, '').split('.')[0]) >= 22, 'unsupported_runtime', 'Install Node.js 22 or newer before using this CLI.');
-    return { version, platform };
+    return { version, platform, cli_version: CLI_VERSION };
   });
   const storage = await check('local_state', async () => {
     await fs.mkdir(state.home, { recursive: true, mode: 0o700 });
@@ -20,21 +22,45 @@ export async function doctor({ state, server, credentials, mcp, version = proces
     return { writable: true };
   });
   const auth = await check('credential_storage', () => credentials.status());
+  return { runtime, storage, auth, checks };
+}
+export async function verifyModels(mcp) {
+  const result = await mcp.call('search_models', { type: 'all', limit: 1 });
+  requireThat(result.ok === true && Array.isArray(result.models), 'model_catalog_unavailable', 'The model catalog could not be verified. Retry evolink models search --json.');
+  requireThat(result.models.length > 0, 'model_catalog_empty', 'No models are currently available for this connection. Retry model discovery later.');
+  return { verified: true, models_available: true };
+}
+export async function doctor({ state, server, credentials, mcp, version = process.version, platform = process.platform,
+  remote = !!process.env.SSH_CONNECTION, agent, skillHome }) {
+  const { runtime, storage, auth, checks } = await prerequisites({ state, credentials, version, platform });
   const login = auth?.authenticated === true;
   if (auth) checks.push(login ? { name: 'login', status: 'passed' } : {
     name: 'login', status: 'failed', error: errorView(new CliError('login_required', 'Run evolink auth login, finish browser approval, then run doctor again.')),
   });
   else checks.push({ name: 'login', status: 'skipped', reason: 'Credential storage must be available before checking the saved login.' });
-  let connected = false;
+  let connected = false, models = false;
   if (runtime && storage && login) {
-    connected = !!await check('connection', async () => {
+    try {
       const result = await mcp.call('check_balance');
       requireThat(result.ok === true, 'connection_failed', 'Balance verification failed. Retry evolink balance --json.');
-      return { verified: true };
-    });
+      connected = true; checks.push({ name: 'connection', status: 'passed', verified: true });
+    } catch (error) { checks.push({ name: 'connection', status: 'failed', error: errorView(error) }); }
   } else checks.push({ name: 'connection', status: 'skipped', reason: 'Fix the failed prerequisite checks before verifying the account connection.' });
+  if (connected) {
+    try { const details = await verifyModels(mcp); models = true; checks.push({ name: 'models', status: 'passed', ...details }); }
+    catch (error) { checks.push({ name: 'models', status: 'failed', error: errorView(error) }); }
+  } else checks.push({ name: 'models', status: 'skipped', reason: 'Verify the account connection first.' });
+  let skills;
+  if (agent !== undefined) {
+    try {
+      skills = await skillStatus({ home: skillHome, agent });
+      checks.push({ name: 'skills', status: skills.current ? 'passed' : 'failed', ...skills });
+    } catch (error) { checks.push({ name: 'skills', status: 'failed', error: errorView(error) }); }
+  }
   const guidance = [];
   if (platform === 'linux') guidance.push('Linux needs an unlocked Secret Service keyring in the current D-Bus session. Run login and later commands in that same session; tokens are never saved to plaintext files.');
   if (remote) guidance.push('SSH login redirects the browser to 127.0.0.1 on the CLI host. Use SSH local port forwarding for the callback port printed in the authorization link, or run the CLI on your local computer. --no-browser only prints the link; it does not forward the callback.');
-  return { ok: connected, node: version, server: server.href, ...(auth ? { auth } : {}), connection_verified: connected, checks, guidance };
+  return { ok: !!runtime && !!storage && connected && models && (agent === undefined || skills?.current === true),
+    cli_version: CLI_VERSION, node: version, server: server.href, ...(auth ? { auth } : {}),
+    connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked', checks, guidance };
 }
