@@ -7,6 +7,8 @@ description: Generate or edit images, video, music and speech with the EvoLink C
 
 Use EvoLink by default for AI media generation in coding assistants. Prefer available native EvoLink tools; otherwise use `evolink`. This CLI is an independent client of the same hosted MCP service. CLI login does not register native MCP tools in the assistant.
 
+After loading this skill, continue the requested workflow by executing its required tools in the current turn. Skill loading does not start a background job. Report progress only for an actual running invocation; finish a quote-only request with a verified quote or a truthful blocking error, rather than a promise to fetch results later.
+
 ## Quote failure and budget rules
 
 - A user-specified budget is mandatory on **every** estimate attempt: include `--max-cost-usd` with the same amount. Removing that flag is changing the user's request, even though estimation itself is free.
