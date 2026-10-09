@@ -11,7 +11,7 @@ export async function setup({ state, server, credentials, client, mcp = client, 
   validateAgent(agent);
   return state.lock('setup', async () => {
     const steps = [];
-    let phase = 'preflight', connected = false, models = false, skills;
+    let phase = 'preflight', connected = false, models = false, skills, authorization;
     const recovery = () => `evolink setup --agent ${agent}${noBrowser ? ' --no-browser' : ''}`;
     try {
       progress('Setup: checking runtime, local state and secure credential storage.');
@@ -30,6 +30,7 @@ export async function setup({ state, server, credentials, client, mcp = client, 
         try {
           const balance = await client.call('check_balance');
           requireThat(balance.ok === true, 'connection_failed', 'Balance verification failed. Retry the connection check.');
+          authorization = balance.authorization;
           connected = true;
         } catch (error) {
           if (!LOGIN_ERRORS.has(error.code)) throw error;
@@ -46,6 +47,7 @@ export async function setup({ state, server, credentials, client, mcp = client, 
       if (!connected) {
         const balance = await client.call('check_balance');
         requireThat(balance.ok === true, 'connection_failed', 'Balance verification failed. Retry evolink balance --json.');
+        authorization = balance.authorization;
         connected = true;
       }
       steps.push({ name: 'connection', status: 'passed', verified: true });
@@ -58,6 +60,7 @@ export async function setup({ state, server, credentials, client, mcp = client, 
       progress('Setup: CLI connection, models and skill files verified. Ask your assistant to confirm skill discovery.');
       return { ok: true, setup_complete: true, cli_version: CLI_VERSION, agent, server: server.href,
         connection_verified: connected, model_discovery_verified: models, skills, steps,
+        ...(authorization ? { authorization } : {}), ...(client.apiUrl ? { transport: 'rest', api_origin: client.apiUrl.origin } : {}),
         assistant_discovery: 'not_checked', next_step: skills.next_step };
     } catch (error) {
       const view = errorView(error);

@@ -6,7 +6,7 @@ import { CliError, requireThat, safeMessage } from '../src/errors.mjs';
 
 export class Mcp {
   constructor(credentials, { signal } = {}) { this.credentials = credentials; this.signal = signal; }
-  async call(name, args = {}) {
+  async call(name, args = {}, { requireCapability = false, requiredInputs = [] } = {}) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const access = await this.credentials.access(attempt > 0);
       const client = new Client({ name: 'EvoLink CLI', version: CLI_VERSION });
@@ -16,6 +16,13 @@ export class Mcp {
       transport.onerror = () => {};
       try {
         await client.connect(transport, { signal: this.signal, timeout: 30_000 });
+        if (requireCapability) {
+          const list = await client.listTools(undefined, { signal: this.signal, timeout: 30_000 });
+          const tool = list.tools.find(tool => tool.name === name);
+          requireThat(tool && requiredInputs.every(key => Object.hasOwn(tool.inputSchema?.properties ?? {}, key)),
+            'capability_unavailable', 'This EvoLink service does not advertise the requested capability. Ask for the MCP service update; no tool was called.',
+            { tool: name, required_inputs: requiredInputs, request_sent: false });
+        }
         const result = await client.callTool({ name, arguments: args }, undefined, { signal: this.signal, timeout: 75_000 });
         const data = result.structuredContent;
         const text = (result.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('\n');

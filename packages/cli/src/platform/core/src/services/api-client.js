@@ -120,9 +120,9 @@ export async function submitTask(config, options) {
 }
 /** Read-only, credential-specific availability; never cached across accounts. */
 export async function getAvailableModelIds(config) {
-    const { data } = await rawRequest(config, {
+    const { data } = await withRetry(() => rawRequest(config, {
         method: 'GET', path: '/v1/models', tool: 'model_catalog',
-    });
+    }), 2, 1500);
     if (!Array.isArray(data.data) || data.data.some(model => typeof model.id !== 'string')) {
         throw new Error('The available-model list could not be verified. Try again before generating.');
     }
@@ -153,7 +153,7 @@ export async function queryTasks(config, taskIds, tool = 'list_tasks') {
     return Array.isArray(data.data) ? data.data : [];
 }
 /** The account's recent tasks, newest first (GET /v1/tasks). Items carry no result links. */
-export async function listTasks(config, query, tool = 'list_tasks') {
+export async function listTasks(config, query, tool = 'list_tasks', options = {}) {
     const params = new URLSearchParams();
     if (query.status)
         params.set('status', query.status);
@@ -163,10 +163,17 @@ export async function listTasks(config, query, tool = 'list_tasks') {
         params.set('model', query.model);
     params.set('page', String(query.page ?? 1));
     params.set('page_size', String(query.pageSize ?? 20));
-    const { data } = await withRetry(() => rawRequest(config, { method: 'GET', path: `/v1/tasks?${params}`, tool }), 2, 1500);
+    const { data } = await withRetry(() => rawRequest(config, { method: 'GET', path: `/v1/tasks?${params}`, tool, timeoutMs: options.timeoutMs }), options.retries ?? 2, 1500);
+    if (!Array.isArray(data.data) || !Number.isSafeInteger(data.total) || data.total < 0) {
+        throw new ApiHttpError(502, 'The task list could not be verified. Retry this read; do not infer zero usage or submit another task.');
+    }
+    if ((data.page !== undefined && data.page !== (query.page ?? 1))
+        || (data.page_size !== undefined && data.page_size !== (query.pageSize ?? 20))) {
+        throw new ApiHttpError(502, 'The task page did not match the requested pagination. Retry this read; no usage total can be verified.');
+    }
     return {
-        data: Array.isArray(data.data) ? data.data : [],
-        total: typeof data.total === 'number' ? data.total : 0,
+        data: data.data,
+        total: data.total,
         page: typeof data.page === 'number' ? data.page : query.page ?? 1,
         page_size: typeof data.page_size === 'number' ? data.page_size : query.pageSize ?? 20,
     };

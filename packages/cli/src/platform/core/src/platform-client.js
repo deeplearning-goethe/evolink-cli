@@ -13,10 +13,14 @@ export class PlatformClient {
     constructor(config) {
         this.config = config;
         const registry = { registerTool: (name, definition, handler) => {
-                this.operations.set(name, { schema: z.object(definition.inputSchema), handler });
+                this.operations.set(name, { schema: z.object(definition.inputSchema).strict(), handler });
                 return {};
             } };
         registerPlatformOperations(registry, config);
+    }
+    supports(name, inputs = []) {
+        const operation = this.operations.get(name);
+        return Boolean(operation && inputs.every(input => Object.hasOwn(operation.schema.shape, input)));
     }
     async call(name, args, credentials) {
         const operation = this.operations.get(name);

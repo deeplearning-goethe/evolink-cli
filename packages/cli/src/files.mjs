@@ -5,7 +5,8 @@ import { randomUUID, createHash } from 'node:crypto';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { resultFetch, USER_AGENT, loopback } from './network.mjs';
-import { CliError, requireThat, localFile, fileError } from './errors.mjs';
+import { CliError, requireThat, localFile, fileError, errorView } from './errors.mjs';
+import { hash } from './state.mjs';
 import { checkContentType, checkMediaPrefix } from './media-content.mjs';
 
 const MIME = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif', '.webp': 'image/webp',
@@ -79,7 +80,7 @@ async function directUpload(file, size, mime, { client, state, server, upload_pa
 export async function getUpload(id, { client, state, server }) {
   const journal = await state.read('uploads', id);
   requireThat(journal?.server === server.href, 'upload_not_found', 'No upload receipt exists for this login resource.');
-  requireThat(journal.backend === 'platform', 'legacy_upload', 'This upload used CLI 0.6.0 and the MCP upload proxy. Recover it with that version; the direct API client cannot query an old proxy slot.', { upload_id: id });
+  requireThat(journal.backend === 'platform', 'legacy_upload', 'This upload used an older MCP-based CLI and its upload proxy. Recover it with the original CLI version; the direct API client cannot query an old proxy slot.', { upload_id: id });
   requireThat(journal.api_origin === client.apiUrl.origin && journal.binding === (await client.credentials.access()).binding,
     'upload_session_changed', 'This receipt belongs to a different platform or login.');
   if (journal.state === 'done') return journal.result;
@@ -87,7 +88,7 @@ export async function getUpload(id, { client, state, server }) {
     text: 'No completed receipt was saved. The file service currently cannot look up an upload by client request ID. Check your files before uploading again; this command does not retry the upload.' };
 }
 
-export async function download(taskId, output, { client, mcp = client, server, index = 1, signal, maxBytes = 1024 ** 3, fetchFn }) {
+export async function download(taskId, output, { client, mcp = client, server, index = 1, signal, maxBytes = 1024 ** 3, fetchFn, task: suppliedTask, beforeCommit }) {
   client = mcp;
   const target = path.resolve(output);
   const parent = await localFile(() => fs.stat(path.dirname(target)), { file: target, missing: 'output_directory_missing' });
@@ -95,7 +96,7 @@ export async function download(taskId, output, { client, mcp = client, server, i
   await localFile(() => fs.access(path.dirname(target), constants.W_OK), { file: target });
   try { await fs.lstat(target); throw new CliError('file_exists', 'The output file already exists. Choose another path.'); }
   catch (e) { if (e.code !== 'ENOENT') throw fileError(e, { file: target }); }
-  const task = await client.call('get_task', { task_id: taskId, wait_seconds: 0 });
+  const task = suppliedTask ?? await client.call('get_task', { task_id: taskId, wait_seconds: 0 });
   requireThat(task.status === 'completed', 'task_not_ready', 'Wait for the task to complete before downloading.');
   const result = task.results?.[index - 1];
   requireThat(Number.isInteger(index) && index > 0 && result?.url, 'result_not_found', 'The requested result index does not exist.');
@@ -131,8 +132,100 @@ export async function download(taskId, output, { client, mcp = client, server, i
     requireThat(response.body, 'download_failed', 'The file service returned an empty response.');
     await pipeline(Readable.fromWeb(response.body), guard, createWriteStream(temp, { flags: 'wx', mode: 0o600 }), { signal: timeoutSignal });
     requireThat(bytes > 0, 'download_failed', 'The file service returned an empty file.');
+    const receipt = { task_id: taskId, result_index: index, path: target, size_bytes: bytes, sha256: digest.digest('hex'), kind: result.kind };
+    await beforeCommit?.(receipt);
     await fs.link(temp, target);
-    return { task_id: taskId, result_index: index, path: target, size_bytes: bytes, sha256: digest.digest('hex'), kind: result.kind };
+    return receipt;
   } catch (error) { throw fileError(error, { file: target, missing: 'output_directory_missing' }); }
   finally { await fs.unlink(temp).catch(() => {}); }
+}
+
+export function downloadNames(taskId, results, template = '{task_id}-{index}.{ext}') {
+  requireThat(typeof template === 'string' && template.length > 0 && template.length <= 200 && !/[\\/\x00-\x1f]/.test(template),
+    'invalid_template', 'Use a filename template, without directory separators. Placeholders: {task_id}, {index}, {kind}, {ext}.');
+  const names = results.map((result, index) => {
+    let extension;
+    try { extension = path.extname(new URL(result.url).pathname).toLowerCase(); } catch {}
+    const ext = MIME[extension] ? extension.slice(1) : 'bin';
+    const values = { task_id: String(taskId).replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 128), index: String(index + 1), kind: result.kind, ext };
+    const name = template.replace(/\{(task_id|index|kind|ext)\}/g, (_, key) => values[key]);
+    requireThat(name.length <= 240 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(name) && !name.includes('..')
+      && !/[. ]$/.test(name) && !/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(name),
+    'invalid_template', 'The template must produce portable filenames with letters, digits, dots, underscores or hyphens.');
+    return name;
+  });
+  requireThat(new Set(names.map(name => name.toLowerCase())).size === names.length, 'duplicate_output_path', 'The template must produce a different filename for every result; include {index}.');
+  return names;
+}
+
+/** Recovery checks saved file digests; it never treats an unrelated existing file as a delivered result. */
+export async function downloadAll(taskId, directory, { client, mcp = client, server, state, signal, template, resume = false, fetchFn }) {
+  const target = path.resolve(directory);
+  const receiptId = hash({ taskId, server: server.href, target });
+  return state.lock(`delivery-${receiptId}`, async () => {
+    const task = await mcp.call('get_task', { task_id: taskId, wait_seconds: 0 });
+    requireThat(task.status === 'completed', 'task_not_ready', 'Wait for the task to complete before downloading.');
+    requireThat(Array.isArray(task.results) && task.results.length > 0 && task.results.length <= 50,
+      'invalid_result_count', 'Download all requires between 1 and 50 result links. Use individual downloads for larger tasks.');
+    const names = downloadNames(taskId, task.results, template);
+    const sources = task.results.map(result => {
+      const url = new URL(result.url);
+      return hash({ kind: result.kind, origin: url.origin, path: url.pathname });
+    });
+    let receipt = await state.read('deliveries', receiptId);
+    if (resume) {
+      requireThat(receipt && receipt.task_id === taskId && receipt.directory === target && receipt.server === server.href
+        && Array.isArray(receipt.files) && hash(receipt.names) === hash(names) && hash(receipt.sources) === hash(sources),
+      'delivery_receipt_mismatch', 'No matching delivery receipt exists, or the task outputs/template changed. Keep the task ID; choose a new directory for a fresh download.');
+    } else {
+      requireThat(!receipt, 'delivery_exists', 'This task already has a delivery receipt for this directory. Use --resume to verify saved files and download the remainder.');
+      receipt = { task_id: taskId, directory: target, server: server.href, names, sources, files: [] };
+    }
+    await localFile(() => fs.mkdir(target, { recursive: true, mode: 0o700 }), { file: target });
+    requireThat((await fs.stat(target)).isDirectory(), 'path_not_directory', 'Choose an output directory.');
+    await state.write('deliveries', receiptId, receipt);
+    const failures = [], downloaded = [];
+    for (let index = 1; index <= names.length; index++) {
+      const file = path.join(target, names[index - 1]);
+      try {
+        requireThat(!signal?.aborted, 'interrupted', 'Stopped downloading locally. The completed EvoLink task is unchanged.');
+        let saved = receipt.files.find(item => item.result_index === index);
+        if (saved?.pending_commit) {
+          try { await fs.lstat(file); }
+          catch (error) {
+            if (error.code !== 'ENOENT') throw error;
+            receipt.files = receipt.files.filter(item => item.result_index !== index);
+            await state.write('deliveries', receiptId, receipt);
+            saved = undefined;
+          }
+        }
+        if (saved) {
+          const stat = await localFile(() => fs.lstat(file), { file });
+          requireThat(saved.path === file && /^[a-f0-9]{64}$/.test(saved.sha256) && stat.isFile() && stat.size === saved.size_bytes,
+            'saved_file_changed', 'A previously downloaded file changed. It will not be overwritten. Choose a new output directory.');
+          const digest = createHash('sha256');
+          for await (const bytes of createReadStream(file, { signal })) digest.update(bytes);
+          requireThat(digest.digest('hex') === saved.sha256, 'saved_file_changed', 'A previously downloaded file changed. It will not be overwritten. Choose a new output directory.');
+          if (saved.pending_commit) { saved.pending_commit = false; await state.write('deliveries', receiptId, receipt); }
+          downloaded.push({ ...saved, verified_existing: true });
+        } else {
+          const result = await download(taskId, file, { mcp, server, index, signal, fetchFn, task, beforeCommit: async pending => {
+            receipt.files.push({ ...pending, pending_commit: true });
+            await state.write('deliveries', receiptId, receipt);
+          } });
+          Object.assign(receipt.files.find(item => item.result_index === index), result, { pending_commit: false });
+          await state.write('deliveries', receiptId, receipt);
+          downloaded.push(result);
+        }
+      } catch (error) {
+        failures.push({ result_index: index, path: file, error: errorView(error) });
+        if (signal?.aborted) break;
+      }
+    }
+    const complete = downloaded.length === names.length && failures.length === 0;
+    return { ok: complete, task_id: taskId, generation_status: 'completed', delivery_status: complete ? 'completed' : 'partial',
+      files: downloaded, failures, result_count: names.length, receipt_id: receiptId,
+      ...(signal?.aborted ? { error: { code: 'interrupted' } } : {}),
+      text: `${downloaded.length}/${names.length} original files verified or downloaded.${complete ? '' : ' Delivery is incomplete. Keep this task ID; retry download --all with the same directory/template and --resume. Do not generate again.'}` };
+  });
 }

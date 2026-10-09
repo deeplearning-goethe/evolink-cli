@@ -8,6 +8,7 @@ import { formatUsd } from '../services/error-handler.js';
 import { trackedLink } from '../services/utm.js';
 import { READ_ONLY, errorResult, failure, ok } from './shared.js';
 import { modelTitle } from './search-models.js';
+import { referenceInputs } from '../services/model-capabilities.js';
 function value(v) {
     return JSON.stringify(v);
 }
@@ -89,7 +90,22 @@ export function registerGetModel(server, config) {
                     constraints: spec.constraints,
                     example_input: spec.example,
                     parameters_source: modelParamsMeta(),
+                    input_schema: spec.inputSchema?.schema,
+                    response_schema: spec.responseSchema?.schema,
+                    schema_info: {
+                        dialect: spec.inputSchema?.dialect,
+                        unresolved_input_refs: spec.inputSchema?.unresolved_refs,
+                        unresolved_response_refs: spec.responseSchema?.unresolved_refs,
+                        response_scope: 'generation_submission_response_not_final_task_result',
+                        omitted_fields: { input: ['model', 'callback_url'], response: ['task_info.can_cancel'] },
+                        additional_runtime_constraints: spec.constraints,
+                        source: modelParamsMeta(),
+                        validation_scope: 'documented_schema_plus_runtime_constraints',
+                        runtime_constraints_source: 'reviewed_gateway_supplements',
+                    },
+                    reference_inputs: referenceInputs(spec),
                 });
+                lines.push('Schemas are versioned official OpenAPI references. response_schema describes submission, not necessarily the final task output. Apply the additional runtime constraints above.');
             }
             else {
                 lines.push('', 'Parameters for this model are not documented here; the gateway checks the input when you submit.');

@@ -27,7 +27,10 @@ export class Api {
       http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli', version: CLI_VERSION,
         controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin, freshPricing: name === 'estimate_cost' } };
   }
-  async call(name, args = {}) {
+  async call(name, args = {}, { requireCapability = false, requiredInputs = [] } = {}) {
+    if (requireCapability) requireThat(this.platform.supports(name, requiredInputs),
+      'capability_unavailable', 'This CLI does not contain the requested platform capability. Update the CLI; no request was sent.',
+      { tool: name, required_inputs: requiredInputs, request_sent: false });
     for (let attempt = 0; attempt < 2; attempt++) {
       const access = await this.credentials.access(attempt > 0);
       const result = await this.platform.call(name, args, this.context(access, name));

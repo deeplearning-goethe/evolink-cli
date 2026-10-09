@@ -12,7 +12,7 @@ export function registerCheckBalance(server, config) {
     server.registerTool('check_balance', {
         title: 'Check balance',
         description: [
-            'Show the EvoLink account balance and what has been spent: by EvoLink MCP in total (all assistants connected by sign-in) or by this API key, with its limit if one is set. Free.',
+            'Show the EvoLink account balance and what has been spent: by the shared EvoLink MCP OAuth key in total (CLI and all assistants connected by sign-in) or by this API key, with its limit if one is set. Free.',
             'Also a quick way to confirm the connection works.',
             'Credits: 68 credits ≈ $1.',
         ].join(' '),
@@ -23,7 +23,7 @@ export function registerCheckBalance(server, config) {
             const credits = await getCredits(config);
             // A signed-in connection spends the account's MCP key: its spend and limit cover every connected assistant.
             const signedIn = currentCredentialMode() === 'signed_in';
-            const who = signedIn ? 'EvoLink MCP (all assistants connected to this account)' : 'This API key';
+            const who = signedIn ? 'EvoLink MCP (CLI and all assistants connected to this account)' : 'This API key';
             const limitName = signedIn ? 'the EvoLink MCP limit' : 'its limit';
             const balance = Math.max(0, credits.user.remaining_credits);
             const lines = [`Account balance: ${money(balance)}`];
@@ -35,8 +35,15 @@ export function registerCheckBalance(server, config) {
                 spent_usd: usdOf(credits.token.used_credits),
                 has_limit: !credits.token.unlimited_credits,
                 top_up_url: trackedLink(TOP_UP_URL, 'top_up'),
-                ...(signedIn ? { mcp_settings_url: trackedLink(MCP_CONSOLE_URL, 'api_keys') } : {}),
+                ...(signedIn ? {
+                    mcp_settings_url: trackedLink(MCP_CONSOLE_URL, 'api_keys'),
+                    authorization: { mode: 'oauth', key_name: MCP_KEY_NAME, key_scope: 'account',
+                        shared_clients: ['cli', 'mcp'], quota_scope: 'shared_account_key', permission_scope: 'shared_account_key',
+                        pause_scope: 'shared_account_key', logout_scope: 'current_oauth_session' },
+                } : {}),
             };
+            if (signedIn)
+                lines.push('CLI and MCP share this account key: its total/daily limits, permissions and pause apply to both. Logging out revokes only that OAuth session; other sessions retain access.');
             const daily = dailyLimitOf(credits.token);
             if (credits.token.unlimited_credits) {
                 // A daily limit, if any, is named on its own line below: do not say that only the balance applies.

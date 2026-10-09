@@ -46,10 +46,12 @@ export async function restFixture(state, req, res, url, body, send) {
     send(200, raw(state.tasks.get(state.paid.get(idempotency)))); return true;
   }
   if (url.pathname === '/v1/tasks') {
-    state.calls.push({ name: 'list_tasks', args: { ...(url.searchParams.has('status') ? { status: url.searchParams.get('status') } : {}),
-      ...(url.searchParams.has('type') ? { type: url.searchParams.get('type') } : {}), limit: Number(url.searchParams.get('page_size')) } });
-    send(200, { data: [...state.tasks.values()].map(task => ({ id: task.task_id, model: task.model || 'fixture-image', type: task.type,
-      status: task.status, progress: task.progress ?? 5, created_at: Math.floor(Date.now() / 1000), has_results: !!task.results?.length })), total: state.tasks.size, page: 1, page_size: 50 }); return true;
+    const page = Number(url.searchParams.get('page') || 1), page_size = Number(url.searchParams.get('page_size') || 20);
+    const filters = Object.fromEntries(['status', 'type', 'model'].filter(key => url.searchParams.has(key)).map(key => [key, url.searchParams.get(key)]));
+    state.calls.push({ name: 'list_tasks', args: { ...filters, page, limit: page_size } });
+    const rows = [...state.tasks.values()].map(task => ({ ...raw(task), created_at: task.created_at ?? Math.floor(Date.now() / 1000), has_results: !!task.results?.length, credits_used: task.charged_credits ?? 1.36 }))
+      .filter(task => Object.entries(filters).every(([key, value]) => key === 'status' && value === 'processing' ? ['pending', 'processing'].includes(task.status) : task[key] === value));
+    send(200, { data: rows.slice((page - 1) * page_size, page * page_size), total: rows.length, page, page_size }); return true;
   }
   if (url.pathname === '/v1/tasks/batch') { send(200, { data: JSON.parse(body).task_ids.flatMap(id => state.tasks.has(id) ? [raw(state.tasks.get(id))] : []) }); return true; }
   if (url.pathname.startsWith('/v1/tasks/')) {

@@ -202,14 +202,14 @@ function nextStep(category, info, mode) {
         case 'account_balance_insufficient':
             return sentences(balance && `Balance: ${balance}.`, needed && `This request needs about ${needed}.`, `Ask the user to top up at ${action ?? trackedLink(TOP_UP_URL, 'top_up')}, then retry.`);
         case 'mcp_limit_reached':
-            return sentences(limitFigures(details, 'EvoLink MCP limit'), needed && `This request needs about ${needed}.`, balance && `Account balance: ${balance} (not the problem).`, `Ask the user to raise or remove the EvoLink MCP limit at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)}; it is shared by every assistant connected to their EvoLink account.`, 'Do not retry until they have changed it.');
+            return sentences(limitFigures(details, 'EvoLink MCP limit'), needed && `This request needs about ${needed}.`, balance && `Account balance: ${balance} (not the problem).`, `Ask the user to raise or remove the EvoLink MCP limit at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)}; it is shared by every assistant connected to their EvoLink account, including the CLI.`, 'Do not retry until they have changed it.');
         case 'mcp_daily_limit_reached': {
             const used = credits(details.daily_used_credits);
             const limit = credits(details.daily_limit_credits);
-            return sentences(used && limit && `Today's EvoLink MCP spending: ${used} of the ${limit} daily limit.`, `It resets automatically at midnight${zone ? ` (${zone})` : ''}.`, balance && `Account balance: ${balance} (not the problem).`, `To continue today, ask the user to raise the EvoLink MCP daily limit at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)}.`);
+            return sentences(used && limit && `Today's EvoLink MCP spending: ${used} of the ${limit} daily limit.`, `It resets automatically at midnight${zone ? ` (${zone})` : ''}.`, balance && `Account balance: ${balance} (not the problem).`, `To continue today, ask the user to raise the EvoLink MCP daily limit at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)}; this daily limit is shared by CLI and MCP.`);
         }
         case 'mcp_paused':
-            return `Ask the user to resume EvoLink MCP at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)} (switch it back on). Do not ask them to reconnect, and do not retry until it is resumed.`;
+            return `Ask the user to resume EvoLink MCP at ${mcpLimitPlace(action ?? trackedLink(MCP_CONSOLE_URL, 'api_keys'), details)} (switch it back on; this resumes the shared CLI and MCP key). Do not ask them to reconnect, and do not retry until it is resumed.`;
         case 'mcp_key_expired': {
             const expiredAt = typeof details.expired_at === 'number' && Number.isFinite(details.expired_at) && details.expired_at > 0
                 ? new Date(details.expired_at * 1000).toISOString().slice(0, 10)
@@ -235,7 +235,7 @@ function nextStep(category, info, mode) {
                 return 'The EvoLink connection was rejected. Ask the user to reconnect EvoLink in this client.';
             return mode === 'api_key'
                 ? 'The API key was rejected. Ask the user to check the EvoLink API key configured in this client.'
-                : 'The API key was rejected. Check EVOLINK_API_KEY, or run `evolink login` again.';
+                : 'The API key was rejected. Check EVOLINK_API_KEY or the configured API-key credential helper. The browser CLI uses `evolink auth login` independently.';
         case 'forbidden':
             return 'Access to this resource is denied for this account.';
         case 'rate_limited':

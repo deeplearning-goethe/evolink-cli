@@ -67,7 +67,7 @@ function infoFor(error) {
         category: 'unauthorized',
         message,
         next_step: processCredentialsAllowed()
-            ? `Set EVOLINK_API_KEY (create a key at ${trackedLink(API_KEYS_URL, 'api_keys')}), or run \`evolink login\`.`
+            ? `Set EVOLINK_API_KEY (create a key at ${trackedLink(API_KEYS_URL, 'api_keys')}), or configure EVOLINK_CREDENTIAL_HELPER with an API-key helper. The browser CLI uses \`evolink auth login\` independently.`
             : 'Ask the user to reconnect EvoLink in this client. If it keeps failing, retry in a few minutes.',
         retryable: false,
     };

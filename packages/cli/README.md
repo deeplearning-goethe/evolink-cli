@@ -2,7 +2,7 @@
 
 Generate images, video, music and speech directly through the EvoLink platform API. This is an unreleased development change; public CLI 0.6.0 uses the hosted MCP transport. The CLI provides browser login, model discovery, quotes, task recovery, reference uploads and original-result downloads.
 
-The package connects to the hosted EvoLink service using the assistant's terminal. Requires Node.js 22+.
+The package calls the EvoLink platform API directly using the assistant's terminal. Requires Node.js 22+.
 
 ## Status and installation
 
@@ -116,6 +116,38 @@ The CLI persists the request ID before paid submission. Recovery reuses that ID;
 
 Uploads stream up to 95 MiB directly to the file service using a short-lived upload token issued by the platform. The OAuth access token is never sent to the file service. `uploads get` reads a saved local receipt. A lost response without a saved receipt reports `outcome_unknown` and `result_verified: false`; it does not retry or claim that a result was recovered. The file service has no lookup by client request ID. Legacy proxy slots can be recovered with CLI 0.6.0. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
 
+## Discovery, task pages and all-result delivery
+
+Every command supports local `--help --json`, with option enums, bounds and defaults. New discovery tools and page/model/until filters come from the bundled shared platform module. The CLI checks bundled operation capabilities and reports `capability_unavailable` before calling an unsupported tool or sending an unsupported filter.
+
+```sh
+evolink models recommend --type video --references image --query seedance --json
+evolink models schema MODEL --json
+evolink docs search --query voice_prompt --json
+evolink models search --type video --page 2 --json
+evolink tasks list --model MODEL --page 2 --limit 50 --json
+evolink tasks batch --ids TASK_A,TASK_B --json
+evolink download TASK_ID --all --output-dir /absolute/results --json
+evolink download TASK_ID --all --output-dir /absolute/results --resume --json
+```
+
+Recommendations report documented reference support and editorial selection reasons; they are not a quality, popularity or release-date ranking. Read the actual model inputs and prepare a quote before generating. Documentation search returns bundled official model-reference excerpts and a source commit, not a live full-site crawl. Schemas preserve nested OpenAPI definitions. `response_schema` describes submission rather than necessarily the final task result; runtime constraints remain authoritative.
+
+Task pagination returns `page`, `page_size` and `next_page`. `since`/`until` filter only the selected page; `total` is before those time filters. Batch queries deduplicate known IDs and return missing IDs. Public voice/persona/result metadata is preserved in `outputs` without private upstream metadata.
+
+All-result downloads accept up to 50 results. `--template '{task_id}-{index}.{ext}'` also supports `{kind}`; templates must produce distinct portable filenames without directories. Local receipts record sizes and SHA-256 hashes. `--resume` verifies saved files and downloads the remainder with the same task/directory/template. Changed files and unrelated existing files are preserved. Partial delivery returns successful files and per-result errors, exits nonzero, and leaves generation marked completed. Recover downloads using the original task; never regenerate to fix delivery.
+
+## Usage and spending limits
+
+```sh
+evolink usage --since 30d --max-pages 5 --json
+evolink usage --since 2026-10-01T00:00:00Z --until 2026-10-09T00:00:00Z --model MODEL --json
+```
+
+This account-wide summary scans at most 1–20 pages of 50 retained tasks (default 5), groups by task creation time, and sums valid reported costs of completed tasks. It includes coverage, scan bounds, missing costs and detected pagination changes. Missing costs are not zero. Complete coverage means currently retained matching tasks were scanned; historical completeness and a consistent snapshot remain unknown. It excludes reservations, payments, refunds and non-task charges and is not a bill or invoice. USD is approximate at 68 credits per dollar.
+
+Final task/workflow budgets require authoritative server-side reservation and settlement. This version retains an estimate-based submission guard; task summaries or local waiting cannot enforce a final spending cap. No cancellation command or tool is provided.
+
 ## Authentication and state
 
 Login discovers Passport directly and uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
@@ -138,8 +170,26 @@ Development starts in `deeplearning-goethe/evolink-cli`. After acceptance, repos
 
 ## Platform and MCP paths
 
-The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Independent permissions and platform-owned media estimates are separate follow-up work.
+The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Total and daily limits, model permissions and pause apply to both clients; logging out revokes only the current OAuth session. Separate keys are optional when a project needs independent limits. Platform-owned media estimates remain follow-up work.
 
 The CLI vendors the reviewed shared platform module from the MCP repository with a SHA-256 source/artifact manifest in `src/platform/source.json`. Refresh it on the test host using `scripts/sync-platform-client.mjs`; never edit generated files. The MCP SDK is a development dependency for compatibility fixtures only. No extra package or MCP plugin installation is needed by CLI users.
 
 `--server` retains the OAuth resource identity for existing saved logins and quotes. `--api-url` and `--files-url` accept the official endpoints; loopback overrides require a loopback test resource. No credential-bearing redirects or automatic MCP fallback are allowed. Quotes with a recorded API origin cannot be submitted to a different origin.
+
+## Host permission compatibility
+
+CLI command validation does not grant the assistant permission to run a command. Respect host denials and keep the original budget, model and request IDs. Gemini CLI 0.63.0 can reject shell arguments derived from tool output in a noninteractive session, even with a command-prefix allow rule. Use an interactive session to review permissions; for a separately selected native MCP workflow, configure Gemini's Streamable HTTP connection and authorize it with `/mcp auth evolink`. CLI OAuth credentials are not exported or copied into MCP settings. Do not automatically switch routes after a denial or disable host safety checks.
+
+```json
+{
+  "mcpServers": {
+    "evolink": { "httpUrl": "https://mcp.evolink.ai/mcp" }
+  }
+}
+```
+
+Run `gemini mcp list` from the intended project directory. If EvoLink is `Disabled` because the folder is untrusted, review that folder using Gemini's normal trust dialog or `/permissions`; do not disable folder-trust checks globally. `Connected` confirms discovery, so also verify a real read-only model or balance call.
+
+Headless mode exposes only tools permitted by its policy. In Gemini CLI 0.63.0, a scoped MCP rule uses `mcpName`, not `serverName`; allow only the tools needed for the chosen workflow. For example, a quote-only policy can allow `search_models`, `get_model`, `estimate_cost`, `check_balance` and `get_task` on `evolink`. Generation still requires the user's quote approval and the host's normal tool permission. Do not silently add a generation allow rule or treat a successful process exit without EvoLink tool calls as acceptance.
+
+See [Gemini trusted folders](https://geminicli.com/docs/cli/trusted-folders/) and [Gemini MCP configuration and OAuth](https://geminicli.com/docs/tools/mcp-server/). A cloud terminal test does not prove desktop inline previews, browser handoff on another machine or permission defaults in every host.

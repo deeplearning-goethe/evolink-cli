@@ -5,7 +5,8 @@ import { serverURL } from './network.mjs';
 import { Credentials } from './auth.mjs';
 import { Api } from './api.mjs';
 import { Media } from './media.mjs';
-import { upload, download, getUpload } from './files.mjs';
+import { upload, download, downloadAll, getUpload } from './files.mjs';
+import { commandHelp } from './help.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { doctor } from './doctor.mjs';
 import { setup } from './setup.mjs';
@@ -24,13 +25,17 @@ Read recent tasks across your EvoLink account (free), newest first.
   --status STATUS  ${TASK_STATUS_FILTERS.join('|')}
   --type TYPE      image|video|audio; omit to include all media types
   --since TIME     Creation time: ISO 8601, Unix seconds, or 30m, 2h, 1d
+  --until TIME     Inclusive creation-time upper bound; same formats as since
+  --model MODEL    Exact model ID
+  --page N         Page number, 1-100000 (default 1)
   --limit N        Integer from 1 to 50 (default 20)
   --json           Return one JSON envelope on stdout
 
 ${TASK_STATUS_HELP}
 Filters are case-sensitive. A returned task status can be pending;
 response statuses are not the same as allowed --status filters.
---since filters the returned recent batch; it does not search all history.
+--since/--until filter the selected page; one call does not search all history.
+total counts server-filtered tasks before time filtering; next_page continues.
 An empty list does not prove an uncertain submission created no task.
 cancelled is a read filter; the CLI does not provide a cancel command.
 Connection options: --server URL, --token-stdin.
@@ -51,14 +56,22 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
   models show MODEL              Read parameters and pricing (free)
+  models schema MODEL            Read versioned input/submission schemas (free)
+  models recommend --type TYPE [--query TEXT] [--references image,video,audio]
+  docs search --query TEXT        Search official model reference excerpts (free)
   estimate --model MODEL --input-file FILE [--max-cost-usd USD] [--media-seconds N]
   generate image|video|audio --quote ID --confirm [--wait] [--timeout SECONDS]
   tasks get ID | tasks wait ID [--timeout SECONDS]
   tasks list [--type TYPE] [--status STATUS] [--since TIME] [--limit N]
+             [--until TIME] [--model MODEL] [--page N]
+  tasks batch --ids ID,ID         Read up to 50 known tasks together (free)
+  usage [--since 30d] [--until TIME] [--model MODEL] [--type TYPE] [--max-pages N]
+                                 Summarize retained task costs; not a bill (free)
   tasks resume --quote ID         Recover using the original request ID
   upload FILE [--upload-path FOLDER]
-  uploads get ID                 Recover a lost upload result (free)
+  uploads get ID                 Read a saved upload receipt (free)
   download TASK_ID --output FILE [--index N]
+  download TASK_ID --all --output-dir DIR [--template NAME] [--resume]
   skills install [--agent NAME] [--replace-modified]
                                  Install or update; back up replaced files
   skills status [--agent NAME]   Check installed skill content and CLI version
@@ -74,6 +87,8 @@ ${TASK_STATUS_HELP}
 Task list types: image, video, audio; omit --type to include all types.
 Task list example: evolink tasks list --status processing --json
 Run evolink tasks list --help for filter details and recovery caveats.
+Each command accepts --help --json for its machine-readable command reference.
+Model/docs/usage capabilities come from the bundled shared platform module.
 After upgrading the package, run evolink skills install to refresh its skill.
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
@@ -84,8 +99,8 @@ Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
 
 const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
-  'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'output', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
-for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
+  'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
+for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
 function number(value, name, min, max, integer = false) {
   if (value === undefined) return undefined;
@@ -99,11 +114,13 @@ export function validateCommand(args, options) {
   const routes = {
     setup: [1, 'agent', 'no-browser', 'timeout'],
     'auth login': [2, 'no-browser', 'timeout'], 'auth status': [2], 'auth logout': [2], balance: [1],
-    'models search': [2, 'query', 'type', 'limit'], 'models show': [3],
+    'models search': [2, 'query', 'type', 'limit', 'page'], 'models show': [3], 'models schema': [3],
+    'models recommend': [2, 'type', 'query', 'references', 'limit'], 'docs search': [2, 'query', 'type', 'limit'],
+    usage: [1, 'since', 'until', 'type', 'model', 'max-pages'],
     estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd'],
     'generate image': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate video': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate audio': [2, 'quote', 'confirm', 'wait', 'timeout'],
-    'tasks get': [3], 'tasks wait': [3, 'timeout'], 'tasks list': [2, 'type', 'status', 'since', 'limit'], 'tasks resume': [2, 'quote'],
-    upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index'],
+    'tasks get': [3], 'tasks wait': [3, 'timeout'], 'tasks batch': [2, 'ids'], 'tasks list': [2, 'type', 'status', 'since', 'until', 'model', 'page', 'limit'], 'tasks resume': [2, 'quote'],
+    upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index', 'all', 'output-dir', 'template', 'resume'],
     'skills install': [2, 'agent', 'replace-modified'], 'skills status': [2, 'agent'], doctor: [1, 'agent'],
   };
   const route = routes[`${command} ${action}`] || routes[command];
@@ -114,13 +131,40 @@ export function validateCommand(args, options) {
   if (options.timeout !== undefined) number(options.timeout, 'timeout', command === 'setup' || command === 'auth' ? 30 : 1,
     command === 'setup' || command === 'auth' ? 900 : 86400, true);
   requireThat(!(command === 'setup' && options['token-stdin']), 'invalid_option', 'setup uses the saved OS login. Use balance or doctor for a one-command stdin token.');
-  if (options.type !== undefined) requireThat(['image', 'video', 'audio', ...(command === 'models' ? ['all'] : [])].includes(options.type), 'invalid_type', 'Unsupported media type.');
+  if (options.type !== undefined) requireThat(['image', 'video', 'audio', ...(command === 'docs' || (command === 'models' && action === 'search') ? ['all'] : [])].includes(options.type), 'invalid_type', 'Unsupported media type.');
+  if (options.page !== undefined) number(options.page, 'page', 1, 100000, true);
+  if (options['max-pages'] !== undefined) number(options['max-pages'], 'max-pages', 1, 20, true);
+  if (options.limit !== undefined) number(options.limit, 'limit', 1, command === 'docs' ? 20 : action === 'recommend' ? 10 : 50, true);
+  if (command === 'models' && action === 'recommend') {
+    requireThat(options.type, 'missing_type', 'Pass --type image, video or audio.');
+    if (options.references !== undefined) references(options.references);
+  }
+  if (command === 'docs') requireThat(options.query?.trim(), 'missing_query', 'Pass --query with model reference keywords.');
+  if (command === 'tasks' && action === 'batch') taskIds(options.ids);
+  if (command === 'download') {
+    requireThat(options.all ? options['output-dir'] && !options.output && !options.index : options.output && !options['output-dir'] && !options.template && !options.resume,
+      'invalid_option', 'Choose --output FILE [--index N], or --all --output-dir DIR [--template NAME] [--resume].');
+  }
   if (options.status !== undefined) requireThat(TASK_STATUS_FILTERS.includes(options.status), 'invalid_status',
     `Unsupported task status filter. ${TASK_STATUS_HELP}`, {
       param: 'status', value: options.status, allowed_values: TASK_STATUS_FILTERS,
       queued_filter: 'processing', request_sent: false,
       next_step: 'Use --status processing for queued or running tasks, or omit --status. Run evolink tasks list --help.',
     });
+}
+
+function references(value) {
+  const kinds = value.split(',');
+  requireThat(kinds.length >= 1 && kinds.length <= 3 && kinds.every(kind => ['image', 'video', 'audio'].includes(kind)),
+    'invalid_references', 'Use comma-separated reference kinds: image, video, audio.');
+  return [...new Set(kinds)];
+}
+
+function taskIds(value) {
+  const ids = (value ?? '').split(',');
+  requireThat(ids.length >= 1 && ids.length <= 50 && ids.every(id => /^[A-Za-z0-9._:-]{4,128}$/.test(id)),
+    'invalid_task_ids', 'Pass --ids with 1-50 comma-separated task IDs.');
+  return [...new Set(ids)];
 }
 
 async function estimateArgs(options) {
@@ -152,8 +196,20 @@ export async function dispatch(positionals, options, { state, server, credential
   if (command === 'balance') return client.call('check_balance');
   if (command === 'models') {
     if (action === 'show' && id) return client.call('get_model', { model: id });
-    if (action === 'search') return client.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
+    if (action === 'schema' && id) {
+      const model = await client.call('get_model', { model: id });
+      requireThat(model.input_schema, 'schema_unavailable', 'The service has no versioned input schema for this model. Use models show for documented parameters; update the CLI if needed.');
+      return model;
+    }
+    if (action === 'search') return client.call('search_models', { type: options.type || 'all', query: options.query, limit: number(options.limit, 'limit', 1, 50, true) || 20,
+      ...(options.page !== undefined ? { page: Number(options.page) } : {}) },
+      options.page !== undefined ? { requireCapability: true, requiredInputs: ['page'] } : undefined);
+    if (action === 'recommend') return client.call('recommend_models', { type: options.type, query: options.query,
+      references: options.references ? references(options.references) : [], limit: number(options.limit, 'limit', 1, 10, true) || 3 }, { requireCapability: true });
   }
+  if (command === 'docs') return client.call('search_docs', { query: options.query, type: options.type || 'all', limit: number(options.limit, 'limit', 1, 20, true) || 5 }, { requireCapability: true });
+  if (command === 'usage') return client.call('get_task_usage', { since: options.since || '30d', until: options.until, model: options.model, type: options.type,
+    max_pages: number(options['max-pages'], 'max-pages', 1, 20, true) || 5 }, { requireCapability: true });
   if (command === 'estimate') return media.estimate(await estimateArgs(options));
   if (command === 'generate') {
     requireThat(options.quote, 'missing_quote', 'Run estimate and obtain user approval before generation.');
@@ -169,7 +225,12 @@ export async function dispatch(positionals, options, { state, server, credential
     if (action === 'get' && id) return client.call('get_task', { task_id: id, wait_seconds: 0 });
     if (action === 'wait' && id) return media.wait(id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress });
     if (action === 'resume' && options.quote) return media.resume(options.quote);
-    if (action === 'list') return client.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20 });
+    if (action === 'batch') return client.call('list_tasks', { task_ids: taskIds(options.ids) });
+    if (action === 'list') {
+      const added = Object.fromEntries(['model', 'until', 'page'].filter(key => options[key] !== undefined).map(key => [key, key === 'page' ? Number(options[key]) : options[key]]));
+      return client.call('list_tasks', { type: options.type, status: options.status, since: options.since, limit: number(options.limit, 'limit', 1, 50, true) || 20, ...added },
+        Object.keys(added).length ? { requireCapability: true, requiredInputs: Object.keys(added) } : undefined);
+    }
   }
   if (command === 'upload' && action) return upload(action, { client, state, server, signal, upload_path: options['upload-path'] });
   if (command === 'uploads' && action === 'get' && id) {
@@ -180,6 +241,7 @@ export async function dispatch(positionals, options, { state, server, credential
     return { ...view, text: upload_url ? 'The upload is waiting for its original one-time PUT. No address is exposed by this recovery query.' : text };
   }
   if (command === 'download' && action) {
+    if (options.all) return downloadAll(action, options['output-dir'], { client, server, state, signal, template: options.template, resume: options.resume });
     requireThat(options.output, 'missing_output', 'Pass --output with a new local file path.');
     return download(action, options.output, { client, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
   }
@@ -218,8 +280,9 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
     if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: CLI_VERSION }) + '\n' : CLI_VERSION + '\n'); return; }
     if (options.help || !positionals.length) {
-      const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : HELP;
-      io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help }) + '\n' : help); return;
+      const reference = commandHelp(positionals);
+      const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : reference?.help || HELP;
+      io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, ...reference, help }) + '\n' : help); return;
     }
     validateCommand(positionals, options);
     const server = serverURL(options.server);

@@ -71,14 +71,40 @@ export function resultLinks(task) {
     };
     for (const url of task.results ?? [])
         add(url);
-    if (Array.isArray(task.result_data)) {
-        for (const item of task.result_data) {
+    if (task.result_data) {
+        const items = Array.isArray(task.result_data) ? task.result_data : [task.result_data];
+        for (const item of items) {
+            if (!item || typeof item !== 'object')
+                continue;
             add(item.video_url, 'video');
             add(item.image_url, 'image');
             add(item.audio_url, 'audio');
         }
     }
     return links;
+}
+/** Return reusable public result fields without forwarding provider metadata or account details. */
+export function taskOutputs(task) {
+    const items = Array.isArray(task.result_data) ? task.result_data : task.result_data ? [task.result_data] : [];
+    const identifiers = new Set(['voice', 'voice_id', 'persona_id', 'result_id', 'id']);
+    const textFields = new Set(['title', 'tags']);
+    const urls = new Set(['video_url', 'image_url', 'audio_url', 'stream_audio_url']);
+    return items.slice(0, 100).flatMap(item => {
+        if (!item || typeof item !== 'object' || Array.isArray(item))
+            return [];
+        const output = {};
+        for (const [key, value] of Object.entries(item)) {
+            if (identifiers.has(key) && typeof value === 'string' && /^[A-Za-z0-9._:-]{1,128}$/.test(value))
+                output[key] = value;
+            else if (textFields.has(key) && typeof value === 'string')
+                output[key] = value.slice(0, 1000);
+            else if (urls.has(key) && typeof value === 'string' && /^https?:\/\//.test(value))
+                output[key] = value;
+            else if ((key === 'duration' || key === 'seed') && typeof value === 'number' && Number.isFinite(value) && value >= 0)
+                output[key] = value;
+        }
+        return Object.keys(output).length ? [output] : [];
+    });
 }
 /** Typed links complement the text fallback; they do not guarantee a client preview.
  * Never fetch or transform media here, and never wrap a video URL in ImageContent.
@@ -125,6 +151,11 @@ export function describeTask(task) {
         model: task.model,
         type: task.type,
     };
+    const outputs = taskOutputs(task);
+    if (outputs.length) {
+        structured.outputs = outputs;
+        lines.push(`Public output metadata: ${JSON.stringify(outputs)}`);
+    }
     if (links.length > 0) {
         lines.push(`Results (download links expire after ${RESULT_LINK_HOURS} hours; save them now):`);
         for (const link of links)

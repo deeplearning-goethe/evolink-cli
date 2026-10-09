@@ -39,11 +39,12 @@ export async function doctor({ state, server, credentials, client, mcp = client,
     name: 'login', status: 'failed', error: errorView(new CliError('login_required', 'Run evolink auth login, finish browser approval, then run doctor again.')),
   });
   else checks.push({ name: 'login', status: 'skipped', reason: 'Credential storage must be available before checking the saved login.' });
-  let connected = false, models = false;
+  let connected = false, models = false, authorization;
   if (runtime && storage && login) {
     try {
       const result = await client.call('check_balance');
       requireThat(result.ok === true, 'connection_failed', 'Balance verification failed. Retry evolink balance --json.');
+      authorization = result.authorization;
       connected = true; checks.push({ name: 'connection', status: 'passed', verified: true });
     } catch (error) { checks.push({ name: 'connection', status: 'failed', error: errorView(error) }); }
   } else checks.push({ name: 'connection', status: 'skipped', reason: 'Fix the failed prerequisite checks before verifying the account connection.' });
@@ -63,5 +64,6 @@ export async function doctor({ state, server, credentials, client, mcp = client,
   if (remote) guidance.push('SSH login redirects the browser to 127.0.0.1 on the CLI host. Use SSH local port forwarding for the callback port printed in the authorization link, or run the CLI on your local computer. --no-browser only prints the link; it does not forward the callback.');
   return { ok: !!runtime && !!storage && connected && models && (agent === undefined || skills?.current === true),
     cli_version: CLI_VERSION, node: version, server: server.href, ...(auth ? { auth } : {}),
+    ...(authorization ? { authorization } : {}), ...(client.apiUrl ? { transport: 'rest', api_origin: client.apiUrl.origin } : {}),
     connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked', checks, guidance };
 }

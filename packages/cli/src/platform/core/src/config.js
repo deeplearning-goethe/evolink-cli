@@ -87,5 +87,6 @@ export function getApiKey() {
         // Return one stable recovery message without echoing helper stderr or key material.
     }
     throw new Error(`No EvoLink API key is available. Set EVOLINK_API_KEY to a key from ${trackedLink(API_KEYS_URL, 'api_keys')}, ` +
-        'or run `evolink login` and keep the evolink CLI on PATH (or set EVOLINK_CREDENTIAL_HELPER to its absolute path).');
+        'or set EVOLINK_CREDENTIAL_HELPER to an API-key helper that implements `credential get`. ' +
+        'The browser-login @evolinkai/cli does not export API keys; use its own `evolink auth login` workflow or hosted MCP for OAuth.');
 }

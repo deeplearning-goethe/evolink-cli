@@ -6,6 +6,8 @@ import os from 'node:os';
 import { createHash } from 'node:crypto';
 import { Api } from '../src/api.mjs';
 import { Credentials } from '../src/auth.mjs';
+import { dispatch } from '../src/cli.mjs';
+import { downloadAll } from '../src/files.mjs';
 import { Media } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 import { upload, getUpload } from '../src/files.mjs';
@@ -180,4 +182,61 @@ test('seeded parameter and budget combinations refuse invalid input before any g
     else assert.equal((await media.estimate(args)).input_valid, true);
   }
   assert.equal(f.paid.size, 0); assert.equal(f.restCalls.some(call => call.path.endsWith('/generations')), false);
+});
+
+
+test('bundled capabilities validate locally before credentials or network access', async t => {
+  const { f, client } = await context(t);
+  let accesses = 0;
+  client.credentials.access = async () => { accesses++; throw new Error('Credentials must not be consulted'); };
+  for (const [name, inputs] of [['unknown_operation', []], ['list_tasks', ['unsupported_page']]]) {
+    await assert.rejects(client.call(name, {}, { requireCapability: true, requiredInputs: inputs }),
+      error => error.code === 'capability_unavailable' && error.details.request_sent === false);
+  }
+  assert.equal(accesses, 0); assert.equal(f.restCalls?.length ?? 0, 0);
+});
+
+test('strict operation inputs never silently discard unsupported filters', async t => {
+  const { f, client } = await context(t);
+  await assert.rejects(client.call('list_tasks', { unsupported_filter: 'private' }),
+    error => error.code === 'invalid_request' && error.details.charged === 'no');
+  assert.equal(f.restCalls?.length ?? 0, 0);
+});
+
+test('shared OAuth balance identifies CLI/MCP limits and session-only logout', async t => {
+  const { client } = await context(t);
+  const balance = await client.call('check_balance');
+  assert.equal(balance.spent_scope, 'mcp');
+  assert.equal(balance.authorization.key_name, 'EvoLink MCP (OAuth)');
+  assert.deepEqual(balance.authorization.shared_clients, ['cli', 'mcp']);
+  assert.equal(balance.authorization.quota_scope, 'shared_account_key');
+  assert.equal(balance.authorization.permission_scope, 'shared_account_key');
+  assert.equal(balance.authorization.pause_scope, 'shared_account_key');
+  assert.equal(balance.authorization.logout_scope, 'current_oauth_session');
+});
+
+test('REST capability commands use local discovery and gateway task APIs while MCP is unavailable', async t => {
+  const { f, client, state, home } = await context(t);
+  const opts = { state, server: f.server, credentials: client.credentials, client };
+  const now = Math.floor(Date.now() / 1000);
+  for (let index = 0; index < 3; index++) f.tasks.set(`task-direct-${index}`, { task_id: `task-direct-${index}`,
+    model: 'fixture-image', type: 'image', status: 'completed', created_at: now, charged_credits: 1.36,
+    results: [{ url: `${f.origin}/assets/result-${index}.png`, kind: 'image' }] });
+  const recommended = await dispatch(['models', 'recommend'], { type: 'image' }, opts);
+  assert.ok(recommended.models.length > 0);
+  const schema = await dispatch(['models', 'schema', 'fixture-image'], {}, opts); assert.ok(schema.input_schema);
+  const docs = await dispatch(['docs', 'search'], { query: 'prompt' }, opts); assert.ok(docs.documents.length > 0);
+  const paged = await dispatch(['tasks', 'list'], { page: '2', limit: '1', model: 'fixture-image', since: '1d', until: '1m' }, opts);
+  assert.equal(paged.page, 2); assert.equal(paged.total, 3); assert.equal(paged.tasks.length, 0);
+  const all = await dispatch(['tasks', 'list'], { page: '2', limit: '1', model: 'fixture-image' }, opts);
+  assert.equal(all.tasks[0].task_id, 'task-direct-1');
+  const batch = await dispatch(['tasks', 'batch'], { ids: 'task-direct-0,task-missing,task-direct-0' }, opts);
+  assert.equal(batch.tasks.length, 1); assert.deepEqual(batch.missing, ['task-missing']);
+  const usage = await dispatch(['usage'], { 'max-pages': '2', type: 'image', model: 'fixture-image' }, opts);
+  assert.equal(usage.is_bill, false); assert.equal(usage.totals.tasks, 3); assert.equal(usage.totals.reported_credits, 4.08);
+  assert.equal(usage.coverage.complete_for_retained_tasks, true);
+  const delivery = await downloadAll('task-direct-0', path.join(home, 'delivery'), { ...opts });
+  assert.equal(delivery.ok, true); assert.equal(delivery.files.length, 1);
+  assert.ok((await downloadAll('task-direct-0', path.join(home, 'delivery'), { ...opts, resume: true })).files[0].verified_existing);
+  assert.equal(f.mcpRequests || 0, 0); assert.equal(f.paid.size, 0);
 });

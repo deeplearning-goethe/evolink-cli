@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['rest-capability', 'src/api.mjs', 'if (requireCapability)', 'if (false)'],
+  ['rest-strict-input', 'src/platform/core/src/platform-client.js', 'z.object(definition.inputSchema).strict()', 'z.object(definition.inputSchema)'],
   ['rest-origin', 'src/api.mjs', 'origins.has(url.origin)', 'true'],
   ['file-credential-isolation', 'src/api.mjs', "authorization.startsWith('Bearer evup_')", 'true'],
   ['rest-fresh-price', 'src/api.mjs', "freshPricing: name === 'estimate_cost'", 'freshPricing: false'],
@@ -49,7 +51,14 @@ const mutants = [
   ['status-pending-alias', 'src/cli.mjs', "Object.freeze(['processing', 'completed', 'failed', 'cancelled'])", "Object.freeze(['processing', 'completed', 'failed', 'cancelled', 'pending'])"],
   ['status-error-values', 'src/cli.mjs', 'allowed_values: TASK_STATUS_FILTERS', 'allowed_values: []'],
   ['status-filter-forwarding', 'src/cli.mjs', 'status: options.status, since:', 'status: undefined, since:'],
-  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : HELP', '? HELP : HELP'],
+  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : reference?.help || HELP', '? HELP : reference?.help || HELP'],
+  ['capability-before-call', 'test/legacy-mcp.mjs', 'if (requireCapability)', 'if (false)'],
+  ['page-forwarding', 'src/cli.mjs', "key === 'page' ? Number(options[key]) : options[key]", "key === 'page' ? 1 : options[key]"],
+  ['delivery-partial-status', 'src/files.mjs', 'ok: complete, task_id:', 'ok: true, task_id:'],
+  ['delivery-digest-check', 'src/files.mjs', "digest.digest('hex') === saved.sha256", 'true'],
+  ['delivery-duplicate-names', 'src/files.mjs', 'new Set(names.map(name => name.toLowerCase())).size === names.length', 'true'],
+  ['delivery-existing-receipt', 'src/files.mjs', "requireThat(!receipt, 'delivery_exists'", "requireThat(true, 'delivery_exists'"],
+  ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
 ];
@@ -66,7 +75,8 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = ['rest-origin', 'file-credential-isolation', 'rest-fresh-price', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
+    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'rest-fresh-price', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
+      : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']
