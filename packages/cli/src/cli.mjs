@@ -38,7 +38,7 @@ Examples:
   evolink tasks list --since 30m --json
 `;
 
-const HELP = `EvoLink CLI 0.5.0 (Node.js 22+)
+const HELP = `EvoLink CLI 0.5.1 (Node.js 22+)
 
   auth login [--no-browser]       Sign in and approve in your browser
   auth status | auth logout      Check or revoke this CLI session
@@ -196,7 +196,7 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     let positionals;
     try { ({ values: options, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })); }
     catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
-    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.0' }) + '\n' : '0.5.0\n'); return; }
+    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.1' }) + '\n' : '0.5.1\n'); return; }
     if (options.help || !positionals.length) {
       const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : HELP;
       io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help }) + '\n' : help); return;

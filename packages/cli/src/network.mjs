@@ -4,7 +4,7 @@ import { CliError, requireThat } from './errors.mjs';
 
 export const SERVER = 'https://mcp.evolink.ai/mcp';
 export const ISSUER = 'https://passport.evolink.ai';
-export const USER_AGENT = 'EvoLinkCLI/0.5.0';
+export const USER_AGENT = 'EvoLinkCLI/0.5.1';
 export const loopback = url => url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
 
 export function serverURL(value = SERVER) {

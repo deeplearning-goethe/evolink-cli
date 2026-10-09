@@ -7,7 +7,7 @@ export class Mcp {
   async call(name, args = {}) {
     for (let attempt = 0; attempt < 2; attempt++) {
       const access = await this.credentials.access(attempt > 0);
-      const client = new Client({ name: 'EvoLink CLI', version: '0.5.0' });
+      const client = new Client({ name: 'EvoLink CLI', version: '0.5.1' });
       const headers = { Authorization: `Bearer ${access.access_token}` };
       const transport = new StreamableHTTPClientTransport(this.credentials.server, { requestInit: { headers }, fetch: this.credentials.fetchFn });
       // The hosted service is stateless and does not expose an SSE GET stream.
