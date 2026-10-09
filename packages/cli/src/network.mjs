@@ -1,4 +1,3 @@
-import { CLI_VERSION } from './version.mjs';
 import net from 'node:net';
 import dns from 'node:dns/promises';
 import https from 'node:https';
