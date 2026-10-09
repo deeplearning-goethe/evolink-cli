@@ -46,10 +46,14 @@ export class Api {
     }
     throw new CliError('login_required', 'The login expired. Run auth login.');
   }
-  async uploadFile(source, size, mime, name, uploadPath) {
+  async uploadFile(source, size, mime, name, uploadPath, uploadId) {
     const access = await this.credentials.access();
-    try { return await this.platform.upload(source, size, mime, name, this.context(access, 'upload_file'), uploadPath); }
+    try { return await this.platform.upload(source, size, mime, name, this.context(access, 'upload_file'), uploadPath, uploadId); }
     catch (error) { throw new CliError(this.signal?.aborted ? 'interrupted' : error.info?.category || 'upload_unknown',
       safeMessage(error.info?.message || 'The upload did not return a verified file result.'), undefined, this.signal?.aborted ? 130 : 1); }
+  }
+  async uploadReceipt(id) {
+    const access = await this.credentials.access();
+    return this.platform.uploadReceipt(id, this.context(access, 'get_upload'));
   }
 }

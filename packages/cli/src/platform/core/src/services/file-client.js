@@ -107,6 +107,11 @@ export async function fileStreamUploadFrom(source, size, mime, originalName, opt
         yield suffix;
     }
     const headers = requestHeaders(options.tool ?? 'upload_file', options.auth);
+    if (options.uploadId) {
+        if (!/^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$/.test(options.uploadId))
+            throw new Error('Invalid upload request ID');
+        headers['X-Evo-Upload-Id'] = options.uploadId;
+    }
     headers['Content-Type'] = `multipart/form-data; boundary=${boundary}`;
     if (size !== undefined)
         headers['Content-Length'] = String(prefix.length + size + suffix.length);
@@ -119,6 +124,33 @@ export async function fileStreamUploadFrom(source, size, mime, originalName, opt
     };
     const response = await fetchWithTimeout(`${filesApiBaseUrl()}/api/v1/files/upload/stream`, init, options.timeoutMs ?? timeoutFromEnv('EVOLINK_MCP_WRITE_TIMEOUT_MS', DEFAULT_WRITE_TIMEOUT_MS));
     return parseResponse(response);
+}
+/** A read-only owner-scoped lookup. Older file services return no receipt. */
+export async function fileUploadReceipt(id, auth) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{15,127}$/.test(id))
+        throw new Error('Invalid upload request ID');
+    const response = await fetchWithTimeout(`${filesApiBaseUrl()}/api/v1/files/upload-receipts/${id}`, {
+        method: 'GET', headers: { Authorization: `Bearer ${auth.bearer}`, ...evoHeaders('get_upload') },
+    }, 30_000);
+    if (response.status === 404 || response.status === 405) {
+        await response.body?.cancel();
+        return undefined;
+    }
+    const result = (await parseResponse(response)).data;
+    if (!result || result.upload_id !== id || !['done', 'outcome_unknown'].includes(result.state))
+        throw new Error('Invalid upload receipt');
+    if (result.state === 'done') {
+        const file = result.file;
+        if (result.result_verified !== true || !file || typeof file.file_id !== 'string' || !file.file_id || typeof file.file_url !== 'string'
+            || !Number.isSafeInteger(file.file_size) || file.file_size <= 0)
+            throw new Error('Invalid completed upload receipt');
+        const url = new URL(file.file_url);
+        const base = new URL(filesApiBaseUrl());
+        const local = base.protocol === 'http:' && ['127.0.0.1', 'localhost'].includes(base.hostname);
+        if (url.username || url.password || url.hash || !(url.protocol === 'https:' || local && url.origin === base.origin))
+            throw new Error('Invalid upload receipt URL');
+    }
+    return result;
 }
 export async function fileStreamUpload(filePath, fileSize, mime, originalName, uploadPath, fileName, auth) {
     return fileStreamUploadFrom(createReadStream(filePath), fileSize, mime, originalName, { uploadPath, fileName, auth });

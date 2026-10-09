@@ -1,6 +1,6 @@
 {
   "name": "@evolinkai/cli",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Generate images, video and audio with EvoLink, with browser login and quoted submissions.",
   "type": "module",
   "license": "MIT",

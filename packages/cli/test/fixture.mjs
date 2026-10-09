@@ -31,8 +31,8 @@ export async function fixture() {
         send(200, { resource: `${state.origin}/mcp`, authorization_servers: [state.origin], scopes_supported: ['mcp'] }); return;
       }
       if (url.pathname === '/.well-known/oauth-authorization-server') {
-        send(200, { issuer: state.origin, authorization_endpoint: `${state.origin}/oauth/authorize`, token_endpoint: `${state.origin}/oauth/token`,
-          registration_endpoint: `${state.origin}/oauth/register`, revocation_endpoint: `${state.origin}/oauth/revoke`,
+        send(200, { ...(state.firstPartyMedia ? { evolink_cli_mcp_supported: true } : {}), issuer: state.origin, authorization_endpoint: `${state.origin}/oauth/authorize`, token_endpoint: `${state.origin}/oauth/token`,
+          ...(state.noRegistrationEndpoint ? {} : { registration_endpoint: `${state.origin}/oauth/register` }), revocation_endpoint: `${state.origin}/oauth/revoke`,
           response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'],
           token_endpoint_auth_methods_supported: ['none'], authorization_response_iss_parameter_supported: true }); return;
       }
@@ -60,15 +60,15 @@ export async function fixture() {
         if (data.get('grant_type') === 'authorization_code') {
           const code = state.codes.get(data.get('code'));
           const challenge = createHash('sha256').update(data.get('code_verifier') || '').digest('base64url');
-          if (!code || challenge !== code.code_challenge || data.get('resource') !== code.resource || data.get('redirect_uri') !== code.redirect_uri) {
+          if (!code || challenge !== code.code_challenge || data.get('resource') !== code.resource || data.get('redirect_uri') !== code.redirect_uri || data.get('client_id') !== code.client_id) {
             send(400, { error: 'invalid_grant' }); return;
           }
           state.codes.delete(data.get('code'));
         } else {
-          if (!state.refreshes.has(data.get('refresh_token'))) { send(400, { error: 'invalid_grant' }); return; }
+          if (state.refreshes.get(data.get('refresh_token')) !== data.get('client_id')) { send(400, { error: 'invalid_grant' }); return; }
           state.refreshes.delete(data.get('refresh_token')); state.refreshCount++;
         }
-        const refresh_token = `fixture-refresh-${randomUUID()}`; state.refreshes.set(refresh_token, true);
+        const refresh_token = `fixture-refresh-${randomUUID()}`; state.refreshes.set(refresh_token, data.get('client_id'));
         send(200, { access_token: `fixture-access-${randomUUID()}`, ...(state.omitRefresh ? {} : { refresh_token }), token_type: 'Bearer', expires_in: 3600, scope: state.tokenScope || 'mcp offline_access' }); return;
       }
       if (url.pathname === '/oauth/revoke') { send(state.revokeFails ? 503 : 200, {}); return; }

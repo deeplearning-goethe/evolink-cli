@@ -56,7 +56,7 @@ async function directUpload(file, size, mime, { client, state, server, upload_pa
   await state.write('uploads', upload_id, journal);
   const source = createReadStream(file);
   try {
-    const result = await client.uploadFile(source, size, mime, path.basename(file), upload_path);
+    const result = await client.uploadFile(source, size, mime, path.basename(file), upload_path, upload_id);
     const data = result?.data;
     requireThat(result?.success === true && typeof data?.file_id === 'string' && typeof data?.file_url === 'string',
       'upload_unknown', 'The file service returned no verified upload result.');
@@ -84,8 +84,20 @@ export async function getUpload(id, { client, state, server }) {
   requireThat(journal.api_origin === client.apiUrl.origin && journal.binding === (await client.credentials.access()).binding,
     'upload_session_changed', 'This receipt belongs to a different platform or login.');
   if (journal.state === 'done') return journal.result;
+  let receipt;
+  try { receipt = await client.uploadReceipt?.(id); }
+  catch { throw new CliError('upload_unknown', 'The original upload receipt is unavailable. Keep this upload_id and retry this read later; no bytes were resent.',
+    { upload_id: id, state: 'outcome_unknown', next_step: `evolink uploads get ${id}` }); }
+  if (receipt?.state === 'done' && receipt.result_verified === true) {
+    const data = receipt.file;
+    journal.state = 'done';
+    journal.result = { ok: true, upload_id: id, state: 'done', file_id: data.file_id, file_url: data.file_url,
+      file_name: data.original_name ?? data.file_name, size_bytes: data.file_size, mime_type: data.mime_type, expires_at: data.expires_at };
+    await state.write('uploads', id, journal);
+    return journal.result;
+  }
   return { ok: true, upload_id: id, state: 'outcome_unknown', result_verified: false,
-    text: 'No completed receipt was saved. The file service currently cannot look up an upload by client request ID. Check your files before uploading again; this command does not retry the upload.' };
+    text: 'No verified completed receipt is available. The upload may still have arrived. Check your files before starting another upload; this command only reads the original receipt and never resends bytes.' };
 }
 
 export async function download(taskId, output, { client, mcp = client, server, index = 1, signal, maxBytes = 1024 ** 3, fetchFn, task: suppliedTask, beforeCommit }) {

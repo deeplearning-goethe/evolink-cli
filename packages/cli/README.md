@@ -101,6 +101,20 @@ evolink uploads get UPLOAD_ID --json
 evolink download TASK_ID --output /absolute/result.mp4 --index 1 --json
 ```
 
+Uploads save a stable request ID before sending bytes. On connection loss, keep
+that ID and run `evolink uploads get UPLOAD_ID --json`. With a compatible file
+service this reads an account-owned receipt retained for up to 72 hours; it never
+repeats the upload. Older services return an unknown outcome rather than a false
+failure. Logout revokes future use of the scoped upload grant; an upload already
+accepted before logout may still finish. Recovery retains the original login
+binding and never copies OAuth credentials into MCP settings.
+
+Passport can advertise `evolink_cli_mcp_supported: true`. New browser grants then
+use the public official `evolink-cli` identity with PKCE, `mcp offline_access`, and
+the configured MCP resource. Existing dynamic-client sessions refresh with their
+original client ID. Earlier Passport deployments continue to use dynamic
+registration. This does not change shared CLI/MCP account-Key limits or permissions.
+
 Task-list filters are case-sensitive:
 
 | Option | Allowed values | When omitted |

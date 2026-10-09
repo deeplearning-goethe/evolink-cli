@@ -10,7 +10,7 @@ export async function metadata(server, fetchFn) {
   const data = await response.json();
   requireThat(data.issuer === issuer && data.code_challenge_methods_supported?.includes('S256'),
     'invalid_auth_metadata', 'Passport did not provide the expected issuer and PKCE method.');
-  for (const key of ['authorization_endpoint', 'token_endpoint', 'registration_endpoint', 'revocation_endpoint']) {
+  for (const key of ['authorization_endpoint', 'token_endpoint', 'revocation_endpoint', ...(data.registration_endpoint ? ['registration_endpoint'] : [])]) {
     let endpoint;
     try { endpoint = new URL(data[key]); } catch { throw new CliError('invalid_auth_metadata', 'Passport did not provide valid login endpoints.'); }
     requireThat(endpoint.origin === issuer && !endpoint.username && !endpoint.password && !endpoint.hash,
@@ -19,11 +19,19 @@ export async function metadata(server, fetchFn) {
   return data;
 }
 
-async function client(provider, data, fetchFn) {
+async function client(provider, data, fetchFn, newLogin = false) {
   let value = await provider.clientInformation();
   if (value) requireThat(value.issuer === data.issuer && typeof value.client_id === 'string' && !value.client_secret,
     'invalid_client', 'The saved public OAuth client belongs to a different service.');
+  // A rolled-back Passport may no longer support media grants for this public
+  // identity. Only a new login can change clients; an existing refresh cannot.
+  if (newLogin && value?.client_id === 'evolink-cli' && data.evolink_cli_mcp_supported !== true) value = undefined;
+  if ((!value || newLogin) && data.evolink_cli_mcp_supported === true) {
+    value = { client_id: 'evolink-cli', issuer: data.issuer, token_endpoint_auth_method: 'none' };
+    await provider.saveClientInformation(value);
+  }
   if (!value) {
+    requireThat(data.registration_endpoint, 'registration_unavailable', 'Passport does not support CLI client registration. Update the login service or retry later.');
     const response = await fetchFn(data.registration_endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(provider.clientMetadata) });
     requireThat(response.ok, 'registration_failed', 'Passport could not register this CLI login.');
@@ -68,7 +76,7 @@ export async function refresh(provider, fetchFn) {
 
 export async function authorize(provider, fetchFn, authorizationCode) {
   const data = await metadata(provider.server, fetchFn);
-  const info = await client(provider, data, fetchFn);
+  const info = await client(provider, data, fetchFn, !authorizationCode);
   if (authorizationCode) return token(provider, data, info, { grant_type: 'authorization_code', code: authorizationCode,
     redirect_uri: String(provider.redirectUrl), code_verifier: await provider.codeVerifier() }, fetchFn);
   const verifier = randomBytes(32).toString('base64url');
