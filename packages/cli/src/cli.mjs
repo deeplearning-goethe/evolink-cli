@@ -10,7 +10,36 @@ import { installSkill } from './skills.mjs';
 import { doctor } from './doctor.mjs';
 import { CliError, requireThat, errorView, localFile } from './errors.mjs';
 
-const HELP = `EvoLink CLI 0.5.0 (Node.js 22+)
+const TASK_STATUS_FILTERS = Object.freeze(['processing', 'completed', 'failed', 'cancelled']);
+const TASK_STATUS_HELP = `Allowed task status filters: ${TASK_STATUS_FILTERS.join(', ')}.
+processing includes queued tasks. pending and queued are not filter values.
+Omit --status to list recent tasks across all states.`;
+
+const TASKS_LIST_HELP = `Usage: evolink tasks list [options]
+
+Read recent tasks across your EvoLink account (free), newest first.
+
+  --status STATUS  ${TASK_STATUS_FILTERS.join('|')}
+  --type TYPE      image|video|audio; omit to include all media types
+  --since TIME     Creation time: ISO 8601, Unix seconds, or 30m, 2h, 1d
+  --limit N        Integer from 1 to 50 (default 20)
+  --json           Return one JSON envelope on stdout
+
+${TASK_STATUS_HELP}
+Filters are case-sensitive. A returned task status can be pending;
+response statuses are not the same as allowed --status filters.
+--since filters the returned recent batch; it does not search all history.
+An empty list does not prove an uncertain submission created no task.
+cancelled is a read filter; the CLI does not provide a cancel command.
+Connection options: --server URL, --token-stdin.
+
+Examples:
+  evolink tasks list --status processing --json
+  evolink tasks list --status completed --type video --limit 50 --json
+  evolink tasks list --since 30m --json
+`;
+
+const HELP = `EvoLink CLI 0.5.1 (Node.js 22+)
 
   auth login [--no-browser]       Sign in and approve in your browser
   auth status | auth logout      Check or revoke this CLI session
@@ -32,6 +61,11 @@ Options: --json, --server URL, --token-stdin, --help, --version
 Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
         openclaw, hermes.
 Input: --input JSON or --input-file FILE, plus optional --prompt TEXT.
+${TASK_STATUS_HELP}
+Task list types: image, video, audio; omit --type to include all types.
+Task list example: evolink tasks list --status processing --json
+Run evolink tasks list --help for filter details and recovery caveats.
+After upgrading the package, run evolink skills install to refresh its skill.
 Quotes expire in 15 minutes. --confirm is only for an already approved quote.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
@@ -64,7 +98,12 @@ export function validateCommand(args, options) {
   requireThat(Object.keys(options).every(k => allowed.has(k)), 'invalid_option', 'An option does not apply to this command. Run evolink --help.');
   if (options.timeout !== undefined) number(options.timeout, 'timeout', 1, 86400, true);
   if (options.type !== undefined) requireThat(['image', 'video', 'audio', ...(command === 'models' ? ['all'] : [])].includes(options.type), 'invalid_type', 'Unsupported media type.');
-  if (options.status !== undefined) requireThat(['processing', 'completed', 'failed', 'cancelled'].includes(options.status), 'invalid_status', 'Unsupported task status.');
+  if (options.status !== undefined) requireThat(TASK_STATUS_FILTERS.includes(options.status), 'invalid_status',
+    `Unsupported task status filter. ${TASK_STATUS_HELP}`, {
+      param: 'status', value: options.status, allowed_values: TASK_STATUS_FILTERS,
+      queued_filter: 'processing', request_sent: false,
+      next_step: 'Use --status processing for queued or running tasks, or omit --status. Run evolink tasks list --help.',
+    });
 }
 
 async function estimateArgs(options) {
@@ -155,8 +194,11 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     let positionals;
     try { ({ values: options, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })); }
     catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
-    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.0' }) + '\n' : '0.5.0\n'); return; }
-    if (options.help || !positionals.length) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help: HELP }) + '\n' : HELP); return; }
+    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: '0.5.1' }) + '\n' : '0.5.1\n'); return; }
+    if (options.help || !positionals.length) {
+      const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : HELP;
+      io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, help }) + '\n' : help); return;
+    }
     validateCommand(positionals, options);
     const server = serverURL(options.server);
     const state = new State();
