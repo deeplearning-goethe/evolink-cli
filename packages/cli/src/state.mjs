@@ -45,39 +45,70 @@ export class State {
   async remove(group, id) { await fs.unlink(this.file(group, id)).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
   async lock(id, fn) {
     requireThat(validID(id), 'invalid_id', 'Invalid lock identifier.');
-    const dir = path.join(this.home, 'locks', id);
+    const dir = path.join(this.home, 'locks', id), recovery = `${dir}.recovery`;
     await fs.mkdir(path.dirname(dir), { recursive: true, mode: 0o700 });
     const deadline = Date.now() + 10_000;
     for (;;) {
-      try { await fs.mkdir(dir, { mode: 0o700 }); break; }
-      catch (e) {
-        if (e.code !== 'EEXIST') throw e;
-        // Serialize stale-owner recovery so two contenders cannot remove a new lock.
-        const recovery = `${dir}.recovery`;
-        let recovering = false;
-        try {
-          await fs.mkdir(recovery, { mode: 0o700 });
-          recovering = true;
-          let stale = false;
-          try {
-            const owner = JSON.parse(await fs.readFile(path.join(dir, 'owner.json'), 'utf8'));
-            if (owner.hostname === os.hostname()) {
-              try { process.kill(owner.pid, 0); } catch (probe) { stale = probe.code === 'ESRCH'; }
-            }
-          } catch {
-            try { stale = Date.now() - (await fs.stat(dir)).mtimeMs > 30_000; }
-            catch (statError) { if (statError.code !== 'ENOENT') throw statError; }
-          }
-          if (stale) await fs.rm(dir, { recursive: true, force: true });
-        } catch (recoveryError) { if (recoveryError.code !== 'EEXIST') throw recoveryError; }
-        finally { if (recovering) await fs.rmdir(recovery); }
-        if (Date.now() > deadline) throw new CliError('operation_busy', 'Another command is using this state. Wait for it to finish.');
-        await new Promise(resolve => setTimeout(resolve, 100));
+      const owner = await claim(dir);
+      if (owner) {
+        try { return await fn(); }
+        finally { await release(dir, owner); }
       }
+      // Each recovery guard has an owner and can itself be recovered after a crash.
+      // Remove only the observed owner's unique file: a replacement guard survives.
+      const guard = await claim(recovery);
+      if (guard) {
+        try { await recover(dir); }
+        finally { await release(recovery, guard); }
+      } else await recover(recovery);
+      if (Date.now() > deadline) throw new CliError('operation_busy', 'Another command is using this state. Wait for it to finish.');
+      await new Promise(resolve => setTimeout(resolve, 100));
     }
-    try {
-      await fs.writeFile(path.join(dir, 'owner.json'), JSON.stringify({ pid: process.pid, hostname: os.hostname() }), { mode: 0o600 });
-      return await fn();
-    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  }
+}
+
+async function claim(dir) {
+  try { await fs.lstat(dir); return undefined; }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const token = `${randomUUID()}.owner.json`, temp = `${dir}.claim-${randomUUID()}`;
+  await fs.mkdir(temp, { mode: 0o700 });
+  try {
+    await fs.writeFile(path.join(temp, token), JSON.stringify({ pid: process.pid, hostname: os.hostname() }), { mode: 0o600 });
+    // Publish a nonempty directory atomically, so a crash cannot leave an owner gap.
+    await fs.rename(temp, dir);
+    return token;
+  } catch (error) {
+    if (!['EEXIST', 'ENOTEMPTY', 'EPERM', 'EACCES'].includes(error.code)) throw error;
+    try { await fs.lstat(dir); } catch { throw error; }
+    return undefined;
+  } finally { await fs.rm(temp, { recursive: true, force: true }); }
+}
+
+async function release(dir, token) {
+  try { await fs.unlink(path.join(dir, token)); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  try { await fs.rmdir(dir); }
+  catch (error) { if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error; }
+}
+
+async function recover(dir) {
+  try {
+    const stat = await fs.lstat(dir);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return;
+    const names = await fs.readdir(dir);
+    if (!names.length) {
+      // A previous CLI may have left an empty recovery guard; allow its creation window.
+      if (Date.now() - stat.mtimeMs > 30_000) await fs.rmdir(dir).catch(error => {
+        if (!['ENOENT', 'ENOTEMPTY', 'EEXIST'].includes(error.code)) throw error;
+      });
+      return;
+    }
+    if (names.length !== 1 || !(names[0] === 'owner.json' || /^[a-f0-9-]{36}\.owner\.json$/.test(names[0]))) return;
+    const owner = JSON.parse(await fs.readFile(path.join(dir, names[0]), 'utf8'));
+    if (owner.hostname !== os.hostname() || !Number.isInteger(owner.pid) || owner.pid <= 0) return;
+    try { process.kill(owner.pid, 0); }
+    catch (error) { if (error.code === 'ESRCH') await release(dir, names[0]); }
+  } catch (error) {
+    if (!['ENOENT', 'ENOTDIR'].includes(error.code) && !(error instanceof SyntaxError)) throw error;
   }
 }

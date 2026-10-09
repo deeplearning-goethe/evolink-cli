@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['recovery-guard', 'src/state.mjs', 'else await recover(recovery);', 'else {}'],
+  ['lock-live-owner', 'src/state.mjs', 'process.kill(owner.pid, 0);', "throw Object.assign(new Error('mutant'), { code: 'ESRCH' });"],
   ['approval', 'src/media.mjs', 'requireThat(confirmed || resume,', 'requireThat(true,'],
   ['fresh-price', 'src/media.mjs', 'priceFingerprint(fresh) === quote.fingerprint', 'true'],
   ['cap-direction', 'src/media.mjs', 'quote.estimate.max_usd <= cap', 'quote.estimate.max_usd >= cap'],
@@ -33,13 +35,17 @@ const mutants = [
   ['download-media-header', 'src/media-content.mjs', 'kinds.includes(kind)', 'true'],
   ['quote-error-budget', 'src/media.mjs', '...(cap !== undefined ? { max_cost_usd: cap } : {})', '...{}'],
   ['doctor-prerequisites', 'src/doctor.mjs', 'runtime && storage && login', 'true'],
-  ['doctor-exit-code', 'src/cli.mjs', 'if (!view.ok) process.exitCode = 1;', 'if (!view.ok) process.exitCode = 0;'],
   ['status-filter-validation', 'src/cli.mjs', 'TASK_STATUS_FILTERS.includes(options.status)', 'true'],
   ['status-pending-alias', 'src/cli.mjs', "Object.freeze(['processing', 'completed', 'failed', 'cancelled'])", "Object.freeze(['processing', 'completed', 'failed', 'cancelled', 'pending'])"],
   ['status-error-values', 'src/cli.mjs', 'allowed_values: TASK_STATUS_FILTERS', 'allowed_values: []'],
   ['status-filter-forwarding', 'src/cli.mjs', 'status: options.status, since:', 'status: undefined, since:'],
   ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : HELP', '? HELP : HELP'],
 
+  ['skill-modified', 'src/skills.mjs', '!modified || replaceModified', 'true'],
+  ['model-verification', 'src/doctor.mjs', 'result.models.length > 0', 'true'],
+  ['setup-network-login', 'src/setup.mjs', '!LOGIN_ERRORS.has(error.code)', 'false'],
+  ['callback-reuse', 'src/auth.mjs', 'if (settled)', 'if (false)'],
+  ['doctor-exit-code', 'src/cli.mjs', "if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;", 'if (!view.ok) process.exitCode = 0;'],
 ];
 
 let killed = 0;
@@ -54,13 +60,14 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name === 'callback-state' ? ['auth.test.mjs']
+    const files = ['recovery-guard', 'lock-live-owner'].includes(name) ? ['state-lock.test.mjs']
+      : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
+      : ['skill-modified', 'model-verification', 'setup-network-login', 'callback-reuse'].includes(name) ? ['setup.test.mjs', 'skills.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'e2e.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = name === 'callback-state' ? ['--test-name-pattern=callback rejects wrong state'] : [];
     const run = spawnSync(process.execPath, ['--test', '--test-concurrency=1', ...selection, ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });
-
     const output = `${run.stdout || ''}\n${run.stderr || ''}`;
     if (run.status > 0 && !run.error && /not ok \d+|✖ /.test(output) && !output.includes('SyntaxError:')) { killed++; console.log(`DETECTED ${name}`); }
     else { console.error(`${run.error || run.signal ? 'INCONCLUSIVE' : 'SURVIVED'} ${name} (status=${run.status}, signal=${run.signal}, error=${run.error?.code || 'none'})\n${output.slice(-2000)}`); process.exitCode = 1; }

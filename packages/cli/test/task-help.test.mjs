@@ -144,7 +144,7 @@ test('installed bundled skill carries setup and task-filter recovery guidance in
     assert.match(text, /allowed_values/);
     assert.match(text, /Updating the npm package alone does not refresh/);
   }
-  assert.equal((await installSkill({ home })).updated, true);
+  assert.equal((await installSkill({ home })).updated, false);
 });
 
 test('POSIX setup preflight treats absence as normal and preserves an installed command failure', { skip: process.platform === 'win32' }, async t => {

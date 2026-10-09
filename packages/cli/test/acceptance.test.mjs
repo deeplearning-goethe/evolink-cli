@@ -146,10 +146,10 @@ test('doctor reports all prerequisites, skips unsafe connection attempts and pre
   for (const c of cases) {
     f.calls.length = 0;
     const result = await doctor({ state, server: f.server, credentials: c, mcp, platform: 'linux', remote: true });
-    assert.equal(result.checks.length, 5);
+    assert.equal(result.checks.length, 6);
     assert.equal(result.ok, c === credentials);
     assert.equal(result.checks.find(c => c.name === 'connection').status, result.ok ? 'passed' : 'skipped');
-    assert.equal(f.calls.length, result.ok ? 1 : 0);
+    assert.equal(f.calls.length, result.ok ? 2 : 0);
     assert.ok(result.guidance.some(g => g.includes('port forwarding')));
     assert.equal((await fs.readdir(home)).some(n => n.startsWith('.doctor-')), false);
   }

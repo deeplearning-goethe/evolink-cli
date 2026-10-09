@@ -136,10 +136,10 @@ function randomID() { return '00000000-0000-4000-8000-000000000000'; }
 
 test('skill installation uses bundled content and protects another skill', async t => {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-skill-')); t.after(() => fs.rm(home, { recursive: true, force: true }));
-  const first = await installSkill({ home }); assert.equal(first.updated, false);
+  const first = await installSkill({ home }); assert.equal(first.updated, true);
   assert.equal(first.installations.length, 4);
   assert.equal(await fs.readFile(first.installations[0].path, 'utf8'), await fs.readFile(first.installations[1].path, 'utf8'));
-  assert.equal((await installSkill({ home })).updated, true);
+  assert.equal((await installSkill({ home })).updated, false);
   await fs.writeFile(first.path, 'a different user skill');
   await assert.rejects(installSkill({ home }), { code: 'skill_conflict' });
   assert.equal(await fs.readFile(first.path, 'utf8'), 'a different user skill');
