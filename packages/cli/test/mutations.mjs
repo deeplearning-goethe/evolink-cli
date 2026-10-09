@@ -42,7 +42,14 @@ const mutants = [
   ['status-pending-alias', 'src/cli.mjs', "Object.freeze(['processing', 'completed', 'failed', 'cancelled'])", "Object.freeze(['processing', 'completed', 'failed', 'cancelled', 'pending'])"],
   ['status-error-values', 'src/cli.mjs', 'allowed_values: TASK_STATUS_FILTERS', 'allowed_values: []'],
   ['status-filter-forwarding', 'src/cli.mjs', 'status: options.status, since:', 'status: undefined, since:'],
-  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : HELP', '? HELP : HELP'],
+  ['task-specific-help', 'src/cli.mjs', '? TASKS_LIST_HELP : reference?.help || HELP', '? HELP : reference?.help || HELP'],
+  ['capability-before-call', 'src/mcp.mjs', 'if (requireCapability)', 'if (false)'],
+  ['page-forwarding', 'src/cli.mjs', "key === 'page' ? Number(options[key]) : options[key]", "key === 'page' ? 1 : options[key]"],
+  ['delivery-partial-status', 'src/files.mjs', 'ok: complete, task_id:', 'ok: true, task_id:'],
+  ['delivery-digest-check', 'src/files.mjs', "digest.digest('hex') === saved.sha256", 'true'],
+  ['delivery-duplicate-names', 'src/files.mjs', 'new Set(names.map(name => name.toLowerCase())).size === names.length', 'true'],
+  ['delivery-existing-receipt', 'src/files.mjs', "requireThat(!receipt, 'delivery_exists'", "requireThat(true, 'delivery_exists'"],
+  ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
 ];
@@ -59,7 +66,8 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name === 'callback-state' ? ['auth.test.mjs']
+    const files = name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
+      : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']
       : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']
