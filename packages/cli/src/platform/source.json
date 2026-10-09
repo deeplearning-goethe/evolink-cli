@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repository": "Evolink-AI/evolink-mcp",
   "baseline": "acc9fd43b945e3917b47809fc94f85ba26c7c8db",
-  "source_sha256": "e62034ee96fa16bdf46fd6be5fc04775582fd29499b2f90501fe86b054e37a5a",
+  "source_sha256": "5453ba93642db77cd6199e20dbad50487ef9c5fe1ba7284fe6c9b1c5e4bab15e",
   "files": {
     "packages/core/src/branding.ts": "534b944a1370f210a3858c1a85b1a23071aca8e26b7a3e70e4d859ba5b152ff7",
     "packages/core/src/config.ts": "208496230e22f43817cfb9b3805cde279fcce61a82227dfbd9f63485a33d33c7",
@@ -37,14 +37,14 @@
     "packages/core/src/tools/get-model.ts": "276be6bb4b1a655fec69aef7347ed24cdab93f16458ffc2af7d7d866cd54b84c",
     "packages/core/src/tools/get-task.ts": "937a5ad4454956dd000abfd11149523d135527018d4d643ede600950d69e6205",
     "packages/core/src/tools/list-tasks.ts": "22e5ac19bbe210fb11ea39afe12fa7f92fb40ffc0560c7bee3d1f9354fc78395",
-    "packages/core/src/tools/prepare-upload.ts": "bf1fdbc19e3216e7ad8c141c715b0c36e160bb66d85d0638e7e591e85016a583",
+    "packages/core/src/tools/prepare-upload.ts": "c58cfb04725cc660e34f68391727e99f726e355f9329d91ced56878212294d40",
     "packages/core/src/tools/search-models.ts": "3b950140240ac6c5f0dfdc0264cb4b66d0583e05e220c67245b6e8a7616fc55e",
     "packages/core/src/tools/shared.ts": "4edde666dc31af730460cbecf5520cc56626bc2b17f951f849130f3d7d4ccbef",
     "packages/core/src/tools/task-billing.ts": "cfb18355e44caa41ea278b4156bd15e6c3ebca13411c7cf043d7225c5532dcce",
     "packages/core/src/tools/task-format.ts": "d9d367086db95034a04e6f1639fc1bdbced719b046233b0da905d06fd421f595",
     "packages/core/src/tools/task-usage.ts": "ba05d054e1d60d67f6ab75cc6d9169f453c87e0e89c17a2c1be5fc429e8f9f47",
     "packages/core/src/tools/upload-file.ts": "da6f239d1b1e6a13a7b418d24e738ebabf9823b2656111eeaa70eb247421ad40",
-    "packages/core/src/version.ts": "84d58feeac16c22e6f9a6e528b4a891f99f0aff9373b0f68e40ce78eebbde3d1"
+    "packages/core/src/version.ts": "f614986abbb91e2925f5817cad0ce27b3d02dec51498d73d4cca45644c74bdc7"
   },
   "artifacts": {
     "core/src/config.js": "e5f001e6bb30fa3ca49ca1383b3deb83ea495d20079adefad6d0451f5bbee0e3",
@@ -79,6 +79,6 @@
     "core/src/tools/task-billing.js": "f49b252afcaf4a6275f5db6ebc8e6380387b2406bd5fc91e7367e3523025af8b",
     "core/src/tools/task-format.js": "2daefc0f34ff14f0be38eb65b6e91dacd0c3f111a474e424a25906c9d8122338",
     "core/src/tools/task-usage.js": "3aae5d7807efc2c762bf604cf9ecfecf8f9008185bcef584e6d4243404418dc5",
-    "core/src/version.js": "850acd6b3227ec266df6bfa3ef9c4db08752289eb073eb4f4c244925cde645cb"
+    "core/src/version.js": "d0d9da469fddf7d1fa19b1ade8fc23b048caff2e7510b445c9772b5390159b2a"
   }
 }
