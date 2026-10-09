@@ -92,7 +92,7 @@ export async function fixture() {
       if (message.method === 'initialize') {
         rpc({ protocolVersion: message.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'evolink-cli-fixture', version: '1.0.0' } }); return;
       }
-      if (message.method === 'tools/list') { rpc({ tools: [] }); return; }
+      if (message.method === 'tools/list') { rpc({ tools: state.tools ?? [] }); return; }
       if (message.method !== 'tools/call') { send(400, {}); return; }
       const { name, arguments: args } = message.params; state.calls.push({ name, args });
       let data;
@@ -126,6 +126,7 @@ export async function fixture() {
       }
       if (name === 'get_upload') data = { ...state.uploads.get(args.upload_id), upload_id: args.upload_id,
         ...(state.uploads.get(args.upload_id)?.state === 'waiting' ? { upload_url: `${state.origin}/uploads/${args.upload_id}?token=one-time-fixture-token` } : {}) };
+      if (state.responses?.[name]) data = await state.responses[name](args);
       data = { ok: !data?.error, ...data };
       rpc({ isError: !data.ok, structuredContent: data, content: [{ type: 'text', text: data.ok ? data.upload_url || 'Fixture result.' : data.error.message }, { type: 'image', data: png.toString('base64'), mimeType: 'image/png' }] });
     } catch { res.writeHead(500); res.end(); }
