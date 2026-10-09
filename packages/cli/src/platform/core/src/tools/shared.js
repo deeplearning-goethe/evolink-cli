@@ -1,9 +1,11 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
+import { CredentialError } from '../config.js';
+import { publicIdentifier, publicErrorDetails, publicText } from '../services/public-error.js';
 import { processCredentialsAllowed } from '../request-context.js';
 import { ApiHttpError } from '../services/api-client.js';
 import { CREDITS_PER_USD, formatCredits, formatUsd } from '../services/error-handler.js';
-import { API_KEYS_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError } from '../services/http-policy.js';
+import { API_KEYS_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 /** Free lookups: clients can run them without asking. */
 export const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -19,7 +21,7 @@ export function ok(text, structured, resources = []) {
     return { content: [{ type: 'text', text }, ...resources], structuredContent: { ok: true, ...structured } };
 }
 export function failure(text, structured) {
-    return { content: [{ type: 'text', text }], structuredContent: { ok: false, ...structured }, isError: true };
+    return { content: [{ type: 'text', text: publicText(text) }], structuredContent: { ok: false, ...(structured.charged === 'no' ? { submission_state: 'not_submitted' } : {}), ...publicErrorDetails(structured) }, isError: true };
 }
 export function money(credits) {
     if (typeof credits !== 'number' || !Number.isFinite(credits))
@@ -42,10 +44,12 @@ export function usdOf(credits) {
     return Number((credits / CREDITS_PER_USD).toFixed(6));
 }
 function infoFor(error) {
+    if (error instanceof SubmissionNotStartedError)
+        return infoFor(error.cause);
     if (error instanceof ApiHttpError && error.info)
         return error.info;
     if (error instanceof ApiHttpError) {
-        return { status: error.status, category: 'server_error', message: error.message, next_step: 'Retry in a minute.', retryable: true, request_id: error.requestId };
+        return { status: error.status, category: 'server_error', message: 'The operation returned an unverified error.', next_step: 'Retry in a minute.', retryable: true, request_id: error.requestId };
     }
     if (error instanceof PaidRequestOutcomeUnknownError) {
         return {
@@ -59,8 +63,13 @@ function infoFor(error) {
     if (error instanceof RequestTimeoutError || error instanceof TypeError) {
         return { status: 0, category: 'server_error', message: 'EvoLink did not respond in time.', next_step: 'Retry in a minute.', retryable: true };
     }
-    const message = error instanceof Error ? error.message : 'Unknown error';
-    // Credential problems surface as plain errors from getApiKey(): no key in this scope, or a
+    if (!(error instanceof CredentialError))
+        return {
+            status: 0, category: 'server_error', message: 'EvoLink could not complete this operation.',
+            next_step: 'Retry free queries. For a generation, recover the original task or client_request_id before creating a new paid request.', retryable: false,
+        };
+    const message = 'No EvoLink credential is available for this request.';
+    // Credential problems surface as typed errors from getApiKey(): no key in this scope, or a
     // signed-in connection that cannot use the hosted service channel.
     return {
         status: 0,
@@ -75,35 +84,46 @@ function infoFor(error) {
 /** Converts a thrown error into a tool error with a category and a concrete next step. */
 export function errorResult(error, context = {}) {
     const info = infoFor(error);
+    const requestId = publicIdentifier(info.request_id);
+    const clientRequestId = publicIdentifier(context.clientRequestId);
+    const taskId = publicIdentifier(context.taskId);
     const label = `${info.category}${info.code ? `, ${info.code}` : ''}${info.status ? `, HTTP ${info.status}` : ''}`;
-    // A headline names the limit in plain words first, so every client shows the user which one stopped the call.
     const lines = info.headline ? [info.headline] : [`Error (${label}): ${info.message}`];
-    lines.push(`Next step: ${info.next_step}`);
     let charged;
+    let submissionState;
     if (context.paid) {
-        if (info.category === 'outcome_unknown' || info.category === 'server_error') {
-            charged = 'unknown';
-            lines.push(context.clientRequestId
-                ? `It is unclear whether a task was created. To retry this exact request safely, pass client_request_id "${context.clientRequestId}".`
-                : 'It is unclear whether a task was created; check list_tasks before submitting again.');
+        // An accepted task is stronger evidence than a later credential/read failure.
+        const accepted = context.phase === 'accepted' || !!taskId;
+        const beforeSubmit = !accepted && (context.phase === 'before_submit' || error instanceof SubmissionNotStartedError || error instanceof CredentialError);
+        const rejected = !accepted && error instanceof ApiHttpError && error.submissionState === 'rejected';
+        submissionState = accepted ? 'accepted' : beforeSubmit ? 'not_submitted' : rejected ? 'rejected' : 'outcome_unknown';
+        charged = beforeSubmit || rejected ? 'no' : 'unknown';
+        if (charged === 'unknown') {
+            info.next_step = taskId
+                ? `Query the original task ${taskId}. Do not submit another generation to recover this result.`
+                : clientRequestId
+                    ? `Check list_tasks for the original request. To recover this exact submission, pass client_request_id "${clientRequestId}" with identical input; do not create a new quote or request ID.`
+                    : 'Check list_tasks for the original request. Recover only with the same client_request_id and identical input; do not create a new quote or request ID.';
+            lines.push('Whether a charge was made is unknown. A new generation is separately paid and requires a fresh estimate and explicit user approval.');
         }
-        else {
-            charged = 'no';
-            lines.push('Nothing was submitted or charged.');
-        }
+        else
+            lines.push(beforeSubmit ? 'Nothing was submitted or charged.' : 'Nothing was submitted or charged. Gateway admission rejected the generation before dispatch.');
     }
+    lines.push(`Next step: ${info.next_step}`);
     // No HTTP status: the request timed out or the connection dropped, so the upload's outcome is unknown.
     if (context.upload && info.category === 'server_error' && !info.status) {
         lines.push('The upload may not have finished. Calling upload_file again is safe.');
     }
     if (info.headline)
         lines.push(`Error: ${label}`);
-    if (info.request_id)
-        lines.push(`Request ID: ${info.request_id}`);
+    if (requestId)
+        lines.push(`Request ID: ${requestId}`);
     return failure(lines.join('\n'), {
         error: info,
         ...(charged ? { charged } : {}),
-        ...(context.clientRequestId && charged === 'unknown' ? { client_request_id: context.clientRequestId } : {}),
+        ...(submissionState ? { submission_state: submissionState } : {}),
+        ...(clientRequestId && context.paid ? { client_request_id: clientRequestId } : {}),
+        ...(taskId ? { task_id: taskId } : {}),
     });
 }
 /** Sends a progress notification when the client asked for them; failures are ignored. */

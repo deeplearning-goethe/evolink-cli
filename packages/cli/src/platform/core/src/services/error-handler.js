@@ -1,5 +1,6 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
+import { publicIdentifier, publicLabel, publicNumber } from './public-error.js';
 import { currentCredentialMode } from '../request-context.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL, siteUrl } from './http-policy.js';
 import { trackedLink } from './utm.js';
@@ -9,7 +10,7 @@ const ACCOUNT_CODES = new Set(['insufficient_quota', 'insufficient_user_quota', 
 const KEY_QUOTA_CODES = new Set(['insufficient_token_quota', 'key_quota_exhausted']);
 const KEY_DAILY_CODES = new Set(['token_daily_quota_exceeded', 'key_daily_quota_exhausted']);
 const CONTENT_CODES = new Set(['content_policy_violation', 'content_filter', 'sensitive_content', 'moderation_blocked', 'input_moderation_failed']);
-const UNAVAILABLE_CODES = new Set(['no_available_channel', 'model_unavailable', 'channel_selection_failed', 'service_unavailable']);
+const UNAVAILABLE_CODES = new Set(['no_available_channel', 'model_unavailable', 'channel_selection_failed']);
 /** Hosted service channel (key custody A): the connection itself is gone and needs a new sign-in. */
 const CONNECTION_ENDED_CODES = new Set(['connection_not_found', 'connection_revoked', 'session_inactive', 'session_expired', 'mcp_scope_missing']);
 /** The hosted service, not the user's connection, was refused or sent a request the channel does not serve. */
@@ -79,7 +80,9 @@ function categorize(status, code, mode, mcpLimits) {
         return 'outcome_unknown';
     if (CONTENT_CODES.has(lower))
         return 'content_policy';
-    if (UNAVAILABLE_CODES.has(lower) || lower.startsWith('channel:'))
+    if (lower === 'service_unavailable')
+        return 'service_unavailable';
+    if (UNAVAILABLE_CODES.has(lower))
         return 'model_unavailable';
     if (CONNECTION_ENDED_CODES.has(lower))
         return 'connection_ended';
@@ -106,7 +109,7 @@ function categorize(status, code, mode, mcpLimits) {
         case 404: return 'not_found';
         case 413: return 'request_too_large';
         case 429: return 'rate_limited';
-        case 503: return 'model_unavailable';
+        case 503: return 'service_unavailable';
     }
     if (status >= 500)
         return 'server_error';
@@ -117,6 +120,7 @@ const RETRYABLE = new Set([
     'mcp_daily_limit_reached',
     'rate_limited',
     'model_unavailable',
+    'service_unavailable',
     'outcome_unknown',
     'server_error',
     'session_check_unavailable',
@@ -241,15 +245,17 @@ function nextStep(category, info, mode) {
         case 'rate_limited':
             return `Too many requests. Wait ${info.retry_after_seconds ?? 30} seconds before retrying; do not loop paid submissions.`;
         case 'invalid_request':
-            return 'Fix the parameter named in the message and retry. get_model lists every parameter with its allowed values.';
+            return 'Check the supplied parameters before retrying. get_model lists every parameter with its allowed values.';
         case 'not_found':
             return 'Nothing matches this ID. Check it, or use list_tasks to find recent tasks.';
         case 'content_policy':
-            return 'The prompt or input was blocked by content review. Rephrase it (no real people, brands, explicit or violent content) and retry.';
+            return 'The prompt or input was blocked by content review. Review the applicable content policy and revise the input. Do not bypass content review.';
+        case 'service_unavailable':
+            return 'EvoLink is temporarily unavailable. Check the original task or request ID before retrying a paid submission.';
         case 'model_unavailable':
             return 'The model is temporarily unavailable. Retry in a minute, or pick another model with search_models.';
         case 'idempotency_conflict':
-            return 'This client_request_id was already used for a different request. Use a new client_request_id for a new generation.';
+            return 'This client_request_id was already used for a different request. Recover the original request first. A different generation requires a new estimate and explicit user approval; it is a separately paid task.';
         case 'outcome_unknown':
             return 'The earlier submission with this client_request_id is still being processed or its outcome is unknown. Do not submit it again with a new id: wait a minute and retry with the same client_request_id, or look it up with list_tasks.';
         case 'request_too_large':
@@ -275,17 +281,58 @@ function nextStep(category, info, mode) {
 /** Classifies one non-2xx gateway or files-api response. */
 export function classifyGatewayError(status, body, retryAfterMs, headerRequestId) {
     const error = envelope(body);
-    const code = text(error.code);
+    const rawCode = text(error.code)?.toLowerCase();
+    const knownCodes = new Set([...ACCOUNT_CODES, ...KEY_QUOTA_CODES, ...KEY_DAILY_CODES, ...CONTENT_CODES, ...UNAVAILABLE_CODES, ...CONNECTION_ENDED_CODES, ...SERVICE_CODES,
+        'mcp_paused', 'mcp_key_expired', 'mcp_channel_disabled', 'key_disabled', 'key_expired', 'key_model_not_allowed', 'idempotency_conflict', 'paid_outcome_unknown', 'agent_session_unavailable', 'mcp_connection_create_failed', 'mcp_token_invalid', 'user_disabled', 'upload_token_rate_limited', 'upload_token_unavailable', 'service_unavailable', 'invalid_token', 'internal_error', 'invalid_parameters', 'invalid_parameter', 'invalid_media_url', 'invalid_request']);
+    const code = rawCode && knownCodes.has(rawCode) ? rawCode : undefined;
     const mode = currentCredentialMode();
     const mcpScope = text(error.limit_scope)?.toLowerCase() === 'mcp';
     const category = categorize(status, code ?? '', mode, mcpScope || mode === 'signed_in');
-    const requestId = text(error.request_id) ?? headerRequestId;
-    const rawMessage = text(error.message) ?? `HTTP ${status}`;
-    const message = rawMessage.replace(/\s*\(request id: [^)]*\)\s*$/i, '').slice(0, 600);
+    const requestId = publicIdentifier(error.request_id) ?? publicIdentifier(headerRequestId);
+    // Remote prose, stack traces and suggestions are never promoted into assistant instructions.
+    let message = headlineFor(category) ?? {
+        invalid_request: 'EvoLink rejected the request parameters. Check get_model for the current rules.',
+        content_policy: 'The prompt or input was blocked by content review.',
+        unauthorized: 'EvoLink could not authenticate this request.',
+        forbidden: 'Access to this resource is denied.',
+        not_found: 'The requested resource was not found.',
+        rate_limited: 'The request rate limit was reached.',
+        request_too_large: 'The request exceeds the allowed size.',
+        model_unavailable: 'The requested model is temporarily unavailable.',
+        service_unavailable: 'EvoLink is temporarily unavailable.',
+        idempotency_conflict: 'This request ID is already associated with a different request.',
+        outcome_unknown: 'The earlier submission outcome is unknown.',
+    }[category] ?? 'EvoLink could not complete this operation.';
+    if (status === 415 && category === 'invalid_request')
+        message = 'The request uses an unsupported file type or media format.';
     const details = {};
     for (const field of DETAIL_FIELDS) {
-        if (error[field] !== undefined && error[field] !== null && error[field] !== '')
-            details[field] = error[field];
+        const value = error[field];
+        if (field.endsWith('_credits') || field === 'expired_at') {
+            const n = publicNumber(value);
+            if (n !== undefined && (field !== 'expired_at' || n <= 253402300799))
+                details[field] = n;
+        }
+        else if (field === 'allowed_models' && Array.isArray(value)) {
+            details[field] = value.slice(0, 20).map(publicIdentifier).filter(Boolean);
+        }
+        else {
+            const label = publicLabel(value);
+            if (label)
+                details[field] = label;
+        }
+    }
+    const param = typeof error.param === 'string' && /^[A-Za-z_][A-Za-z0-9_.\[\]]{0,100}$/.test(error.param) ? error.param : undefined;
+    if (category === 'invalid_request' && param) {
+        message += ` Parameter: ${param}.`;
+        for (const field of ['min', 'max']) {
+            const n = publicNumber(error[field]);
+            if (n !== undefined)
+                details[field] = n;
+        }
+        if (Array.isArray(error.allowed_values))
+            details.allowed_values = error.allowed_values.slice(0, 30)
+                .filter(value => publicNumber(value) !== undefined || publicLabel(value) !== undefined);
     }
     let actionUrl;
     if (category === 'account_balance_insufficient') {
@@ -303,6 +350,7 @@ export function classifyGatewayError(status, body, retryAfterMs, headerRequestId
         category,
         ...(headline ? { headline } : {}),
         code,
+        ...(param ? { param } : {}),
         message,
         next_step: '',
         retryable: RETRYABLE.has(category),
@@ -332,7 +380,7 @@ export function formatApiError(status, body) {
 }
 const TASK_ERROR_MAP = {
     content_policy_violation: {
-        suggestion: 'Revise the prompt: avoid real person photos, celebrity names, copyrighted content, NSFW or violence. An illustration style often passes.',
+        suggestion: 'Review the applicable content policy and revise the input. Do not bypass content review.',
         retryable: false,
     },
     invalid_parameters: {
@@ -340,15 +388,15 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
     image_dimension_mismatch: {
-        suggestion: 'The input image does not match the requested aspect ratio. Resize it (for example 1280x720 for 16:9) or change the ratio.',
+        suggestion: 'Check the input dimensions and aspect ratio against this model’s get_model rules.',
         retryable: false,
     },
     image_processing_error: {
-        suggestion: 'The input image could not be processed. Use JPG, PNG or WebP under 10 MB at a publicly reachable URL (upload_file gives one).',
+        suggestion: 'The input image could not be processed. Check accessibility, format and size against this model’s get_model rules.',
         retryable: false,
     },
     request_cancelled: {
-        suggestion: 'The task was cancelled. Submit a new request if it was not intended.',
+        suggestion: 'The task was cancelled. Check this task’s billing state before deciding whether to request another generation.',
         retryable: false,
     },
     resource_not_found: {
@@ -356,32 +404,32 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
     generation_timeout: {
-        suggestion: 'Generation timed out, probably under high load. Retry, or simplify the prompt or lower the resolution.',
+        suggestion: 'The generation timed out. Check the original task and its billing state before considering another generation.',
         retryable: true,
     },
     quota_exceeded: {
-        suggestion: `The account was over quota or rate limited when the task ran. Wait, then retry; top up at ${TOP_UP_URL} if the balance is low.`,
+        suggestion: `The generation encountered a quota limit. Check balance and limits before requesting another generation; top up at ${TOP_UP_URL} if the balance is low.`,
         retryable: true,
     },
     resource_exhausted: {
-        suggestion: 'Provider capacity was temporarily exhausted. Wait 30–60 seconds and retry.',
+        suggestion: 'Generation capacity was temporarily exhausted. Wait before considering another generation.',
         retryable: true,
     },
     generation_failed_no_content: {
-        suggestion: 'The model produced no output, often because of protected content or watermark removal requests. Change the prompt or input and retry.',
-        retryable: true,
+        suggestion: 'The model returned no output. The cause is not established; retain the task ID and contact EvoLink support if needed.',
+        retryable: false,
     },
     service_error: {
-        suggestion: 'Temporary service error. Retry after a minute.',
+        suggestion: 'The generation service reported an error. Retain the task ID and check its billing state.',
         retryable: true,
     },
     service_unavailable: {
-        suggestion: 'The service was temporarily unavailable. Retry after 1–2 minutes.',
+        suggestion: 'The generation service was temporarily unavailable. Retain the task ID and check its billing state.',
         retryable: true,
     },
     unknown_error: {
-        suggestion: 'Unknown error. Retry after a minute; if it keeps failing, give the task ID to EvoLink support.',
-        retryable: true,
+        suggestion: 'The cause is unknown. Give the task ID to EvoLink support; do not generate again automatically.',
+        retryable: false,
     },
 };
 export function getTaskErrorInfo(code) {
@@ -391,14 +439,14 @@ export function getTaskErrorInfo(code) {
         ? { ...info, suggestion: info.suggestion.replace(TOP_UP_URL, trackedLink(TOP_UP_URL, 'top_up')) }
         : info;
 }
-export function formatTaskError(error) {
-    const code = error.code ?? 'unknown_error';
+export function publicTaskError(error = {}) {
+    const code = Object.prototype.hasOwnProperty.call(TASK_ERROR_MAP, error.code ?? '')
+        ? error.code : 'unknown_error';
     const info = getTaskErrorInfo(code);
-    const lines = [
-        `Error code: ${code}`,
-        `Message: ${error.message ?? 'No details provided'}`,
-        `Retryable: ${info.retryable ? 'Yes — you can retry this request' : 'No — modify your input before retrying'}`,
-        `Suggestion: ${info.suggestion}`,
-    ];
-    return lines.join('\n');
+    return { code, message: code === 'unknown_error' ? 'Generation failed; the cause is unknown.'
+            : `Generation did not complete (${code}).`, ...info };
+}
+export function formatTaskError(error) {
+    const info = publicTaskError(error);
+    return `Error code: ${info.code}\nMessage: ${info.message}\nSuggestion: ${info.suggestion}`;
 }

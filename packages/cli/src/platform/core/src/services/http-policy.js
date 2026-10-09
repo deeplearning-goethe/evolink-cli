@@ -31,6 +31,14 @@ export class RequestTimeoutError extends Error {
         this.name = 'RequestTimeoutError';
     }
 }
+export class SubmissionNotStartedError extends Error {
+    cause;
+    constructor(cause) {
+        super('Generation was not submitted.');
+        this.cause = cause;
+        this.name = 'SubmissionNotStartedError';
+    }
+}
 export class PaidRequestOutcomeUnknownError extends Error {
     cause;
     idempotencyKey;
@@ -59,11 +67,21 @@ export function evoHeaders(tool) {
 /** Turns a console path such as /dashboard/credits into a full link; full https links pass through. */
 export function siteUrl(pathOrUrl, fallback) {
     const value = (pathOrUrl ?? '').trim();
-    if (value.startsWith('https://'))
-        return value;
-    if (value.startsWith('/') && !value.startsWith('//'))
-        return `${EVOLINK_SITE}${value}`;
-    return fallback;
+    try {
+        if (value.startsWith('//') || /[\\\u0000-\u0020]/.test(value))
+            return fallback;
+        const url = new URL(value, EVOLINK_SITE);
+        if (url.origin !== EVOLINK_SITE || url.username || url.password || url.hash
+            || !['/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname))
+            return fallback;
+        // Only the documented console tab is accepted. Tracking is added locally.
+        if ([...url.searchParams].some(([key, v]) => key !== 'tab' || v !== 'mcp'))
+            return fallback;
+        return url.href;
+    }
+    catch {
+        return fallback;
+    }
 }
 export function timeoutFromEnv(name, fallback) {
     const raw = process.env[name];
@@ -123,14 +141,46 @@ export async function fetchWithTimeout(url, init, timeoutMs, fetchImpl) {
             signal.removeEventListener('abort', abort);
     }
 }
-export async function readJsonBody(response) {
-    const text = await response.text();
-    if (!text)
-        return {};
+/** Bound body consumption as well as response headers. Cancelling a reader also closes stalled streams. */
+export async function readJsonBody(response, timeoutMs = DEFAULT_READ_TIMEOUT_MS) {
+    const signal = currentRequestCredentials()?.http?.signal;
+    const reader = response.body?.getReader();
+    let timer;
+    let abort;
+    const read = async () => {
+        if (!reader)
+            return response.text();
+        const decoder = new TextDecoder();
+        let body = '';
+        for (;;) {
+            const chunk = await reader.read();
+            if (chunk.done)
+                return body + decoder.decode();
+            body += decoder.decode(chunk.value, { stream: true });
+        }
+    };
     try {
-        return JSON.parse(text);
+        const body = await Promise.race([read(), new Promise((_, reject) => {
+                const stop = (error) => { reject(error); void reader?.cancel().catch(() => undefined); };
+                timer = setTimeout(() => stop(new RequestTimeoutError(timeoutMs)), timeoutMs);
+                abort = () => stop(new Error('Request interrupted during response read'));
+                signal?.addEventListener('abort', abort, { once: true });
+                if (signal?.aborted)
+                    abort();
+            })]);
+        if (!body)
+            return {};
+        try {
+            return JSON.parse(body);
+        }
+        catch {
+            return { message: body.slice(0, 2000) };
+        }
     }
-    catch {
-        return { message: text.slice(0, 2_000) };
+    finally {
+        clearTimeout(timer);
+        if (abort)
+            signal?.removeEventListener('abort', abort);
+        reader?.releaseLock();
     }
 }

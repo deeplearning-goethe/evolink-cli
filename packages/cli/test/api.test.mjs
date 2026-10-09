@@ -249,3 +249,31 @@ test('REST capability commands use local discovery and gateway task APIs while M
   assert.ok((await downloadAll('task-direct-0', path.join(home, 'delivery'), { ...opts, resume: true })).files[0].verified_existing);
   assert.equal(f.mcpRequests || 0, 0); assert.equal(f.paid.size, 0);
 });
+
+
+test('ambiguous paid responses retain the original quote and independent accepted ledger', async t => {
+  for (const kind of ['image', 'video', 'audio']) for (const fault of ['503', 'body', 'malformed']) {
+    const { f, state, credentials } = await context(t);
+    const ledger = new Set(); let broken = true;
+    const client = new Api(credentials, { fetchFn: async (url, options) => {
+      if (new URL(url).pathname === `/v1/${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audios'}/generations`) {
+        ledger.add(new Headers(options.headers).get('idempotency-key'));
+        if (broken) {
+          if (fault === '503') return new Response(JSON.stringify({ error: { code: 'service_unavailable', message: 'Bearer sk-synthetic secret.upstream.test' } }), { status: 503 });
+          if (fault === 'body') return { ok: true, headers: new Headers(), text: async () => { throw new Error('secret.upstream.test'); } };
+          return new Response('{}');
+        }
+      }
+      return fetch(url, options);
+    } });
+    const media = new Media({ client, state, server: f.server });
+    const quote = await media.estimate({ model: `fixture-${kind}`, input: { prompt: 'test' } });
+    await assert.rejects(media.generate(kind, quote.quote_id, { confirmed: true }), error => error.details.charged === 'unknown');
+    const saved = await state.read('quotes', quote.quote_id);
+    assert.equal(saved.state, 'outcome_unknown'); assert.equal(ledger.size, 1);
+    broken = false;
+    const recovered = await media.resume(quote.quote_id);
+    assert.equal(recovered.client_request_id, saved.client_request_id);
+    assert.equal(ledger.size, 1); assert.equal(f.paid.size, 1);
+  }
+});

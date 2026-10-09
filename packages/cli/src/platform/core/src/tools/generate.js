@@ -119,6 +119,7 @@ function registerGenerate(server, config, kind) {
             input.prompt = args.prompt;
         }
         let clientRequestId;
+        let acceptedTaskId;
         try {
             const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false });
             if (!entry) {
@@ -174,6 +175,7 @@ function registerGenerate(server, config, kind) {
                 tool: name,
                 idempotencyKey: clientRequestId,
             });
+            acceptedTaskId = submitted.id;
             let task = submitted;
             const waitUntil = started + WAIT_MS[kind];
             if (!TERMINAL_STATUSES.has(task.status) && WAIT_MS[kind] > 0 && Date.now() + 3_000 < waitUntil) {
@@ -228,7 +230,8 @@ function registerGenerate(server, config, kind) {
         }
         catch (error) {
             // clientRequestId is set right before the submit, so it also tells whether a request may have gone out.
-            return errorResult(error, { paid: clientRequestId !== undefined, clientRequestId });
+            return errorResult(error, { paid: clientRequestId !== undefined, clientRequestId, taskId: acceptedTaskId,
+                phase: acceptedTaskId ? 'accepted' : clientRequestId ? 'submit_started' : 'before_submit' });
         }
     });
 }

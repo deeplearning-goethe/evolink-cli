@@ -83,7 +83,7 @@ test('readiness: an explicitly refused submission cannot enter a recovery loop',
   const data = { calls: [] }, state = new State(home), mcp = fakeMcp(data);
   const call = mcp.call.bind(mcp);
   mcp.call = async (name, args) => {
-    if (name === 'generate_image') { data.calls.push({ name, args }); throw new CliError('insufficient_balance', 'Fixture refusal', { charged: 'no' }); }
+    if (name === 'generate_image') { data.calls.push({ name, args }); throw new CliError('insufficient_balance', 'Fixture refusal', { charged: 'no', submission_state: 'rejected' }); }
     return call(name, args);
   };
   const media = new Media({ mcp, state, server: new URL('http://127.0.0.1:9999/mcp') });
