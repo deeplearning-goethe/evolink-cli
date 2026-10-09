@@ -90,7 +90,7 @@ function registerGenerate(server, config, kind) {
             client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional()
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
             max_cost_usd: z.number().positive().max(10_000).optional()
-                .describe('Optional estimate-based spending cap: refuses to submit when the estimate is higher or cannot cover the full request. Per-second video requests with video_urls, video_url or source_task_id cannot use this cap, even with media_seconds.'),
+                .describe('Optional estimate-based submission cap, not a final settlement guarantee: refuses to submit when fresh public prices are unavailable, the estimate is higher or published rules cannot cover the full request. Per-second video requests with video_urls, video_url or source_task_id cannot use this cap, even with media_seconds.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title, ...PAID },
@@ -120,7 +120,7 @@ function registerGenerate(server, config, kind) {
         }
         let clientRequestId;
         try {
-            const { catalog, entry } = await resolveModel(args.model, config);
+            const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false });
             if (!entry) {
                 const suggestions = suggestModels(catalog, args.model, kind);
                 return failure(`Unknown ${kind} model "${args.model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs. Nothing was submitted or charged.`, { error: { category: 'not_found', param: 'model' }, suggestions, charged: 'no' });
@@ -216,6 +216,8 @@ function registerGenerate(server, config, kind) {
             return ok(lines.join('\n'), {
                 ...view.structured,
                 submitted: { model: entry.id, input },
+                pricing_scope: 'public_default_group',
+                final_budget_enforced: false,
                 client_request_id: clientRequestId,
                 replayed: submitted.idempotency_replayed === true,
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),

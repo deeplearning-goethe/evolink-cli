@@ -1,8 +1,10 @@
 # EvoLink CLI
 
-Generate images, video, music and speech directly through the EvoLink platform API. This is an unreleased development change; public CLI 0.6.0 uses the hosted MCP transport. The CLI provides browser login, model discovery, quotes, task recovery, reference uploads and original-result downloads.
+Generate images, video, music and speech directly through the EvoLink platform API starting with version 0.8.0. Earlier versions use the hosted MCP transport. The CLI provides browser login, model discovery, quotes, task recovery, reference uploads and original-result downloads.
 
 The package calls the EvoLink platform API directly using the assistant's terminal. Requires Node.js 22+.
+
+Quotes and submissions refresh public default-group prices. A failed refresh cannot use an old price to pass a spending cap. Numeric prices retain their published precision; incomplete SKU prices and known unpublished video billing factors produce a partial estimate. Quotes report `pricing_scope: public_default_group` and `final_budget_enforced: false`. Account-specific authoritative quotes and a final settlement cap require platform support.
 
 ## Status and installation
 

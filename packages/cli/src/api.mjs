@@ -25,7 +25,7 @@ export class Api {
   context(access, name) {
     return { serviceChannel: { accessToken: access.access_token }, clientName: 'EvoLink CLI',
       http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli', version: CLI_VERSION,
-        controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin, freshPricing: name === 'estimate_cost' } };
+        controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin } };
   }
   async call(name, args = {}, { requireCapability = false, requiredInputs = [] } = {}) {
     if (requireCapability) requireThat(this.platform.supports(name, requiredInputs),

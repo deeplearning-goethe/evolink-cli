@@ -26,7 +26,7 @@ export function registerEstimateCost(server, config) {
         annotations: { title: 'Estimate cost', ...READ_ONLY },
     }, async ({ model, input, media_seconds: mediaSeconds }) => {
         try {
-            const { catalog, entry } = await resolveModel(model, config);
+            const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false });
             if (!entry) {
                 const suggestions = suggestModels(catalog, model);
                 return failure(`Unknown model "${model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs.`, { error: { category: 'not_found', param: 'model' }, suggestions });
@@ -68,6 +68,8 @@ export function registerEstimateCost(server, config) {
             const structured = {
                 model: entry.id,
                 type: entry.kind,
+                pricing_scope: 'public_default_group',
+                final_budget_enforced: false,
                 input_valid: validation ? validation.errors.length === 0 : null,
                 problems: validation?.errors ?? [],
                 warnings: validation?.warnings ?? [],

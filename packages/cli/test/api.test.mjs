@@ -61,6 +61,15 @@ test('fresh platform prices block an already approved quote when the price chang
   assert.equal(f.paid.size, 0);
 });
 
+test('a cached price cannot authorize a quote or capped submit after pricing fails', async t => {
+  const { f, media, client } = await context(t);
+  await client.call('get_model', { model: 'fixture-image' });
+  f.estimateFailure = true;
+  await assert.rejects(media.estimate({ model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }), { code: 'uncheckable_cap' });
+  await assert.rejects(client.call('generate_image', { model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }));
+  assert.equal(f.paid.size, 0);
+});
+
 test('interrupted direct submit preserves unknown outcome and recovers without another intent', async t => {
   const { f, state, credentials } = await context(t);
   const controller = new AbortController();

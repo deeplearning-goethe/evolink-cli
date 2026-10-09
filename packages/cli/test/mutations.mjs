@@ -11,7 +11,8 @@ const mutants = [
   ['rest-strict-input', 'src/platform/core/src/platform-client.js', 'z.object(definition.inputSchema).strict()', 'z.object(definition.inputSchema)'],
   ['rest-origin', 'src/api.mjs', 'origins.has(url.origin)', 'true'],
   ['file-credential-isolation', 'src/api.mjs', "authorization.startsWith('Bearer evup_')", 'true'],
-  ['rest-fresh-price', 'src/api.mjs', "freshPricing: name === 'estimate_cost'", 'freshPricing: false'],
+  ['shared-estimate-fresh', 'src/platform/core/src/tools/estimate-cost.js', 'fresh: true, allowStale: false', 'fresh: false, allowStale: true'],
+  ['shared-submit-fresh', 'src/platform/core/src/tools/generate.js', 'fresh: true, allowStale: false', 'fresh: false, allowStale: true'],
   ['quote-api-origin', 'src/media.mjs', '!quote.api_origin || quote.api_origin === this.client.apiUrl?.origin', 'true'],
   ['oauth-metadata-origin', 'src/oauth.mjs', 'endpoint.origin === issuer', 'true'],
   ['oauth-token-scope', 'src/oauth.mjs', "(!value.scope || value.scope.split(' ').includes('mcp'))", 'true'],
@@ -75,7 +76,7 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'rest-fresh-price', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
+    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']

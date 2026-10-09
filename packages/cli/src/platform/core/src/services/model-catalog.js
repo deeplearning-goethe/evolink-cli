@@ -10,7 +10,7 @@ function isMediaKind(value) {
     return value === 'image' || value === 'video' || value === 'audio';
 }
 /** Live available IDs are authoritative; their published aliases join documentation and prices. */
-export async function loadCatalog(config) {
+export async function loadCatalog(config, pricingOptions = {}) {
     const live = await currentModels();
     // /v1/models is credential-specific. OAuth currently allows only media/task/credit
     // routes, so its catalog uses public health (enabled abilities/channels), not a rejected call.
@@ -37,13 +37,13 @@ export async function loadCatalog(config) {
     }
     let pricingWarning;
     try {
-        const pricing = await getPricing();
+        const pricing = await getPricing(pricingOptions);
         if (pricing.source === 'stale-cache')
             pricingWarning = 'Prices could not be refreshed; showing the last known prices.';
         for (const entry of entries.values()) {
             const prices = [entry.id, ...(entry.aliases ?? [])].flatMap(name => [...pricing.models.values()].filter(price => price.id.toLowerCase() === name.toLowerCase()));
             if (prices.length)
-                entry.priced = { ...prices[0], id: entry.id, prices: [...new Map(prices.flatMap(model => model.prices).map(price => [price.sku_id, price])).values()] };
+                entry.priced = { ...prices[0], id: entry.id, pricingIncomplete: prices.some(model => model.pricingIncomplete), prices: [...new Map(prices.flatMap(model => model.prices).map(price => [price.sku_id, price])).values()] };
         }
     }
     catch (error) {
@@ -61,8 +61,8 @@ export function suggestModels(catalog, id, kind) {
     return closestMatches(id, pool, 5);
 }
 /** Looks a model up for one request; prices are best effort. */
-export async function resolveModel(id, config) {
-    const catalog = await loadCatalog(config);
+export async function resolveModel(id, config, pricingOptions = {}) {
+    const catalog = await loadCatalog(config, pricingOptions);
     const entry = findEntry(catalog, id);
     return { catalog, entry };
 }

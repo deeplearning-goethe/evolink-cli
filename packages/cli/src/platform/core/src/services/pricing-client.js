@@ -80,7 +80,20 @@ export function skuPrice(sku) {
             return undefined;
         }
     }
-    if (!Number.isFinite(minUsd) || !Number.isFinite(maxUsd))
+    // The note carries corrected units, but its amounts are rounded for display.
+    // Public token rates are stored per 1K tokens and displayed per 1M tokens.
+    const scale = note && /^1m tokens(?: per hour)?$/.test(unit) ? 1000 : 1;
+    if (sku.price_range != null) {
+        if (typeof sku.price_range.min_usd !== 'number' || typeof sku.price_range.max_usd !== 'number')
+            return undefined;
+        minUsd = sku.price_range.min_usd * scale;
+        maxUsd = sku.price_range.max_usd * scale;
+    }
+    else if (typeof sku.cny_price === 'number') {
+        minUsd = sku.cny_price / CNY_PER_USD * scale;
+        maxUsd = minUsd;
+    }
+    if (!Number.isFinite(minUsd) || !Number.isFinite(maxUsd) || minUsd < 0 || maxUsd <= 0 || minUsd > maxUsd)
         return undefined;
     const metadata = parseMetadata(sku.metadata);
     const tokenBased = /token/.test(unit);
@@ -89,6 +102,10 @@ export function skuPrice(sku) {
         ?? (metadata.resolution_multipliers && typeof metadata.resolution_multipliers === 'object'
             ? metadata.resolution_multipliers
             : undefined);
+    if (multipliers && Object.values(multipliers).some(value => typeof value !== 'number' || !Number.isFinite(value) || value <= 0))
+        return undefined;
+    if (sku.min_charge_uc !== undefined && (!Number.isFinite(sku.min_charge_uc) || sku.min_charge_uc < 0))
+        return undefined;
     const price = {
         sku_id: String(sku.sku_id),
         name: sku.sku_name,
@@ -125,26 +142,28 @@ function buildIndex(skus) {
             model.description = sku.description;
         if (price)
             model.prices.push(price);
+        else
+            model.pricingIncomplete = true;
     }
     return models;
 }
 async function fetchPricing() {
     const response = await fetchWithTimeout(`${controlBaseURL()}/web/api/models/pricing`, {
         method: 'GET',
-        headers: { 'Accept': 'application/json', ...evoHeaders('pricing') },
+        headers: { 'Accept': 'application/json', 'Cache-Control': 'no-cache', ...evoHeaders('pricing') },
     }, timeoutFromEnv('EVOLINK_MCP_READ_TIMEOUT_MS', DEFAULT_READ_TIMEOUT_MS));
     const body = await readJsonBody(response);
-    if (!response.ok || !Array.isArray(body.data)) {
+    if (!response.ok || body.success === false || !Array.isArray(body.data)) {
         throw new Error(`the pricing list returned HTTP ${response.status}`);
     }
     return { models: buildIndex(body.data), fetchedAt: Date.now() };
 }
 /** Image, video and audio models with their published unit prices; cached for five minutes, served stale for a day if a refresh fails. */
-export async function getPricing() {
+export async function getPricing(options = {}) {
     const now = Date.now();
     const key = controlBaseURL();
     const cached = caches.get(key);
-    if (!currentRequestCredentials()?.http?.freshPricing && cached && now - cached.fetchedAt < CACHE_TTL_MS)
+    if (!options.fresh && cached && now - cached.fetchedAt < CACHE_TTL_MS)
         return { ...cached, source: 'cache' };
     try {
         let inflight = pending.get(key);
@@ -157,7 +176,7 @@ export async function getPricing() {
         return { ...fresh, source: 'live' };
     }
     catch (error) {
-        if (cached && now - cached.fetchedAt <= MAX_STALE_MS)
+        if (options.allowStale !== false && cached && now - cached.fetchedAt <= MAX_STALE_MS)
             return { ...cached, source: 'stale-cache' };
         throw error;
     }
@@ -261,6 +280,17 @@ function multiplierRange(price, tiers) {
 export function estimateCost(model, kind, input, spec, options = {}) {
     const byMedia = billedByMediaLength(model, spec);
     const estimate = priceEstimate(model, input, spec, byMedia ? options.mediaSeconds : undefined, byMedia);
+    if (estimate.status === 'estimated' && model?.pricingIncomplete) {
+        estimate.status = 'partial';
+        estimate.uncheckable_reason = 'price_data';
+        estimate.notes.push('Some published SKU prices or multipliers are invalid or missing. This range excludes those charges and cannot establish max_cost_usd.');
+    }
+    if (estimate.status === 'estimated' && kind === 'video'
+        && (/^wan(?:2\.[56]|3\.0)-/.test(model?.id ?? '') || /^veo-3\.1-(?:fast-)?generate-preview$/.test(model?.id ?? ''))) {
+        estimate.status = 'partial';
+        estimate.uncheckable_reason = 'unpublished_factors';
+        estimate.notes.push('Published unit prices do not fully describe this model\'s resolution, audio, count or duration billing rules. This range is illustrative, not a total or an upper bound; max_cost_usd cannot be checked.');
+    }
     if (spec?.constraints?.outputDuration === 'unknown' && byMedia) {
         if (estimate.status === 'estimated')
             estimate.status = 'partial';
