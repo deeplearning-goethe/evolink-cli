@@ -17,6 +17,8 @@ export const validID = id => typeof id === 'string' && /^[a-zA-Z0-9._-]{1,96}$/.
 
 const hostID = createHash('sha256').update(os.hostname()).digest('hex').slice(0, 16);
 const pause = () => new Promise(resolve => setTimeout(resolve, 100));
+// Windows can briefly deny directory deletion while another waiter reads it.
+const removeLock = dir => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 function dead(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return false; }
@@ -97,7 +99,7 @@ export class State {
         const ticket = path.join(recovery, `${hostID}.${process.pid}.${randomUUID()}`);
         await fs.writeFile(ticket, '', { flag: 'wx', mode: 0o600 });
         try {
-          if (await staleOwner(dir)) await fs.rm(dir, { recursive: true, force: true });
+          if (await staleOwner(dir)) await removeLock(dir);
         } finally { await fs.unlink(ticket); }
       }
       if (!acquired) { busy(); await pause(); continue; }
@@ -112,7 +114,7 @@ export class State {
       } catch (error) {
         if (entered || error.code !== 'ENOENT') throw error;
       } finally {
-        if ((await ownerOf(dir))?.token === token) await fs.rm(dir, { recursive: true, force: true });
+        if ((await ownerOf(dir))?.token === token) await removeLock(dir);
       }
       busy();
     }
