@@ -1,6 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
-import { CliError, requireThat } from './errors.mjs';
+import { CliError, requireThat, fileError } from './errors.mjs';
+
+function quoteError(error, cap) {
+  const cause = fileError(error);
+  return new CliError(cause instanceof CliError ? cause.code : 'estimate_unavailable',
+    cause instanceof CliError ? cause.message : 'The quote could not be obtained. No generation was submitted.', {
+      ...(cause instanceof CliError ? cause.details : {}), phase: 'estimate', submission_allowed: false,
+      ...(cap !== undefined ? { max_cost_usd: cap } : {}),
+      next_step: 'Resolve the quote error and estimate again with the same budget. Do not use catalog starting prices as task quotes or remove the user budget.',
+    }, cause.exitCode);
+}
 
 export function priceFingerprint(quote) {
   return hash({ model: quote.model, type: quote.type, input_valid: quote.input_valid, estimate: quote.estimate,
@@ -9,10 +19,17 @@ export function priceFingerprint(quote) {
 
 export function checkEstimate(quote, cap) {
   requireThat(quote.input_valid !== false, 'invalid_input', 'The model input is invalid.', { problems: quote.problems });
-  requireThat(quote.enough_balance !== false && quote.enough_limit !== false && quote.enough_daily_limit !== false,
-    'insufficient_balance', 'The account or spending limit does not cover this estimate.');
+  requireThat(quote.enough_limit !== false, 'insufficient_limit', 'The EvoLink MCP or API key spending limit does not cover this estimate. Adjust that limit; this is not the account balance.', { limit_scope: quote.limit_scope });
+  requireThat(quote.enough_daily_limit !== false, 'insufficient_daily_limit', 'The daily spending limit does not cover this estimate. Wait for its reset or adjust that limit; this is not the account balance.');
+  requireThat(quote.enough_balance !== false, 'insufficient_balance', 'The EvoLink account balance does not cover this estimate.');
+  if (quote.estimate?.status === 'estimated') {
+    const { min_usd, max_usd } = quote.estimate;
+    requireThat(Number.isFinite(max_usd) && max_usd >= 0 && (min_usd === undefined || Number.isFinite(min_usd) && min_usd >= 0 && min_usd <= max_usd),
+      'estimate_unavailable', 'The service returned an invalid price range. Obtain a valid quote before submission.');
+  }
   if (cap !== undefined) {
     requireThat(Number.isFinite(cap) && cap > 0 && cap <= 10_000, 'invalid_cap', 'max-cost-usd must be greater than 0 and at most 10000.');
+    requireThat(quote.input_valid === true, 'uncheckable_input', 'The service could not validate the model input. The CLI cannot submit this request with a spending cap.', { problems: quote.problems });
     requireThat(quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
       'uncheckable_cap', 'This request has no complete cost estimate. The CLI cannot submit it with a spending cap.', { estimate: quote.estimate });
     requireThat(quote.estimate.max_usd <= cap, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
@@ -24,12 +41,15 @@ export class Media {
   constructor({ mcp, state, server, now = Date.now }) { this.mcp = mcp; this.state = state; this.server = server.href; this.now = now; }
   async estimate(args) {
     const { max_cost_usd, ...input } = args;
-    const quote = await this.mcp.call('estimate_cost', input);
-    checkEstimate(quote, max_cost_usd);
-    requireThat(['image', 'video', 'audio'].includes(quote.type), 'unsupported_model', 'This model is not a media generation model.');
+    let quote;
+    try {
+      quote = await this.mcp.call('estimate_cost', input);
+      checkEstimate(quote, max_cost_usd);
+      requireThat(['image', 'video', 'audio'].includes(quote.type), 'unsupported_model', 'This model is not a media generation model.');
+    } catch (error) { throw quoteError(error, max_cost_usd); }
     // A complete quote also guards a pricing change between the refresh and POST.
     const quotedMax = quote.estimate.max_usd;
-    const effectiveCap = max_cost_usd ?? (quote.estimate.status === 'estimated' && Number.isFinite(quotedMax) && quotedMax > 0 && quotedMax <= 10_000 ? quotedMax : undefined);
+    const effectiveCap = max_cost_usd ?? (quote.input_valid === true && quote.estimate.status === 'estimated' && Number.isFinite(quotedMax) && quotedMax > 0 && quotedMax <= 10_000 ? quotedMax : undefined);
     const id = randomUUID();
     const argsToSubmit = { ...input, model: quote.model, ...(effectiveCap !== undefined ? { max_cost_usd: effectiveCap } : {}) };
     const stored = { id, server: this.server, binding: quote._binding, args: argsToSubmit,
@@ -53,13 +73,23 @@ export class Media {
       const quote = await this.load(id);
       requireThat(quote.type === kind, 'quote_type_mismatch', 'Use the media type shown in the saved quote.');
       if (quote.task_id) return { ...await this.mcp.call('get_task', { task_id: quote.task_id, wait_seconds: 0 }), quote_id: id, recovered: true };
+      requireThat(quote.state !== 'refused', 'submission_refused',
+        'EvoLink refused this submission and reported no charge. Resolve the original error, estimate again with the same budget, and obtain approval for the new quote.',
+        { quote_id: id, client_request_id: quote.client_request_id, charged: 'no', submission_allowed: false });
+      if (resume && quote.state === 'quoted') throw new CliError('submission_not_started',
+        'This quote has never been submitted. After user approval, use generate with this same quote; tasks resume only recovers an uncertain submission.',
+        { quote_id: id, client_request_id: quote.client_request_id, submission_allowed: false,
+          next_step: `After user approval, run evolink generate ${kind} --quote ${id} --confirm.` });
       requireThat(resume ? ['submitting', 'outcome_unknown'].includes(quote.state) : quote.state === 'quoted',
         'submission_already_started', 'A submission already started. Use tasks resume with this quote; do not create a new request ID.', { quote_id: id, client_request_id: quote.client_request_id });
       requireThat(this.now() <= quote.expires_at, 'quote_expired', 'The quote expired. Check recent tasks before preparing another submission.', { quote_id: id, client_request_id: quote.client_request_id });
       const { max_cost_usd, ...checkArgs } = quote.args;
-      const fresh = await this.mcp.call('estimate_cost', checkArgs);
-      requireThat(priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
-      checkEstimate(fresh, max_cost_usd);
+      let fresh;
+      try {
+        fresh = await this.mcp.call('estimate_cost', checkArgs);
+        requireThat(priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
+        checkEstimate(fresh, max_cost_usd);
+      } catch (error) { throw quoteError(error, max_cost_usd); }
       quote.state = 'submitting';
       quote.approved_at ??= this.now();
       await this.state.write('quotes', id, quote);

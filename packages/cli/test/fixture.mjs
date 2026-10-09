@@ -11,9 +11,16 @@ export class MemoryVault {
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6uHoAAAAASUVORK5CYII=', 'base64');
 
+// Small transport fixtures; downloads inspect headers, not full codec validity.
+export const mediaSamples = {
+  image: { bytes: png, type: 'image/png' },
+  video: { bytes: Buffer.from('000000186674797069736f6d0000020069736f6d6d703432', 'hex'), type: 'video/mp4' },
+  audio: { bytes: Buffer.from('524946462600000057415645666d74201000000001000100401f0000803e00000200100064617461020000000000', 'hex'), type: 'audio/wav' },
+};
+
 export async function fixture() {
   const state = { calls: [], clients: [], codes: new Map(), refreshes: new Map(), paid: new Map(), tasks: new Map(), uploads: new Map(),
-    multiplier: 1, loseSubmission: false, loseUploadReply: false, chunkedDownload: false, revokeFails: false, immediate: true, bytes: png, downloads: [], uploadHeaders: [], refreshCount: 0, beforeSubmit: undefined };
+    multiplier: 1, loseSubmission: false, loseUploadReply: false, chunkedDownload: false, revokeFails: false, immediate: true, bytes: png, contentType: 'image/png', downloads: [], uploadHeaders: [], refreshCount: 0, beforeSubmit: undefined };
   const server = http.createServer(async (req, res) => {
     try {
       const url = new URL(req.url, state.origin);
@@ -73,7 +80,7 @@ export async function fixture() {
       if (url.pathname.startsWith('/assets/')) {
         state.downloads.push(req.headers);
         if (!req.headers['user-agent']?.startsWith('EvoLinkCLI/')) { send(403, { error: 'user_agent_required' }); return; }
-        res.writeHead(200, { 'Content-Type': 'image/png', ...(state.chunkedDownload ? {} : { 'Content-Length': state.bytes.length }) });
+        res.writeHead(200, { ...(state.contentType ? { 'Content-Type': state.contentType } : {}), ...(state.chunkedDownload ? {} : { 'Content-Length': state.bytes.length }) });
         res.write(state.bytes.subarray(0, 4)); res.end(state.bytes.subarray(4)); return;
       }
       if (url.pathname !== '/mcp') { send(404, {}); return; }
@@ -89,7 +96,7 @@ export async function fixture() {
       if (message.method !== 'tools/call') { send(400, {}); return; }
       const { name, arguments: args } = message.params; state.calls.push({ name, args });
       let data;
-      if (name === 'check_balance') data = { balance_credits: 1000 };
+      if (name === 'check_balance') data = state.balanceFailure ? { error: { category: 'connection_failed', message: 'Fixture balance unavailable.' } } : { balance_credits: 1000 };
       if (name === 'search_models') data = { models: [{ id: 'fixture-image', type: 'image', starting_price_usd: 0.02 }] };
       if (name === 'get_model') data = { model: args.model, type: args.model.includes('video') ? 'video' : args.model.includes('audio') ? 'audio' : 'image', params: ['prompt', 'n', 'quality'] };
       if (name === 'estimate_cost') {
@@ -99,6 +106,7 @@ export async function fixture() {
         const status = args.model.includes('token') ? 'token_billed' : args.model.includes('partial') ? 'partial' : 'estimated';
         data = { model: args.model, type, input_valid: !input.invalid, problems: input.invalid ? [{ param: 'invalid' }] : [], warnings: [], enough_balance: input.insufficient ? false : true,
           estimate: { status, ...(status !== 'token_billed' ? { min_usd: cost, max_usd: cost } : {}), basis: ['fixture rate'], notes: [] } };
+        if (state.estimateFailure) data = { error: { category: 'estimate_unavailable', message: 'Fixture pricing unavailable.' } };
       }
       if (name.startsWith('generate_')) {
         await state.beforeSubmit?.(args);

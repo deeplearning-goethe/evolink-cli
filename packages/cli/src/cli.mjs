@@ -7,7 +7,8 @@ import { Mcp } from './mcp.mjs';
 import { Media } from './media.mjs';
 import { upload, download } from './files.mjs';
 import { installSkill } from './skills.mjs';
-import { CliError, requireThat, errorView } from './errors.mjs';
+import { doctor } from './doctor.mjs';
+import { CliError, requireThat, errorView, localFile } from './errors.mjs';
 
 const TASK_STATUS_FILTERS = Object.freeze(['processing', 'completed', 'failed', 'cancelled']);
 const TASK_STATUS_HELP = `Allowed task status filters: ${TASK_STATUS_FILTERS.join(', ')}.
@@ -109,8 +110,9 @@ async function estimateArgs(options) {
   requireThat(options.model, 'missing_model', 'Pass --model.');
   requireThat(!(options.input && options['input-file']), 'invalid_input', 'Choose --input or --input-file.');
   let input = {};
-  try { input = JSON.parse(options['input-file'] ? await fs.readFile(options['input-file'], 'utf8') : options.input || '{}'); }
-  catch { throw new CliError('invalid_input', 'The input must be a JSON object or a readable JSON file.'); }
+  const raw = options['input-file'] ? await localFile(() => fs.readFile(options['input-file'], 'utf8'), { file: options['input-file'] }) : options.input || '{}';
+  try { input = JSON.parse(raw); }
+  catch { throw new CliError('invalid_input', 'The input must contain valid JSON.'); }
   requireThat(input && typeof input === 'object' && !Array.isArray(input), 'invalid_input', 'The model input must be a JSON object.');
   if (options.prompt !== undefined) {
     requireThat(input.prompt === undefined || input.prompt === options.prompt, 'invalid_input', 'prompt was supplied twice with different values.');
@@ -163,11 +165,7 @@ export async function dispatch(positionals, options, { state, server, credential
     return download(action, options.output, { mcp, server, signal, index: number(options.index, 'index', 1, 50, true) || 1 });
   }
   if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent });
-  if (command === 'doctor') {
-    const status = await credentials.status();
-    const balance = await mcp.call('check_balance');
-    return { node: process.version, server: server.href, auth: status, connection_verified: balance.ok === true };
-  }
+  if (command === 'doctor') return doctor({ state, server, credentials, mcp });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
@@ -208,8 +206,9 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const credentials = new Credentials({ server, state, token });
     const mcp = new Mcp(credentials, { signal: controller.signal });
     const result = publicView(await dispatch(positionals, options, { state, server, credentials, mcp, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
-    const view = { schema_version: 1, ...result, ok: true };
+    const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
+    if (!view.ok) process.exitCode = 1;
   } catch (error) {
     const view = { schema_version: 1, ok: false, error: errorView(error) };
     (options.json ? io.stdout : io.stderr).write(options.json ? JSON.stringify(view) + '\n' : `${view.error.code}: ${view.error.message}\n${view.error.details ? JSON.stringify(view.error.details, null, 2) + '\n' : ''}`);

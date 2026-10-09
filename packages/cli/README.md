@@ -58,6 +58,8 @@ For video/audio, choose the corresponding generation command and a model's docum
 
 `--max-cost-usd` is an estimate-based submission guard, not a final-settlement guarantee. A complete estimate automatically uses its quoted maximum as this guard unless the user supplied a cap. Incomplete or unknown totals cannot use it. `--media-seconds` is a pricing hint, never a model parameter. Token-billed and unknown-duration models require explicit acceptance of their billing uncertainty; a missing price is refused.
 
+A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
+
 ## Tasks and files
 
 ```sh
@@ -86,13 +88,17 @@ An invalid status is rejected locally before login or an MCP request. The `inval
 
 The CLI persists the request ID before paid submission. Recovery reuses that ID; it never silently submits with a new one. For an uncertain submission, omit `--status` so completed or failed tasks remain visible. Lists are account-wide, newest first and limited to the returned recent batch; `--since` filters that batch rather than searching all history. An empty list does not prove no task was created. Keep the original IDs and use `tasks get` or `tasks resume` as appropriate; after an expired uncertain quote, inspect recent tasks before considering another paid submission. Ctrl-C stops local waiting, not generation. Task links expire after 24 hours.
 
-Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, stream at most 1 GiB per result, and refuse to overwrite existing files. These commands transfer originals and do not alter the generated content or guarantee host inline previews.
+Uploads stream up to the service limit (currently 95 MB) through a one-time address. Its token is not stored or forwarded elsewhere. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
 
 ## Authentication and state
 
 Login uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
 
 Tokens are stored only in the OS credential store. Linux requires a running Secret Service keyring; the CLI does not silently fall back to an in-memory kernel store or plaintext credential files. A one-command OAuth access token can be passed through stdin with `--token-stdin`, never as a command argument. `auth logout` revokes this session and preserves the account's shared MCP key.
+
+Run `evolink doctor --json` to check Node.js, writable local state, credential storage, saved login and balance connectivity. It reports failed and skipped checks together and exits nonzero until the connection is verified. On Linux, run login and later commands in the same unlocked Secret Service/D-Bus session. A keyring package alone does not start or unlock that session.
+
+On an SSH host, the OAuth loopback callback belongs to the host running the CLI. If you open the link on your own computer, forward its callback port: run `evolink auth login --no-browser` remotely, read the `127.0.0.1:PORT` in the printed link's `redirect_uri`, then use a second local terminal with `ssh -N -L PORT:127.0.0.1:PORT USER@HOST` before opening that link. Keep both commands alive until approval finishes (the login waits up to three minutes). Otherwise run the CLI locally. `--no-browser` prints a link but does not forward it. Device-code login is not provided.
 
 Quotes, request IDs and non-secret public client metadata retain the existing `~/.evolink-media` location so an upgrade can reuse saved requests and the OS-stored login. `EVOLINK_CLI_HOME` selects an isolated state directory; the original `EVOLINK_MEDIA_HOME` remains supported. The credential-service identity and skill ownership marker also remain stable across the command rename. Browser links are printed on stderr. Tokens and PKCE verifiers are not printed. Never include credentials in bug reports.
 
