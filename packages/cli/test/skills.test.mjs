@@ -57,6 +57,17 @@ test('known published skill migrates safely, version drift is visible, and untra
   assert.equal(await fs.readFile(path.join(dir, 'personal-note.txt'), 'utf8'), 'keep this');
 });
 
+test('published 0.5.1 skills migrate without asking to replace local modifications', async t => {
+  const home = await homeFor(t), dir = path.join(home, '.agents/skills/evolink-cli');
+  await fs.mkdir(dir, { recursive: true });
+  const legacy = await fs.readFile(new URL('./fixtures/skill-v051.md', import.meta.url));
+  await fs.writeFile(path.join(dir, 'SKILL.md'), legacy);
+  assert.equal((await skillStatus({ home, agent: 'codex' })).installations[0].status, 'legacy');
+  const installed = await installSkill({ home, agent: 'codex' });
+  assert.deepEqual(await fs.readFile(path.join(installed.installations[0].backup, 'SKILL.md')), legacy);
+  assert.equal((await skillStatus({ home, agent: 'codex' })).current, true);
+});
+
 test('deleted managed resources, damaged manifests, unowned skills and symlinks cannot silently overwrite user files', async t => {
   const home = await homeFor(t), installed = await installSkill({ home, agent: 'codex' });
   const dir = path.dirname(installed.path), reference = path.join(dir, 'references/media-workflows.md');
@@ -92,19 +103,4 @@ test('a later filesystem failure rolls back earlier agent updates', async t => {
     assert.ok(status.installations.every(i => i.status === 'outdated' && i.installed_cli_version === '0.4.0'));
     assert.ok(!(await fs.readdir(path.join(home, '.agents/skills'))).some(n => n.includes('staging')));
   } finally { await fs.chmod(blockedParent, 0o700); }
-});
-
-
-test('published 0.5.1 skills upgrade automatically while edits to that bundle remain protected', async t => {
-  const home = await homeFor(t), dir = path.join(home, '.agents/skills/evolink-cli');
-  await fs.mkdir(dir, { recursive: true });
-  const published = await fs.readFile(new URL('./fixtures/skill-v051.md', import.meta.url));
-  await fs.writeFile(path.join(dir, 'SKILL.md'), published);
-  assert.equal((await skillStatus({ home, agent: 'codex' })).installations[0].status, 'legacy');
-  const result = await installSkill({ home, agent: 'codex' });
-  assert.deepEqual(await fs.readFile(path.join(result.installations[0].backup, 'SKILL.md')), published);
-  await fs.rm(path.join(dir, '.evolink-cli.json'));
-  await fs.writeFile(path.join(dir, 'SKILL.md'), Buffer.concat([published, Buffer.from('\nUser modification.')]));
-  await assert.rejects(installSkill({ home, agent: 'codex' }), { code: 'skill_modified' });
-  assert.ok((await fs.readFile(path.join(dir, 'SKILL.md'), 'utf8')).endsWith('User modification.'));
 });

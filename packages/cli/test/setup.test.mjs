@@ -37,8 +37,8 @@ test('SDK OAuth and MCP setup reuses a verified login and concurrent setup creat
   const { f, home, options, progress, vault } = await context(t);
   const results = await Promise.all([setup(options), setup(options)]);
   assert.ok(results.every(r => r.ok && r.setup_complete && r.connection_verified && r.model_discovery_verified));
-  assert.equal(results[0].steps.find(s => s.name === 'login').reused, false);
-  assert.equal(results[1].steps.find(s => s.name === 'login').reused, true);
+  // Filesystem acquisition order is not guaranteed across operating systems.
+  assert.deepEqual(results.map(result => result.steps.find(s => s.name === 'login').reused).sort(), [false, true]);
   assert.equal(f.clients.length, 1); assert.equal(f.paid.size, 0);
   assert.equal(results[0].assistant_discovery, 'not_checked');
   assert.equal((await skillStatus({ home, agent: 'codex' })).current, true);

@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { spawn } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { State } from '../src/state.mjs';
 
 const moduleURL = new URL('../src/state.mjs', import.meta.url).href;
@@ -31,7 +31,8 @@ test('crashed owners and crashed recovery guards do not block the next command',
   child.kill('SIGKILL'); await exit;
   const guard = path.join(home, 'locks/shared.recovery');
   await fs.mkdir(guard);
-  await fs.writeFile(path.join(guard, `${randomUUID()}.owner.json`), JSON.stringify({ pid: child.pid, hostname: os.hostname() }));
+  const hostID = createHash('sha256').update(os.hostname()).digest('hex').slice(0, 16);
+  await fs.writeFile(path.join(guard, `${hostID}.${child.pid}.${randomUUID()}`), '');
   assert.equal(await new State(home).lock('shared', async () => 'recovered'), 'recovered');
   await assert.rejects(fs.stat(path.join(home, 'locks/shared')), { code: 'ENOENT' });
 });

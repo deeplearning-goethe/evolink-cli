@@ -42,9 +42,9 @@ The skill is bundled with the package. By default it installs into `~/.agents/sk
 
 After upgrading the npm package, run `evolink skills install` again to refresh the installed skill copies, then verify that the assistant discovers the updated skill. Open a new conversation only if discovery does not refresh. Fix reusable guidance in `skills/evolink-cli/SKILL.md` in this package; editing only a local installed copy will not distribute the fix.
 
-## Setup and skill updates (development candidate)
+## Setup and skill updates
 
-These additions are a development candidate, not part of the published npm 0.5.1. After release, use the selected assistant's name:
+Starting with CLI 0.6.0, use the selected assistant's name:
 
 ```sh
 evolink setup --agent codex --json
@@ -58,7 +58,7 @@ CLI checks cannot prove that the assistant has loaded a skill. A successful resu
 
 `auth login` and `setup` accept `--timeout SECONDS` (30–900, default 180). Keep the login process running until it reports completion. If it times out or is interrupted, start a new login and open the new link. The local callback page acknowledges receipt and returns you to the assistant for verification; it does not claim the account connection was verified. Repeated callbacks are refused and the browser page clears the authorization query from its visible URL.
 
-The installer copies SKILL.md and its bundled references, records their hashes and CLI version, and skips identical installations. `skills status` distinguishes missing, current, outdated, legacy, unmanaged, modified and conflicting installations. The unmodified published 0.5.0 and 0.5.1 skills migrates automatically. Local changes are preserved by default. Only after choosing to replace those changes, run:
+The installer copies SKILL.md and its bundled references, records their hashes and CLI version, and skips identical installations. `skills status` distinguishes missing, current, outdated, legacy, unmanaged, modified and conflicting installations. The unmodified published 0.5.0 or 0.5.1 skill migrates automatically. Local changes are preserved by default. Only after choosing to replace those changes, run:
 
 ```sh
 evolink skills install --agent codex --replace-modified --json
@@ -122,7 +122,7 @@ Login uses a native public OAuth client, PKCE, a loopback callback and `mcp offl
 
 Tokens are stored only in the OS credential store. Linux requires a running Secret Service keyring; the CLI does not silently fall back to an in-memory kernel store or plaintext credential files. A one-command OAuth access token can be passed through stdin with `--token-stdin`, never as a command argument. `auth logout` revokes this session and preserves the account's shared MCP key.
 
-Run `evolink doctor --json` to check Node.js, writable local state, credential storage, saved login and balance connectivity. It reports failed and skipped checks together and exits nonzero until the connection is verified. On Linux, run login and later commands in the same unlocked Secret Service/D-Bus session. A keyring package alone does not start or unlock that session.
+Run `evolink doctor --json` to check Node.js, writable local state, credential storage, saved login, balance connectivity and model discovery. Add `--agent NAME` to check installed skills. It reports failed and skipped checks together and exits nonzero until the connection is verified. On Linux, run login and later commands in the same unlocked Secret Service/D-Bus session. A keyring package alone does not start or unlock that session.
 
 On an SSH host, the OAuth loopback callback belongs to the host running the CLI. If you open the link on your own computer, forward its callback port: run `evolink auth login --no-browser` remotely, read the `127.0.0.1:PORT` in the printed link's `redirect_uri`, then use a second local terminal with `ssh -N -L PORT:127.0.0.1:PORT USER@HOST` before opening that link. Keep both commands alive until approval finishes (the login waits up to three minutes). Otherwise run the CLI locally. `--no-browser` prints a link but does not forward it. Device-code login is not provided.
 
@@ -135,7 +135,6 @@ All machine-readable commands accept `--json`. Stdout contains one envelope with
 Run installation and tests on the test cloud host, not the development Mac. In this package directory: `npm ci`, `npm test`, `npm run test:mutations`, and `npm pack`. Tests use loopback fixtures and never spend production credits. Real paid acceptance requires a separate quote and user approval.
 
 Development starts in `deeplearning-goethe/evolink-cli`. After acceptance, repository management will arrange migration to `Evolink-AI/evolink-cli`. Keep package/bin names and service identity stable; update repository metadata, publishing permissions and installation links during migration.
-
 
 ## Host permission compatibility
 

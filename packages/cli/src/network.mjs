@@ -4,6 +4,7 @@ import dns from 'node:dns/promises';
 import https from 'node:https';
 import { Readable } from 'node:stream';
 import { CliError, requireThat } from './errors.mjs';
+import { CLI_VERSION } from './version.mjs';
 
 export const SERVER = 'https://mcp.evolink.ai/mcp';
 export const ISSUER = 'https://passport.evolink.ai';

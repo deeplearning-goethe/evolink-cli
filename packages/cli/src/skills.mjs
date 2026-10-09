@@ -13,8 +13,10 @@ const AGENT_DIRS = {
   openclaw: '.openclaw', hermes: '.hermes',
 };
 const MANIFEST = '.evolink-cli.json';
-// Only exact published bundles migrate without explicit replacement approval.
-const LEGACY_HASHES = new Set(['bed3f5dcba1d5d07e98f21f6ab45180eaa5983b610851d2aed25274114b64982', '680faa81bab65b6324933fa24bed34f2680c88df0bbf843423b53e3d3c9b6de5']);
+const LEGACY_HASHES = new Set([
+  '680faa81bab65b6324933fa24bed34f2680c88df0bbf843423b53e3d3c9b6de5', // Published 0.5.0.
+  'bed3f5dcba1d5d07e98f21f6ab45180eaa5983b610851d2aed25274114b64982', // Published 0.5.1.
+]);
 const digest = content => createHash('sha256').update(content).digest('hex');
 const owned = content => content?.startsWith('---\nname: evolink-cli\n') && content.includes('<!-- evolink-media-cli-owned -->');
 const source = fileURLToPath(new URL('../skills/evolink-cli/', import.meta.url));

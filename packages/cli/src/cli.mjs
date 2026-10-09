@@ -73,7 +73,7 @@ Task list types: image, video, audio; omit --type to include all types.
 Task list example: evolink tasks list --status processing --json
 Run evolink tasks list --help for filter details and recovery caveats.
 After upgrading the package, run evolink skills install to refresh its skill.
-Task statuses: processing (including queued), completed, failed, cancelled.
+
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
 Quotes expire in 15 minutes. --confirm is only for an already approved quote.
