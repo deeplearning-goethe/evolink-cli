@@ -21,7 +21,7 @@ for (const [name, file, before, after] of mutants) {
   try {
     await writeFile(target, source.replace(before, after));
     // Full-response assertion diffs can exceed the subprocess default buffer.
-    const run = spawnSync(process.execPath, ['--test', 'test/pricing-rules.test.mjs'],
+    const run = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'test/pricing-rules.test.mjs'],
       { cwd: root, encoding: 'utf8', timeout: 45000, maxBuffer: 4 * 1024 * 1024 });
     const output = `${run.stdout ?? ''}\n${run.stderr ?? ''}`;
     if (run.status > 0 && !run.error && /not ok \d+/.test(output) && !/SyntaxError:|ERR_MODULE_NOT_FOUND/.test(output)) {

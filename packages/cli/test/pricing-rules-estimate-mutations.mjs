@@ -18,7 +18,7 @@ for (const [name, before, after] of mutations) {
   if (!original.includes(before)) throw new Error(`Missing target ${name}`);
   try {
     await writeFile(file, original.replace(before, after));
-    const r = spawnSync(process.execPath, ['--test', 'test/account-quote.test.mjs'], { encoding: 'utf8', timeout: 45000, maxBuffer: 4 * 1024 * 1024 });
+    const r = spawnSync(process.execPath, ['--test', '--test-reporter=tap', 'test/account-quote.test.mjs'], { encoding: 'utf8', timeout: 45000, maxBuffer: 4 * 1024 * 1024 });
     const output = `${r.stdout ?? ''}\n${r.stderr ?? ''}`;
     if (r.status > 0 && !r.error && /not ok \d+/.test(output) && !/SyntaxError:|ERR_MODULE_NOT_FOUND/.test(output)) { detected++; console.log(`DETECTED ${name}`); }
     else { console.error(`SURVIVED OR INCONCLUSIVE ${name}\n${output.slice(-2500)}`); process.exitCode = 1; }
