@@ -14,6 +14,7 @@ After loading this skill, continue the requested workflow by executing its requi
 - A user-specified budget is mandatory on **every** estimate attempt: include `--max-cost-usd` with the same amount. Removing that flag is changing the user's request, even though estimation itself is free.
 - If the host denies an estimate command by policy, **stop this task for the current turn**. Tell the user that the quote is unavailable and the estimate needs permission. Do not issue another estimate command with fewer flags, a different shell or another tool. Resume only after the host's normal permission flow permits the original request with its unchanged budget.
 - If estimation fails, there is no usable quote and no generation to approve. Catalog starting prices cannot replace a task's total. Report the failure and retain the budget; do not request generation confirmation or submit a paid task.
+- When supported, `models pricing --model MODEL --view full --json` reads public default rules without login. Current production coverage is text-only; missing media rules do not mean free. Preserve fractional UC decimal strings, minimum charges, tiers, price scope and validity. `meta.price_selection=route_priority` means a web-aligned reference; absent metadata means legacy minimum configuration prices. Public rates may differ from account prices and failover settlement. This response never replaces `estimate`, creates a quote or establishes a final spending cap.
 
 ## Connect
 

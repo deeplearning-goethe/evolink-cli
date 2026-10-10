@@ -56,6 +56,8 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
   models show MODEL              Read parameters and pricing (free)
+  models pricing [--model MODEL] [--modality TYPE] [--view summary|full]
+                                 Read public default rules; not a quote (no login)
   models schema MODEL            Read versioned input/submission schemas (free)
   models recommend --type TYPE [--query TEXT] [--references image,video,audio]
   docs search --query TEXT        Search official model reference excerpts (free)
@@ -98,7 +100,7 @@ Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
 
-const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
+const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle', 'input', 'input-file', 'prompt', 'media-seconds',
   'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
 for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
@@ -115,6 +117,7 @@ export function validateCommand(args, options) {
     setup: [1, 'agent', 'no-browser', 'timeout'],
     'auth login': [2, 'no-browser', 'timeout'], 'auth status': [2], 'auth logout': [2], balance: [1],
     'models search': [2, 'query', 'type', 'limit', 'page'], 'models show': [3], 'models schema': [3],
+    'models pricing': [2, 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle'],
     'models recommend': [2, 'type', 'query', 'references', 'limit'], 'docs search': [2, 'query', 'type', 'limit'],
     usage: [1, 'since', 'until', 'type', 'model', 'max-pages'],
     estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd'],
@@ -195,6 +198,14 @@ export async function dispatch(positionals, options, { state, server, credential
   }
   if (command === 'balance') return client.call('check_balance');
   if (command === 'models') {
+    if (action === 'pricing') return client.call('get_pricing_rules', {
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.modality !== undefined ? { modality: options.modality } : {}),
+      ...(options.view !== undefined ? { view: options.view } : {}),
+      ...(options['product-id'] !== undefined ? { product_id: options['product-id'] } : {}),
+      ...(options.operation !== undefined ? { operation: options.operation } : {}),
+      ...(options.lifecycle !== undefined ? { lifecycle: options.lifecycle } : {}),
+    }, { requireCapability: true });
     if (action === 'show' && id) return client.call('get_model', { model: id });
     if (action === 'schema' && id) {
       const model = await client.call('get_model', { model: id });

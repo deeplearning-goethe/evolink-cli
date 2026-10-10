@@ -6,6 +6,7 @@ import { registerCheckBalance } from './tools/check-balance.js';
 import { registerEstimateCost } from './tools/estimate-cost.js';
 import { registerGenerateTools } from './tools/generate.js';
 import { registerGetModel } from './tools/get-model.js';
+import { registerPricingRules } from './tools/get-pricing-rules.js';
 import { registerGetTask } from './tools/get-task.js';
 import { registerListTasks } from './tools/list-tasks.js';
 import { registerSearchModels } from './tools/search-models.js';
@@ -13,6 +14,7 @@ export function registerPlatformOperations(registry, config) {
     registerSearchModels(registry, config);
     registerDiscovery(registry, config);
     registerGetModel(registry, config);
+    registerPricingRules(registry);
     registerEstimateCost(registry, config);
     registerGenerateTools(registry, config);
     registerGetTask(registry, config);
