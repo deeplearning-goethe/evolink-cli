@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['error-refusal-evidence', 'src/media.mjs', "&& ['not_submitted', 'rejected'].includes(e.details?.submission_state)", "&& true"],
+
   ['rest-capability', 'src/api.mjs', 'if (requireCapability)', 'if (false)'],
   ['rest-strict-input', 'src/platform/core/src/platform-client.js', 'z.object(definition.inputSchema).strict()', 'z.object(definition.inputSchema)'],
   ['rest-origin', 'src/api.mjs', 'origins.has(url.origin)', 'true'],
@@ -78,6 +80,7 @@ for (const [name, file, before, after] of selected) {
     await fs.writeFile(target, source.replace(before, after));
     const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
+      : name === 'error-refusal-evidence' ? ['media.test.mjs']
       : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']

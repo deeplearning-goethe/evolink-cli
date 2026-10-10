@@ -101,6 +101,20 @@ evolink uploads get UPLOAD_ID --json
 evolink download TASK_ID --output /absolute/result.mp4 --index 1 --json
 ```
 
+Uploads save a stable request ID before sending bytes. On connection loss, keep
+that ID and run `evolink uploads get UPLOAD_ID --json`. With a compatible file
+service this reads an account-owned receipt retained for up to 72 hours; it never
+repeats the upload. Older services return an unknown outcome rather than a false
+failure. Logout revokes future use of the scoped upload grant; an upload already
+accepted before logout may still finish. Recovery retains the original login
+binding and never copies OAuth credentials into MCP settings.
+
+Passport can advertise `evolink_cli_mcp_supported: true`. New browser grants then
+use the public official `evolink-cli` identity with PKCE, `mcp offline_access`, and
+the configured MCP resource. Existing dynamic-client sessions refresh with their
+original client ID. Earlier Passport deployments continue to use dynamic
+registration. This does not change shared CLI/MCP account-Key limits or permissions.
+
 Task-list filters are case-sensitive:
 
 | Option | Allowed values | When omitted |
@@ -204,3 +218,8 @@ Run `gemini mcp list` from the intended project directory. If EvoLink is `Disabl
 Headless mode exposes only tools permitted by its policy. In Gemini CLI 0.63.0, a scoped MCP rule uses `mcpName`, not `serverName`; allow only the tools needed for the chosen workflow. For example, a quote-only policy can allow `search_models`, `get_model`, `estimate_cost`, `check_balance` and `get_task` on `evolink`. Generation still requires the user's quote approval and the host's normal tool permission. Do not silently add a generation allow rule or treat a successful process exit without EvoLink tool calls as acceptance.
 
 See [Gemini trusted folders](https://geminicli.com/docs/cli/trusted-folders/) and [Gemini MCP configuration and OAuth](https://geminicli.com/docs/tools/mcp-server/). A cloud terminal test does not prove desktop inline previews, browser handoff on another machine or permission defaults in every host.
+
+
+Generation errors preserve the saved quote and request ID when acceptance or charging is uncertain. `charged: no` alone does not authorize a new request: `submission_state` must also establish `not_submitted` or `rejected`. Recover uncertain submissions with the original quote, and query a known task. A new generation needs a fresh estimate and user approval.
+
+A failed/cancelled task does not establish a refund. `tasks get` can successfully return that task, while `tasks wait` exits nonzero with the same task and billing details. `billing.refund_status` reports account-balance evidence: `unknown`, `pending`, `failed`, `completed`, or `not_required`. A completed refund includes recorded credits and time; key-limit restoration remains unknown. Old gateways without billing fields retain unknown status, rather than claiming zero charge or a completed refund.

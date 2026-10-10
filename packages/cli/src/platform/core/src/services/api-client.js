@@ -3,19 +3,21 @@
 import { gatewayAuthHeaders } from '../config.js';
 import { currentRequestCredentials } from '../request-context.js';
 import { classifyGatewayError, formatGatewayError } from './error-handler.js';
-import { DEFAULT_READ_TIMEOUT_MS, DEFAULT_SUBMIT_TIMEOUT_MS, MAX_RETRY_DELAY_MS, PaidRequestOutcomeUnknownError, RequestTimeoutError, evoHeaders, fetchWithTimeout, newRunId, parseRetryAfter, readJsonBody, responseRequestId, timeoutFromEnv, } from './http-policy.js';
+import { DEFAULT_READ_TIMEOUT_MS, DEFAULT_SUBMIT_TIMEOUT_MS, MAX_RETRY_DELAY_MS, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError, evoHeaders, fetchWithTimeout, newRunId, parseRetryAfter, readJsonBody, responseRequestId, timeoutFromEnv, } from './http-policy.js';
 // --- Error class for HTTP-level failures ---
 export class ApiHttpError extends Error {
     status;
     retryAfterMs;
     requestId;
     info;
-    constructor(status, message, retryAfterMs, requestId, info) {
+    submissionState;
+    constructor(status, message, retryAfterMs, requestId, info, submissionState) {
         super(message);
         this.status = status;
         this.retryAfterMs = retryAfterMs;
         this.requestId = requestId;
         this.info = info;
+        this.submissionState = submissionState;
         this.name = 'ApiHttpError';
     }
 }
@@ -63,40 +65,65 @@ export async function withRetry(fn, retries, baseDelayMs) {
 }
 // --- Core request (no retry) ---
 async function rawRequest(config, options) {
-    const url = `${config.baseUrl}${options.path}`;
-    const headers = {
-        ...gatewayAuthHeaders(),
-        'Accept': 'application/json',
-        ...evoHeaders(options.tool ?? 'unknown'),
-    };
-    if (options.body)
-        headers['Content-Type'] = 'application/json';
-    if (options.idempotencyKey) {
-        headers['Idempotency-Key'] = options.idempotencyKey;
-        headers['X-Evo-Run-Id'] = options.idempotencyKey;
-    }
-    const isRead = options.method === 'GET' || !options.idempotencyKey;
-    let response;
+    const isPaid = options.method === 'POST' && !!options.idempotencyKey;
+    let headers;
+    let body;
+    let timeout;
     try {
-        response = await fetchWithTimeout(url, {
-            method: options.method,
-            headers,
-            body: options.body ? JSON.stringify(options.body) : undefined,
-        }, options.timeoutMs ?? timeoutFromEnv(isRead ? 'EVOLINK_MCP_READ_TIMEOUT_MS' : 'EVOLINK_MCP_WRITE_TIMEOUT_MS', isRead ? DEFAULT_READ_TIMEOUT_MS : DEFAULT_SUBMIT_TIMEOUT_MS));
+        headers = { ...gatewayAuthHeaders(), Accept: 'application/json', ...evoHeaders(options.tool ?? 'unknown') };
+        if (options.body)
+            headers['Content-Type'] = 'application/json';
+        if (options.idempotencyKey) {
+            headers['Idempotency-Key'] = options.idempotencyKey;
+            headers['X-Evo-Run-Id'] = options.idempotencyKey;
+        }
+        body = options.body ? JSON.stringify(options.body) : undefined;
+        timeout = options.timeoutMs ?? timeoutFromEnv(isPaid ? 'EVOLINK_MCP_WRITE_TIMEOUT_MS' : 'EVOLINK_MCP_READ_TIMEOUT_MS', isPaid ? DEFAULT_SUBMIT_TIMEOUT_MS : DEFAULT_READ_TIMEOUT_MS);
     }
     catch (error) {
-        if (!isRead)
-            throw new PaidRequestOutcomeUnknownError(error, options.idempotencyKey);
+        if (isPaid)
+            throw new SubmissionNotStartedError(error);
         throw error;
     }
-    const data = await readJsonBody(response);
-    const requestId = responseRequestId(response.headers);
-    if (!response.ok) {
-        const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
-        const info = classifyGatewayError(response.status, data, retryAfterMs, requestId);
-        throw new ApiHttpError(response.status, formatGatewayError(info), retryAfterMs, info.request_id, info);
+    // Reading and verifying the body belong to the submission boundary too.
+    try {
+        const started = Date.now();
+        const response = await fetchWithTimeout(`${config.baseUrl}${options.path}`, {
+            method: options.method, headers, body,
+        }, timeout);
+        const data = await readJsonBody(response, Math.max(1, timeout - (Date.now() - started)));
+        const requestId = responseRequestId(response.headers);
+        if (!response.ok) {
+            const retryAfterMs = parseRetryAfter(response.headers.get('retry-after'));
+            const info = classifyGatewayError(response.status, data, retryAfterMs, requestId);
+            throw new ApiHttpError(response.status, formatGatewayError(info), retryAfterMs, info.request_id, info, isPaid ? (verifiedPrechargeRejection(response.status, info.code) ? 'rejected' : 'outcome_unknown') : undefined);
+        }
+        if (isPaid && (!data || typeof data !== 'object' || Array.isArray(data)
+            || typeof data.id !== 'string'
+            || !/^[A-Za-z0-9._:-]{1,128}$/.test(data.id))) {
+            throw new PaidRequestOutcomeUnknownError(new Error('Unverified submission response'), options.idempotencyKey);
+        }
+        return { data: data, requestId, headers: response.headers };
     }
-    return { data: data, requestId, headers: response.headers };
+    catch (error) {
+        if (isPaid && !(error instanceof ApiHttpError) && !(error instanceof PaidRequestOutcomeUnknownError)) {
+            throw new PaidRequestOutcomeUnknownError(error, options.idempotencyKey);
+        }
+        throw error;
+    }
+}
+/** These codes are emitted by gateway admission checks before dispatch, not inferred from an HTTP status. */
+function verifiedPrechargeRejection(status, code) {
+    if (status < 400 || !code)
+        return false;
+    return new Set([
+        'insufficient_quota', 'insufficient_user_quota', 'quota_not_enough', 'account_balance_insufficient',
+        'insufficient_token_quota', 'key_quota_exhausted', 'token_daily_quota_exceeded', 'key_daily_quota_exhausted',
+        'key_disabled', 'key_expired', 'key_model_not_allowed', 'mcp_paused', 'mcp_key_expired',
+        'connection_not_found', 'connection_revoked', 'session_inactive', 'session_expired', 'mcp_scope_missing',
+        'mcp_service_unauthorized', 'mcp_connection_required', 'mcp_route_not_allowed', 'mcp_token_invalid', 'user_disabled',
+        'agent_session_unavailable', 'mcp_connection_create_failed', 'mcp_channel_disabled',
+    ]).has(code.toLowerCase());
 }
 /**
  * Submit one paid intent. At most one transport retry, always with the same

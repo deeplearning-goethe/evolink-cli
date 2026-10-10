@@ -1,3 +1,4 @@
+import { publicIdentifier, publicText } from './platform/core/src/services/public-error.js';
 export class CliError extends Error {
   constructor(code, message, details, exitCode = 1) {
     super(message);
@@ -34,12 +35,7 @@ export async function localFile(action, context) {
 }
 
 export function safeMessage(message) {
-  return String(message)
-    .replace(/Bearer\s+\S+/gi, 'Bearer [redacted]')
-    .replace(/\b(?:sk-|evup_)[a-zA-Z0-9_-]+/g, '[redacted]')
-    .replace(/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[redacted]')
-    .replace(/([?&](?:token|access_token|refresh_token|api_key|key|client_secret|code|code_verifier)=)[^\s&#"'<>]+/gi, '$1[redacted]')
-    .slice(0, 2000);
+  return publicText(String(message));
 }
 
 export function errorView(error) {
@@ -50,11 +46,23 @@ export function errorView(error) {
   return { code: error.code, message: safeMessage(error.message), ...(error.details ? { details: safeDetails(error.details) } : {}) };
 }
 
-function safeDetails(value) {
-  if (typeof value === 'string') return safeMessage(value);
-  if (Array.isArray(value)) return value.map(safeDetails);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value)
-    .filter(([key]) => !key.startsWith('_') && !/^(access_token|refresh_token|client_secret|code_verifier|authorization|upload_url|api_key|apiKey|x-api-key|x-goog-api-key|token|secret|password)$/i.test(key))
-    .map(([key, nested]) => [key, safeDetails(nested)]));
-  return value;
+function safeDetails(value, depth = 0, seen = new WeakSet(), key = '') {
+  if (depth > 8) return '[truncated]';
+  if (typeof value === 'string') {
+    if (['client_request_id', 'task_id', 'quote_id', 'request_id'].includes(key)) return publicIdentifier(value);
+    // Preserve original media links in a failed task with partial results; they are delivery data.
+    if (['url', 'uri', 'image_url', 'video_url', 'audio_url'].includes(key)) {
+      try { const url = new URL(value); if (['https:', 'http:'].includes(url.protocol) && !url.username && !url.password) return value; } catch {}
+    }
+    return safeMessage(value);
+  }
+  if (value && typeof value === 'object') {
+    if (seen.has(value)) return '[truncated]';
+    seen.add(value);
+    if (Array.isArray(value)) return value.slice(0, 100).map(v => safeDetails(v, depth + 1, seen, key));
+    return Object.fromEntries(Object.entries(value).slice(0, 100)
+      .filter(([k]) => !k.startsWith('_') && !/^(access_token|refresh_token|client_secret|code_verifier|authorization|upload_url|api_key|apiKey|x-api-key|x-goog-api-key|token|secret|password)$/i.test(k))
+      .map(([k, v]) => [safeMessage(k), safeDetails(v, depth + 1, seen, k)]));
+  }
+  return typeof value === 'number' && !Number.isFinite(value) ? undefined : value;
 }

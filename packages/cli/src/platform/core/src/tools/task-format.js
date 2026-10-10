@@ -1,7 +1,9 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { queryTask } from '../services/api-client.js';
-import { getTaskErrorInfo } from '../services/error-handler.js';
+import { publicIdentifier } from '../services/public-error.js';
+import { publicTaskError } from '../services/error-handler.js';
+import { taskBilling } from './task-billing.js';
 import { money, sleep, usdOf } from './shared.js';
 /** Result links from the gateway stay downloadable for this long. */
 export const RESULT_LINK_HOURS = 24;
@@ -150,6 +152,7 @@ export function describeTask(task) {
         progress: task.progress ?? 0,
         model: task.model,
         type: task.type,
+        billing: taskBilling(task),
     };
     const outputs = taskOutputs(task);
     if (outputs.length) {
@@ -180,14 +183,29 @@ export function describeTask(task) {
         structured.took_seconds = task.duration;
     }
     if (status === 'failed' || status === 'cancelled') {
-        const code = task.error?.code ?? (status === 'cancelled' ? 'request_cancelled' : 'unknown_error');
-        const info = getTaskErrorInfo(code);
-        const suggestion = task.error?.suggestion ? `${info.suggestion} ${task.error.suggestion}` : info.suggestion;
-        lines.push(`Error: ${code}${task.error?.message ? ` — ${task.error.message}` : ''}`);
-        lines.push('Charge: failed tasks are refunded.');
-        lines.push(`Next step: ${info.retryable ? 'You can retry with a new generate call.' : 'Change the input before retrying.'} ${suggestion}`);
-        structured.error = { code, message: task.error?.message, retryable: info.retryable, suggestion };
-        structured.refunded = true;
+        const info = publicTaskError(task.error ?? { code: status === 'cancelled' ? 'request_cancelled' : 'unknown_error' });
+        const billing = taskBilling(task);
+        structured.billing = billing;
+        lines.push(`Error: ${info.code} — ${info.message}`);
+        if (billing.refund_status === 'completed') {
+            lines.push(`Account balance refund completed: ${money(billing.refunded_credits)}. Key limit restoration is unknown.`);
+            structured.refunded = true;
+        }
+        else if (billing.refund_status === 'pending') {
+            lines.push('Account balance refund is pending; it has not been confirmed.');
+        }
+        else if (billing.refund_status === 'failed') {
+            lines.push('Account balance refund processing failed; completion has not been confirmed. Contact EvoLink support with this task ID.');
+        }
+        else if (billing.refund_status === 'not_required') {
+            lines.push('The billing record reports no account balance refund required. Check the recorded charge before requesting another generation.');
+        }
+        else {
+            lines.push('Charge and refund completion cannot be verified from the available billing evidence. Query this task again or contact EvoLink support.');
+        }
+        const next = `${info.suggestion} Query get_task again to verify billing. Do not generate again automatically. Another generation is a separately paid task: obtain a fresh estimate and explicit user approval first.`;
+        lines.push(`Next step: ${next}`);
+        structured.error = { ...info, suggestion: next };
     }
     else if (status === 'completed') {
         if (links.length > 0) {
@@ -207,9 +225,10 @@ export function describeTask(task) {
         }
         lines.push(`Next step: call get_task with task_id "${task.id}" again (it can wait up to 45 s). Do not call generate again to check progress: that starts and charges a new task.`);
     }
-    if (task.request_id) {
-        lines.push(`Request ID: ${task.request_id}`);
-        structured.request_id = task.request_id;
+    const requestId = publicIdentifier(task.request_id);
+    if (requestId) {
+        lines.push(`Request ID: ${requestId}`);
+        structured.request_id = requestId;
     }
     return { lines, structured, resources: resultResources(task.id, links) };
 }

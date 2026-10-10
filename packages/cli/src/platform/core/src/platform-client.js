@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { registerPlatformOperations } from './platform-operations.js';
 import { runWithRequestCredentials } from './request-context.js';
 import { requestUploadToken } from './services/api-client.js';
-import { fileStreamUploadFrom } from './services/file-client.js';
+import { fileStreamUploadFrom, fileUploadReceipt } from './services/file-client.js';
 import { errorResult, failure } from './tools/shared.js';
 /** Local execution of the shared operations. Network traffic is REST only. */
 export class PlatformClient {
@@ -40,11 +40,17 @@ export class PlatformClient {
             }
         });
     }
-    async upload(source, size, mime, name, credentials, uploadPath) {
+    async upload(source, size, mime, name, credentials, uploadPath, uploadId) {
         return runWithRequestCredentials(credentials, async () => {
             const token = await requestUploadToken(this.config, 'upload_file');
-            return fileStreamUploadFrom(source, size, mime, name, { uploadPath, auth: { bearer: token.token },
+            return fileStreamUploadFrom(source, size, mime, name, { uploadPath, uploadId, auth: { bearer: token.token },
                 signal: credentials.http?.signal, timeoutMs: 900_000 });
+        });
+    }
+    async uploadReceipt(id, credentials) {
+        return runWithRequestCredentials(credentials, async () => {
+            const token = await requestUploadToken(this.config, 'get_upload');
+            return fileUploadReceipt(id, { bearer: token.token });
         });
     }
 }

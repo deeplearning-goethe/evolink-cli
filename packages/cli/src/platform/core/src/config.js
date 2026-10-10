@@ -5,6 +5,9 @@ import { currentRequestCredentials, processCredentialsAllowed } from './request-
 import { API_KEYS_URL } from './services/http-policy.js';
 import { trackedLink } from './services/utm.js';
 import { MCP_VERSION } from './version.js';
+export class CredentialError extends Error {
+    constructor(message) { super(message); this.name = 'CredentialError'; }
+}
 const BASE_URLS = {
     official: 'https://api.evolink.ai',
     beta: 'https://beta-api.evolink.ai',
@@ -62,17 +65,17 @@ export function getApiKey() {
     if (scoped) {
         if (scoped.apiKey)
             return scoped.apiKey;
-        throw new Error(scoped.unavailableReason ?? 'No EvoLink credential is available for this request.');
+        throw new CredentialError(scoped.unavailableReason ?? 'No EvoLink credential is available for this request.');
     }
     if (!processCredentialsAllowed()) {
-        throw new Error('No EvoLink credential is available for this request.');
+        throw new CredentialError('No EvoLink credential is available for this request.');
     }
     const configured = process.env.EVOLINK_API_KEY?.trim();
     if (configured)
         return configured;
     const helper = process.env.EVOLINK_CREDENTIAL_HELPER?.trim() || 'evolink';
     if (helper.includes('\0'))
-        throw new Error('EVOLINK_CREDENTIAL_HELPER is invalid');
+        throw new CredentialError('EVOLINK_CREDENTIAL_HELPER is invalid');
     try {
         const key = execFileSync(helper, ['credential', 'get'], {
             encoding: 'utf8',
@@ -86,7 +89,7 @@ export function getApiKey() {
     catch {
         // Return one stable recovery message without echoing helper stderr or key material.
     }
-    throw new Error(`No EvoLink API key is available. Set EVOLINK_API_KEY to a key from ${trackedLink(API_KEYS_URL, 'api_keys')}, ` +
+    throw new CredentialError(`No EvoLink API key is available. Set EVOLINK_API_KEY to a key from ${trackedLink(API_KEYS_URL, 'api_keys')}, ` +
         'or set EVOLINK_CREDENTIAL_HELPER to an API-key helper that implements `credential get`. ' +
         'The browser-login @evolinkai/cli does not export API keys; use its own `evolink auth login` workflow or hosted MCP for OAuth.');
 }

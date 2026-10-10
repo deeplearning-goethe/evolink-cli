@@ -60,6 +60,12 @@ export async function restFixture(state, req, res, url, body, send) {
     else send(200, raw(state.tasks.get(id))); return true;
   }
   if (url.pathname === '/v1/files/upload-token') { send(200, { upload_token: 'evup_fixture-short-lived', expires_at: Math.floor(Date.now() / 1000) + 60 }); return true; }
+  if (url.pathname.startsWith('/api/v1/files/upload-receipts/')) {
+    const id = url.pathname.split('/').at(-1), file = state.uploadReceipts?.get(id);
+    if (state.receiptFailure) { send(503, {}); return true; }
+    if (!file) { send(404, {}); return true; }
+    send(200, { success: true, data: { upload_id: id, state: 'done', result_verified: true, file } }); return true;
+  }
   if (url.pathname === '/api/v1/files/upload/stream') {
     if (req.headers.authorization !== 'Bearer evup_fixture-short-lived') { send(403, {}); return true; }
     state.uploadHeaders.push(req.headers);
@@ -67,6 +73,11 @@ export async function restFixture(state, req, res, url, body, send) {
     const start = body.indexOf(Buffer.from('\r\n\r\n')) + 4;
     const end = body.indexOf(Buffer.from(`\r\n--${boundary}`), start);
     state.uploadedBytes = body.subarray(start, end);
+    if (state.receiptSupport) {
+      state.uploadReceipts ??= new Map();
+      state.uploadReceipts.set(req.headers['x-evo-upload-id'], { file_id: 'fixture-file', file_name: 'reference.png',
+        file_size: state.uploadedBytes.length, mime_type: 'image/png', file_url: `${state.origin}/assets/reference.png`, expires_at: new Date(Date.now() + 86400000).toISOString() });
+    }
     if (state.loseRestUploadReply) { req.socket.destroy(); return true; }
     send(200, { success: true, data: { file_id: 'fixture-file', file_name: 'reference.png', file_size: state.uploadedBytes.length,
       mime_type: 'image/png', file_url: `${state.origin}/assets/reference.png`, expires_at: new Date(Date.now() + 86400000).toISOString() } }); return true;
