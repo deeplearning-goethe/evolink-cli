@@ -191,7 +191,9 @@ export function accountCostEstimate(quote) {
     return { status: 'estimated', min_usd: Number(quote.amount), max_usd: Number(quote.amount),
         min_credits: Number(quote.amounts.credits), max_credits: Number(quote.amounts.credits),
         basis: ['Authenticated account Quote using the published policy.'], possible_extras: [],
-        notes: ['This quote does not reserve quota or guarantee the final charge. Actual usage may differ.'] };
+        notes: [quote.settlement_basis === 'request_only'
+                ? 'Estimated for the requested settings; the task reports the final charge when it finishes.'
+                : 'Final cost depends on actual billed usage and may differ from this estimate.'] };
 }
 export function checkApprovedAccountQuote(approval, model, input, mediaSeconds, pricingParameters, cap) {
     const quote = validateAccountQuote(approval.quote, { model_id: model.toLowerCase(), operation: approval.quote.operation });

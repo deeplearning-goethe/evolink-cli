@@ -11,6 +11,10 @@ const mutations = [
   ['refresh-budget-retained', 'src/media.mjs', 'this.estimate(args)', 'this.estimate({ ...args, max_cost_usd: undefined })'],
   ['refresh-account-before-submit', 'src/media.mjs', 'quote.backend_estimate_id = fresh.account_quote.quote.estimate_id', 'quote.backend_estimate_id = quote.backend_estimate_id'],
   ['quote-options-not-generated', 'src/media.mjs', '...generationArgs, client_request_id:', '...quote.args, client_request_id:'],
+  ['no-automatic-saved-cap', 'src/media.mjs', '...(max_cost_usd !== undefined ? { max_cost_usd } : {})', '...{ max_cost_usd: max_cost_usd ?? quote.estimate.max_usd }'],
+  ['no-automatic-displayed-cap', 'src/media.mjs', "...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {})", "...{ max_cost_usd: max_cost_usd ?? quote.estimate.max_usd, cap_source: 'quote' }"],
+  ['explicit-budget-saved', 'src/media.mjs', '...(max_cost_usd !== undefined ? { max_cost_usd } : {})', '...{}'],
+  ['explicit-budget-precision', 'src/media.mjs', 'compareDecimal(quote.account_quote.quote.amount, String(cap)) <= 0', 'true'],
 ];
 let detected = 0;
 for (const [name, file, before, after] of mutations) {

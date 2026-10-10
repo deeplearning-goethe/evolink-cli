@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Api } from '../src/api.mjs';
 import { Credentials } from '../src/auth.mjs';
-import { Media, priceFingerprint } from '../src/media.mjs';
+import { Media, priceFingerprint, checkEstimate } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 import { dispatch, validateCommand } from '../src/cli.mjs';
 import { fixture, MemoryVault } from './fixture.mjs';
@@ -84,4 +84,47 @@ test('quote approval compares account pricing and inputs but ignores new estimat
   assert.equal(priceFingerprint(q), priceFingerprint({ ...q, account_quote: { ...q.account_quote, quote: { ...q.account_quote.quote, estimate_id: 'new', expires_at: 'new' } } }));
   for (const changed of [{ policy_checksum: 'b' }, { amount: '0.03' }]) assert.notEqual(priceFingerprint(q), priceFingerprint({ ...q, account_quote: { ...q.account_quote, quote: { ...q.account_quote.quote, ...changed } } }));
   assert.doesNotThrow(() => validateCommand(['estimate'], { 'refresh-quote': 'saved' }));
+});
+
+test('seed 20261010: media estimates create no automatic cap and preserve only explicit budgets', async t => {
+  const { f, state, media } = await context(t);
+  let seed = 20261010, cases = 0;
+  for (const kind of ['image', 'video', 'audio']) for (let i = 0; i < 3; i++) for (const budget of [undefined, 0.5]) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const input = { prompt: `estimate-${seed}`, ...(kind === 'image' ? { n: seed % 3 + 1 } : {}) };
+    const q = await media.estimate({ model: `fixture-${kind}`, input, ...(budget !== undefined ? { max_cost_usd: budget } : {}) });
+    assert.equal(q.estimate.max_usd, 0.02 * (input.n || 1));
+    assert.equal(Object.hasOwn(q, 'max_cost_usd'), budget !== undefined);
+    assert.equal(Object.hasOwn(q, 'cap_source'), budget !== undefined);
+    assert.equal(q.max_cost_usd, budget);
+    const saved = await state.read('quotes', q.quote_id);
+    assert.equal(Object.hasOwn(saved.args, 'max_cost_usd'), budget !== undefined);
+    assert.equal(saved.args.max_cost_usd, budget);
+    await assert.rejects(media.generate(kind, q.quote_id), { code: 'confirmation_required' });
+    const result = await media.generate(kind, q.quote_id, { confirmed: true });
+    assert.equal(result.final_budget_enforced, false);
+    assert.equal((await state.read('quotes', q.quote_id)).args.max_cost_usd, budget);
+    cases++;
+  }
+  assert.equal(cases, 18); assert.equal(f.paid.size, cases);
+});
+
+test('a price change still requires new approval when the user supplied no budget', async t => {
+  const { f, media, state } = await context(t);
+  const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'estimate only' } });
+  f.multiplier = 2;
+  await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }), { code: 'price_changed' });
+  assert.equal(f.paid.size, 0); assert.equal((await state.read('quotes', q.quote_id)).state, 'quoted');
+  const refreshed = await media.refresh(q.quote_id);
+  assert.equal(refreshed.estimate.max_usd, 0.04); assert.equal(Object.hasOwn(refreshed, 'max_cost_usd'), false);
+  await assert.rejects(media.generate('image', refreshed.quote_id), { code: 'confirmation_required' });
+});
+
+test('an explicit budget compares exact account decimal amounts before approval', () => {
+  const q = { input_valid: true, estimate: { status: 'estimated', min_usd: 0.02, max_usd: 0.02 },
+    account_quote: { quote: { amount: '0.0200000000000000001' } } };
+  assert.throws(() => checkEstimate(q, 0.02), { code: 'cost_exceeds_cap' });
+  q.account_quote.quote.amount = '0.02'; assert.doesNotThrow(() => checkEstimate(q, 0.02));
+  q.account_quote.quote.amount = '0.0000000100000000001'; q.estimate = { status: 'estimated', min_usd: 1e-8, max_usd: 1e-8 };
+  assert.throws(() => checkEstimate(q, 1e-8), { code: 'cost_exceeds_cap' });
 });

@@ -137,7 +137,7 @@ export function registerEstimateCost(server, config) {
                 structured.pricing_warning = catalog.pricingWarning;
             }
             if (account)
-                lines.push(`Account quote: ${account.quote.estimate_id}; valid until ${account.quote.expires_at}.`, 'This account quote does not reserve quota or enforce a final spending cap. The task reports the reserved and final amounts.');
+                lines.push(`Estimate valid until ${account.quote.expires_at}.`, 'Confirm this estimated cost before generation. The task reports the final charge when it finishes.');
             else
                 lines.push('Public reference estimate only. It is not an account quote or a final spending cap.');
             return ok(lines.join('\n'), structured);

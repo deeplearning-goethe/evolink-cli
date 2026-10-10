@@ -62,6 +62,22 @@ test('failed quote returns a blocked flow with the original cap and creates no s
   await assert.rejects(fs.stat(path.join(home, 'quotes')), { code: 'ENOENT' });
 });
 
+test('actual CLI estimate-confirm-submit flow shows the cost without an automatic cap', async t => {
+  const { f, state, cli } = await setup(t);
+  const estimate = await cli(['estimate', '--model', 'fixture-image', '--input', JSON.stringify({ prompt: 'cost confirmation' })]);
+  assert.equal(estimate.code, 0); assert.equal(estimate.view.ok, true);
+  assert.equal(estimate.view.estimate.max_usd, 0.02);
+  assert.equal(Object.hasOwn(estimate.view, 'max_cost_usd'), false); assert.equal(Object.hasOwn(estimate.view, 'cap_source'), false);
+  const id = estimate.view.quote_id;
+  assert.equal(Object.hasOwn((await state.read('quotes', id)).args, 'max_cost_usd'), false);
+  const unapproved = await cli(['generate', 'image', '--quote', id]);
+  assert.equal(unapproved.view.error.code, 'confirmation_required'); assert.equal(f.paid.size, 0);
+  const approved = await cli(['generate', 'image', '--quote', id, '--confirm']);
+  assert.equal(approved.code, 0); assert.equal(approved.view.final_budget_enforced, false); assert.equal(f.paid.size, 1);
+  const submitted = f.calls.find(call => call.name === 'generate_image');
+  assert.equal(Object.hasOwn(submitted.args, 'max_cost_usd'), false);
+});
+
 test('HTTP 200 HTML, JSON and wrong media types are refused without output or new tasks', async t => {
   const { f, home, mcp, task, cli } = await setup(t);
   const output = path.join(home, 'result.png');

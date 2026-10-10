@@ -91,7 +91,7 @@ function registerGenerate(server, config, kind) {
             client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional()
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
             max_cost_usd: z.number().positive().max(10_000).optional()
-                .describe('Optional estimate-based submission cap, not a final settlement guarantee: refuses to submit when fresh public prices are unavailable, the estimate is higher or published rules cannot cover the full request. Per-second video requests with video_urls, video_url or source_task_id cannot use this cap, even with media_seconds.'),
+                .describe('Compatibility option for a budget explicitly specified by the user. Compare the submission estimate against that budget; never derive this value from the estimate. This does not limit the final charge. Refuses when the estimate is incomplete or exceeds the budget.'),
             account_quote: ApprovedAccountQuote.optional().describe('Account quote approval returned by estimate_cost, for exactly the same input. Client-side preflight only; backend binding and final caps are not yet supported.'),
             pricing_parameters: QuoteParameters.optional().describe('The same explicit billing usage passed to estimate_cost.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),

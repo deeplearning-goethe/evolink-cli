@@ -29,7 +29,7 @@ const mutants = [
   ['daily-limit', 'src/media.mjs', 'quote.enough_daily_limit !== false', 'true'],
   ['input-validation-cap', 'src/media.mjs', 'quote.input_valid === true', 'true'],
   ['estimated-price-range', 'src/media.mjs', 'Number.isFinite(max_usd) && max_usd >= 0', 'true'],
-  ['request-id', 'src/media.mjs', 'this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: quote.client_request_id })', 'this.client.call(`generate_${kind}`, { ...quote.args, client_request_id: randomUUID() })'],
+  ['request-id', 'src/media.mjs', 'this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: quote.client_request_id })', 'this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: randomUUID() })'],
   ['journal', 'src/media.mjs', "quote.state = 'submitting';", "quote.state = 'quoted';"],
   ['never-submitted-recovery', 'src/media.mjs', "'submission_not_started'", "'submission_already_started'"],
   ['refused-recovery', 'src/media.mjs', "quote.state !== 'refused'", 'true'],

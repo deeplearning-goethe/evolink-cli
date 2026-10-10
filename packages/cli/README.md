@@ -77,7 +77,7 @@ For an idempotent installation prompt, check Node.js 22+ and `evolink --version`
 ```sh
 evolink models search --type image --query seedream --json
 evolink models show MODEL --json
-evolink estimate --model MODEL --input-file input.json --max-cost-usd 0.10 --json
+evolink estimate --model MODEL --input-file input.json --json
 # After the user approves the returned quote:
 evolink generate image --quote QUOTE_ID --confirm --json
 evolink tasks wait TASK_ID --json
@@ -86,7 +86,7 @@ evolink download TASK_ID --output /absolute/result.png --json
 
 For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes expire at the earlier of the backend expiry and 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
-`--max-cost-usd` is an estimate-based submission guard, not a final-settlement guarantee. A complete estimate automatically uses its quoted maximum as this guard unless the user supplied a cap. Incomplete or unknown totals cannot use it. `--media-seconds` is a pricing hint, never a model parameter. Token-billed and unknown-duration models require explicit acceptance of their billing uncertainty; a missing price is refused.
+Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused.
 
 A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
 

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
+import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 
 function quoteError(error, cap) {
   const cause = fileError(error);
@@ -37,7 +38,10 @@ export function checkEstimate(quote, cap) {
     requireThat(quote.input_valid === true, 'uncheckable_input', 'The service could not validate the model input. The CLI cannot submit this request with a spending cap.', { problems: quote.problems });
     requireThat(quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
       'uncheckable_cap', 'This request has no complete cost estimate. The CLI cannot submit it with a spending cap.', { estimate: quote.estimate });
-    requireThat(quote.estimate.max_usd <= cap, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
+    const withinBudget = quote.account_quote
+      ? compareDecimal(quote.account_quote.quote.amount, String(cap)) <= 0
+      : quote.estimate.max_usd <= cap;
+    requireThat(withinBudget, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
   }
   requireThat(['estimated', 'partial', 'token_billed'].includes(quote.estimate?.status), 'estimate_unavailable', 'Complete the estimate input or choose a model with pricing before submission.', { estimate: quote.estimate });
 }
@@ -54,11 +58,9 @@ export class Media {
       checkEstimate(quote, max_cost_usd);
       requireThat(['image', 'video', 'audio'].includes(quote.type), 'unsupported_model', 'This model is not a media generation model.');
     } catch (error) { throw quoteError(error, max_cost_usd); }
-    // A complete quote also guards a pricing change between the refresh and POST.
-    const quotedMax = quote.estimate.max_usd;
-    const effectiveCap = max_cost_usd ?? (quote.input_valid === true && quote.estimate.status === 'estimated' && Number.isFinite(quotedMax) && quotedMax > 0 && quotedMax <= 10_000 ? quotedMax : undefined);
+    // Keep an explicit user budget; an estimate does not create a spending cap.
     const id = randomUUID();
-    const argsToSubmit = { ...input, model: quote.model, ...(quote.account_quote ? { account_quote: quote.account_quote } : {}), ...(effectiveCap !== undefined ? { max_cost_usd: effectiveCap } : {}) };
+    const argsToSubmit = { ...input, model: quote.model, ...(quote.account_quote ? { account_quote: quote.account_quote } : {}), ...(max_cost_usd !== undefined ? { max_cost_usd } : {}) };
     const serverExpiry = quote.account_quote ? Date.parse(quote.account_quote.quote.expires_at) : undefined;
     requireThat(serverExpiry === undefined || Number.isFinite(serverExpiry) && serverExpiry > this.now(),
       'quote_expired', 'The account quote expired before it could be saved. Request another estimate.');
@@ -69,7 +71,7 @@ export class Media {
       created_at: this.now(), expires_at: expires, ...(quote.account_quote ? { backend_estimate_id: quote.account_quote.quote.estimate_id,
         server_expires_at: serverExpiry, account_quote: quote.account_quote } : {}), state: 'quoted', client_request_id: `cli-${randomUUID()}` };
     await this.state.write('quotes', id, stored);
-    return { ...quote, quote_id: id, input: input.input || {}, max_cost_usd: effectiveCap, cap_source: max_cost_usd !== undefined ? 'user' : effectiveCap !== undefined ? 'quote' : undefined, expires_at: new Date(stored.expires_at).toISOString(),
+    return { ...quote, quote_id: id, input: input.input || {}, ...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {}), expires_at: new Date(stored.expires_at).toISOString(),
       requires_confirmation: true, next_step: `After the user approves, run evolink generate ${quote.type} --quote ${id} --confirm.` };
   }
   async refresh(id) {

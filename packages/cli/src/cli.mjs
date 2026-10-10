@@ -61,7 +61,7 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   models schema MODEL            Read versioned input/submission schemas (free)
   models recommend --type TYPE [--query TEXT] [--references image,video,audio]
   docs search --query TEXT        Search official model reference excerpts (free)
-  estimate --model MODEL --input-file FILE [--max-cost-usd USD] [--media-seconds N]
+  estimate --model MODEL --input-file FILE [--media-seconds N]
            [--pricing-parameters JSON] [--pricing-source account|public_reference]
   estimate --refresh-quote ID      Refresh saved input and budget; approval required
   generate image|video|audio --quote ID --confirm [--wait] [--timeout SECONDS]

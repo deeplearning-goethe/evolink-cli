@@ -7,6 +7,7 @@ export const PAID_GENERATION_GUIDANCE = [
     'End the reply and wait for the user to explicitly approve that quoted task before calling a generate tool.',
     'You may proceed under a prior explicit approval only when the user specified the task or batch scope and a spending budget that still covers this request; track the remaining budget.',
     'Your own suggested budget, a model recommendation, sufficient balance or a general request to generate is not spending approval.',
+    'Show estimated cost and ask for approval. Do not derive max_cost_usd from a quote; compare only an explicit user budget, without promising a final charge.',
     'A new variation, regeneration or retry after a failed task is a new paid generation and needs approval unless that explicit batch approval covers it.',
     'Never remove or raise a user spending cap without their explicit approval.',
 ].join(' ');
@@ -40,6 +41,7 @@ export const GENERATION_CONFIRMATION_GUIDANCE = [
     '',
     '- Include only applicable output settings supported by the selected model. Use the chosen reference inputs; do not invent settings, prices or totals.',
     '- For a complete estimate, show the returned amount or range in credits and approximate USD. Label it as an estimate, not a guaranteed final charge.',
+    '- Do not add a separate estimated cap or max_cost_usd to the default confirmation. If the user specified a budget, state whether the estimate fits it; pause if it exceeds the budget. A budget comparison does not limit the final settlement.',
     '- For a partial estimate, label it "部分估价" / "Partial estimate", state what is excluded, and say it is neither the total nor an upper bound.',
     '- For token billing, say "按实际 token 用量计费，生成前无法确定总价" / "Billed by actual token usage; the total is unknown before generation." Include the applicable published unit rates when returned. If no price is available, say so rather than assuming token billing.',
     '- If the user set a fixed cap that cannot be checked, explain that gap and replace the usual closing with an explicit question about proceeding without that cap. Do not treat a generic "Confirm generation" as consent to remove or raise a cap.',
