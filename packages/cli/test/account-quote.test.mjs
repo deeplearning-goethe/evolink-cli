@@ -18,19 +18,19 @@ async function context(t) {
   return { f, state, credentials, client, media, server: f.server };
 }
 
-test('account quote saves backend identity and expiry, refreshes before submit, and keeps the user budget', async t => {
+test('rules estimate saves approval and expiry, refreshes before submit, and keeps the user budget', async t => {
   const { f, state, media } = await context(t);
   const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'approved image', n: 2 }, max_cost_usd: 0.05, pricing_source: 'account' });
-  assert.equal(q.pricing_scope, 'account'); assert.equal(q.final_budget_enforced, false);
+  assert.equal(q.pricing_scope, 'public_default'); assert.equal(q.final_budget_enforced, false);
   const saved = await state.read('quotes', q.quote_id);
-  assert.equal(saved.backend_estimate_id, q.estimate_id);
-  assert.equal(saved.expires_at, Date.parse(q.account_quote.quote.expires_at));
-  assert.equal(saved.args.max_cost_usd, 0.05); assert.equal(saved.account_quote.quote.amounts.uc, '27200');
+  assert.equal(saved.backend_estimate_id, undefined); assert.equal(q.estimate_id, undefined);
+  assert.equal(saved.expires_at, Date.parse(q.pricing_quote.expires_at));
+  assert.equal(saved.args.max_cost_usd, 0.05); assert.equal(saved.args.pricing_quote.total_uc, '27200');
   const result = await media.generate('image', q.quote_id, { confirmed: true });
   const submitted = await state.read('quotes', q.quote_id);
-  assert.notEqual(submitted.backend_estimate_id, saved.backend_estimate_id);
+  assert.equal(submitted.args.pricing_quote.fingerprint, saved.args.pricing_quote.fingerprint);
   assert.equal(submitted.args.max_cost_usd, 0.05); assert.equal(result.final_budget_enforced, false);
-  assert.equal(f.quoteRequests.length, 2); assert.equal(f.paid.size, 1);
+  assert.equal(f.quoteRequests?.length || 0, 0); assert.equal(f.ruleReads, 3); assert.equal(f.paid.size, 1);
 });
 
 test('explicit refresh preserves input and budget, changes local identity, and needs new approval', async t => {
@@ -56,25 +56,25 @@ test('backend errors and price/version changes stop submission without replacing
   assert.equal(f.paid.size, 0);
 });
 
-test('public reference previews cannot create an approved submission record', async t => {
+test('public_reference compatibility uses full rules and can be approved', async t => {
   const { f, media } = await context(t);
   const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'preview' }, pricing_source: 'public_reference' });
-  assert.equal(q.quote_id, undefined); assert.equal(q.submission_allowed, false); assert.equal(q.requires_confirmation, false);
+  assert.ok(q.quote_id); assert.equal(q.requires_confirmation, true); assert.equal(q.pricing_source, 'pricing_rules');
   assert.equal(f.quoteRequests?.length || 0, 0); assert.equal(f.paid.size, 0);
 });
 
-test('unknown outcomes retain the exact backend quote and request ID, with no new account quote', async t => {
+test('unknown outcomes retain the approved rules and original request ID; only fresh rules GET is allowed', async t => {
   const { f, media, state } = await context(t);
   const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'one request' } });
   f.loseRestSubmissions = 2;
   await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }));
-  const unknown = await state.read('quotes', q.quote_id), quoteCount = f.quoteRequests.length;
+  const unknown = await state.read('quotes', q.quote_id), quoteCount = f.ruleReads;
   assert.equal(unknown.state, 'outcome_unknown');
   const recovered = await media.resume(q.quote_id);
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(recovered.task_id, f.paid.get(unknown.client_request_id));
   assert.deepEqual(saved.args, unknown.args); assert.equal(saved.backend_estimate_id, unknown.backend_estimate_id);
-  assert.equal(f.quoteRequests.length, quoteCount); assert.equal(f.paid.size, 1);
+  assert.equal(f.ruleReads, quoteCount + 1); assert.equal(f.paid.size, 1);
   await assert.rejects(media.refresh(q.quote_id), { code: 'submission_already_started' });
 });
 
@@ -127,4 +127,28 @@ test('an explicit budget compares exact account decimal amounts before approval'
   q.account_quote.quote.amount = '0.02'; assert.doesNotThrow(() => checkEstimate(q, 0.02));
   q.account_quote.quote.amount = '0.0000000100000000001'; q.estimate = { status: 'estimated', min_usd: 1e-8, max_usd: 1e-8 };
   assert.throws(() => checkEstimate(q, 1e-8), { code: 'cost_exceeds_cap' });
+});
+
+
+test('rules approval fingerprint ignores refreshed expiry but retains policy, amount and input binding', () => {
+  const q = { model: 'test', estimate: { status: 'estimated', max_usd: 0.02 }, pricing_scope: 'public_default',
+    pricing_quote: { request_hash: 'a', fingerprint: 'b', total_uc: '13600', expires_at: 'old' } };
+  assert.equal(priceFingerprint(q), priceFingerprint({ ...q, pricing_quote: { ...q.pricing_quote, expires_at: 'new' } }));
+  for (const change of [{ fingerprint: 'c' }, { total_uc: '13601' }, { request_hash: 'c' }]) assert.notEqual(priceFingerprint(q), priceFingerprint({ ...q, pricing_quote: { ...q.pricing_quote, ...change } }));
+  const budget = { input_valid: true, estimate: { status: 'estimated', min_usd: 0.00000147, max_usd: 0.00000147 }, pricing_quote: { total_uc: '1' } };
+  assert.throws(() => checkEstimate(budget, 0.00000147), { code: 'cost_exceeds_cap' });
+  assert.doesNotThrow(() => checkEstimate(budget, 0.00000148));
+});
+
+test('a preflight refusal while replaying cannot declare the original unknown submission free', async t => {
+  const { f, media, state } = await context(t);
+  const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'one request' } });
+  f.loseRestSubmissions = 2;
+  await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }));
+  const original = await state.read('quotes', q.quote_id);
+  // The fresh rules change before an idempotent replay; the first request was already accepted.
+  f.multiplier = 2;
+  await assert.rejects(media.resume(q.quote_id), error => error.code === 'outcome_unknown' && error.details.charged === 'unknown');
+  const saved = await state.read('quotes', q.quote_id);
+  assert.equal(saved.state, 'outcome_unknown'); assert.equal(saved.client_request_id, original.client_request_id); assert.equal(f.paid.size, 1);
 });

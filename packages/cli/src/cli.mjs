@@ -62,7 +62,7 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   models recommend --type TYPE [--query TEXT] [--references image,video,audio]
   docs search --query TEXT        Search official model reference excerpts (free)
   estimate --model MODEL --input-file FILE [--media-seconds N]
-           [--pricing-parameters JSON] [--pricing-source account|public_reference]
+           [--pricing-parameters JSON] [--pricing-source pricing_rules]
   estimate --refresh-quote ID      Refresh saved input and budget; approval required
   generate image|video|audio --quote ID --confirm [--wait] [--timeout SECONDS]
   tasks get ID | tasks wait ID [--timeout SECONDS]
@@ -189,7 +189,7 @@ async function estimateArgs(options) {
     try { pricingParameters = JSON.parse(options['pricing-parameters']); } catch { throw new CliError('invalid_input', 'pricing-parameters must contain valid JSON.'); }
     requireThat(pricingParameters && typeof pricingParameters === 'object' && !Array.isArray(pricingParameters), 'invalid_input', 'pricing-parameters must be a JSON object.');
   }
-  requireThat(options['pricing-source'] === undefined || ['account', 'public_reference'].includes(options['pricing-source']), 'invalid_option', 'pricing-source must be account or public_reference.');
+  requireThat(options['pricing-source'] === undefined || ['pricing_rules', 'account', 'public_reference'].includes(options['pricing-source']), 'invalid_option', 'pricing-source must be pricing_rules (account/public_reference remain compatibility aliases).');
   const media = number(options['media-seconds'], 'media-seconds', Number.MIN_VALUE, 3600);
   const cap = number(options['max-cost-usd'], 'max-cost-usd', Number.MIN_VALUE, 10_000);
   return { model: options.model, input, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };

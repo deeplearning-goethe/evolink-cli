@@ -5,7 +5,7 @@ import { currentRequestCredentials } from '../request-context.js';
 import { getAvailableModelIds } from './api-client.js';
 import { currentModels } from './catalog-client.js';
 import { closestMatches } from './param-validator.js';
-import { getPricing } from './pricing-client.js';
+import { getPricingRules } from './pricing-rules-client.js';
 function isMediaKind(value) {
     return value === 'image' || value === 'video' || value === 'audio';
 }
@@ -39,13 +39,17 @@ export async function loadCatalog(config, pricingOptions = {}) {
         return { entries: [...entries.values()] };
     let pricingWarning;
     try {
-        const pricing = await getPricing(pricingOptions);
-        if (pricing.source === 'stale-cache')
-            pricingWarning = 'Prices could not be refreshed; showing the last known prices.';
+        const { body } = await getPricingRules({ view: 'full' }, { fresh: pricingOptions.fresh });
+        const rules = 'models' in body ? body.models : [body.model];
         for (const entry of entries.values()) {
-            const prices = [entry.id, ...(entry.aliases ?? [])].flatMap(name => [...pricing.models.values()].filter(price => price.id.toLowerCase() === name.toLowerCase()));
-            if (prices.length)
-                entry.priced = { ...prices[0], id: entry.id, pricingIncomplete: prices.some(model => model.pricingIncomplete), prices: [...new Map(prices.flatMap(model => model.prices).map(price => [price.sku_id, price])).values()] };
+            const rule = rules.find(model => model.model_id.toLowerCase() === entry.id.toLowerCase());
+            if (!rule)
+                continue;
+            entry.priced = { id: entry.id, kind: entry.kind, pricingIncomplete: rule.pricing_status !== 'available',
+                prices: rule.components.map(c => ({ sku_id: c.sku_id, name: c.id,
+                    unit: c.unit.includes('token') ? c.unit : c.unit.includes('second') ? 'second' : c.unit.includes('image') ? 'image' : c.unit,
+                    min_usd: Number(c.rate.usd), max_usd: Number(c.rate.usd), min_charge_usd: Number(c.minimum_charge.usd),
+                    role: c.unit.includes('token') ? 'token' : c.role.includes('output') || c.role === 'request' || c.role === 'output' ? 'output' : 'add_on' })) };
         }
     }
     catch (error) {

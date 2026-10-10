@@ -50,7 +50,7 @@ const aliases = { duration_seconds: ['duration'], output_seconds: ['duration'], 
     video_count: ['n', 'count'], resolution: ['quality'], quality: ['resolution'] };
 const measured = /(?:tokens|input_seconds|output_seconds|source_output_seconds|first_input_video_seconds|search_count)$/;
 /** Map only declared billing parameters. Prompts and asset URLs stay in generation input. */
-export function prepareQuoteParameters(rule, entry, input, pricingParameters = {}, mediaSeconds) {
+export function prepareQuoteParameters(rule, entry, input, pricingParameters = {}, mediaSeconds, allowMissingUsage = false) {
     const declared = new Map((rule.parameters ?? []).map(p => [p.name, p]));
     for (const name of Object.keys(pricingParameters))
         if (!declared.has(name)) {
@@ -58,12 +58,26 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         }
     const parameters = {};
     for (const [name, p] of declared) {
-        const generationNames = [name, ...(aliases[name] ?? [])];
+        // A declared duration and duration_seconds have different meanings (smart duration).
+        const generationNames = [name, ...(aliases[name] ?? []).filter(alias => !declared.has(alias))];
         const supplied = generationNames.filter(key => input[key] !== undefined).map(key => input[key]);
         if (supplied.some(value => String(value) !== String(supplied[0]))) {
             fail('conflicting_quote_parameter', `Conflicting generation values for ${name}.`, name);
         }
         let value = supplied[0];
+        if (value === undefined && name === 'input_images') {
+            if (Array.isArray(input.image_urls))
+                value = input.image_urls.length;
+            else if (typeof input.image_url === 'string')
+                value = 1;
+            else
+                value = 0;
+        }
+        // Expected usage cannot change settings or references the model will actually receive.
+        if (value === undefined && pricingParameters[name] !== undefined && !measured.test(name)
+            && generationNames.some(key => entry.spec?.params[key] !== undefined)) {
+            value = generationNames.map(key => entry.spec?.params[key]?.default).find(v => v !== undefined) ?? p.default;
+        }
         if (pricingParameters[name] !== undefined) {
             if (value !== undefined && String(value) !== String(pricingParameters[name])) {
                 fail('conflicting_quote_parameter', `Pricing parameter ${name} differs from the generation input.`, name);
@@ -74,22 +88,33 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
             && String(value) !== String(mediaSeconds)) {
             fail('conflicting_quote_parameter', 'input_seconds differs from media_seconds.', name);
         }
-        if (value === undefined && name === 'input_images') {
-            const images = input.image_urls;
-            if (Array.isArray(images))
-                value = images.length;
-            else if (typeof input.image_url === 'string')
-                value = 1;
-        }
         // media_seconds describes measured input length, never an unknown generated output.
         if (value === undefined && name === 'input_seconds' && mediaSeconds !== undefined)
             value = mediaSeconds;
+        if (value === undefined && name === 'first_input_video_seconds' && mediaSeconds !== undefined)
+            value = mediaSeconds;
+        if (value === undefined && ['output_seconds', 'duration_seconds'].includes(name) && mediaSeconds !== undefined && entry.spec && !entry.spec.params.duration && !declared.has('duration') && entry.spec?.constraints?.outputDuration !== 'unknown')
+            value = mediaSeconds;
+        if (value === undefined && name === 'duration_seconds' && declared.has('duration') && String(input.duration ?? pricingParameters.duration ?? entry.spec?.params.duration?.default ?? declared.get('duration')?.default) === '-1') {
+            if (allowMissingUsage)
+                continue;
+            fail('quote_usage_required', 'Provide expected generated duration_seconds for automatic duration in pricing_parameters.', name);
+        }
+        if (value === undefined && ['duration_seconds', 'output_seconds'].includes(name) && entry.spec?.constraints?.outputDuration === 'unknown') {
+            if (allowMissingUsage)
+                continue;
+            fail('quote_usage_required', `Provide expected generated ${name} in pricing_parameters.`, name);
+        }
         if (value === undefined && !measured.test(name)) {
             const defaults = generationNames.map(key => entry.spec?.params[key]?.default).filter(v => v !== undefined);
             value = defaults[0];
         }
-        const references = input.video_urls !== undefined || input.video_url !== undefined || input.source_task_id !== undefined;
+        const references = Array.isArray(input.video_urls) && input.video_urls.length > 0
+            || typeof input.video_url === 'string' && input.video_url.trim().length > 0
+            || typeof input.source_task_id === 'string' && input.source_task_id.trim().length > 0;
         if (value === undefined && measured.test(name) && (p.required || references || /tokens$/.test(name) || (name === 'search_count' && input.web_search === true) || p.default === undefined)) {
+            if (allowMissingUsage)
+                continue;
             fail('quote_usage_required', `Provide measured or expected usage for ${name} in pricing_parameters.`, name);
         }
         if (value === undefined)
@@ -105,6 +130,14 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         if (typeof value === 'string' && value.length > 128)
             fail('invalid_quote_parameter', `Pricing parameter ${name} is too long.`, name);
         if (p.type === 'integer' || p.type === 'decimal') {
+            if (typeof value === 'number' && String(value).includes('e')) {
+                const negative = value < 0, [mantissa, exponent] = String(Math.abs(value)).split('e');
+                const [whole, part = ''] = mantissa.split('.'), digits = whole + part, point = whole.length + Number(exponent);
+                value = (negative ? '-' : '') + (point <= 0 ? '0.' + '0'.repeat(-point) + digits
+                    : point >= digits.length ? digits + '0'.repeat(point - digits.length) : digits.slice(0, point) + '.' + digits.slice(point));
+                if (String(value).length > 128)
+                    fail('invalid_quote_parameter', `Pricing parameter ${name} is too long.`, name);
+            }
             if (typeof value === 'boolean' || !/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(String(value))
                 || (p.type === 'integer' && !/^-?(?:0|[1-9]\d*)$/.test(String(value)))) {
                 fail('invalid_quote_parameter', `Pricing parameter ${name} must be ${p.type}.`, name);

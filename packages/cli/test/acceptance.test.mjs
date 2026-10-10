@@ -42,7 +42,7 @@ async function setup(t) {
 test('failed quote returns a blocked flow with the original cap and creates no saved quote or task', async t => {
   const { f, home, cli } = await setup(t);
   for (const [model, input, failure, code, balance = 1000] of [
-    ['fixture-image', { prompt: 'test' }, true, 'service_unavailable'],
+    ['fixture-image', { prompt: 'test' }, true, 'estimate_unavailable'],
     ['fixture-image', { invalid: true }, false, 'invalid_input'],
     ['fixture-image', { prompt: 'test' }, false, 'insufficient_balance', 0],
     ['fixture-token-image', { prompt: 'test' }, false, 'uncheckable_cap'],

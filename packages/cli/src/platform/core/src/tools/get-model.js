@@ -110,7 +110,9 @@ export function registerGetModel(server, config) {
             else {
                 lines.push('', 'Parameters for this model are not documented here; the gateway checks the input when you submit.');
             }
-            lines.push('', 'Pricing (USD; 68 credits ≈ $1):');
+            lines.push('', 'Public default component base prices (USD; 68 credits ≈ $1). Tiers, quantities and minimum charges affect totals; use estimate_cost with the actual input.');
+            structured.pricing_source = 'pricing_rules';
+            structured.pricing_scope = 'public_default';
             if (priced && priced.prices.length > 0) {
                 const groups = [['output', 'Main charge'], ['add_on', 'Extra charges'], ['token', 'Usage-based']];
                 for (const [role, label] of groups) {

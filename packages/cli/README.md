@@ -4,9 +4,9 @@ Generate images, video, music and speech directly through the EvoLink platform A
 
 The package calls the EvoLink platform API directly using the assistant's terminal. Requires Node.js 22+.
 
-The account Quote changes described below are unreleased and require backend enablement.
+The pricing-rules estimation changes described below are an unreleased candidate.
 
-Account estimates use authenticated backend Quote and preserve exact decimal-string amounts. A failed refresh cannot authorize a new submission. Public default prices remain an explicit read-only preview. Account Quote requires gateway support; a final settlement cap still requires GroAPI/Worker enforcement. Responses report `final_budget_enforced: false`.
+Estimates use the two published full pricing-rules endpoints and exact UC arithmetic, including resolution, tiers, minimum charges and rounding. Public default prices exclude personal discounts. A failed refresh cannot authorize a new submission. Final settlement caps still require GroAPI/Worker enforcement; responses report `final_budget_enforced: false`.
 
 ## Status and installation
 
@@ -226,23 +226,24 @@ Generation errors preserve the saved quote and request ID when acceptance or cha
 
 A failed/cancelled task does not establish a refund. `tasks get` can successfully return that task, while `tasks wait` exits nonzero with the same task and billing details. `billing.refund_status` reports account-balance evidence: `unknown`, `pending`, `failed`, `completed`, or `not_required`. A completed refund includes recorded credits and time; key-limit restoration remains unknown. Old gateways without billing fields retain unknown status, rather than claiming zero charge or a completed refund.
 
-### Account quotes and refresh
+### Rules estimates and refresh
 
-`evolink estimate` uses authenticated backend account Quote by default. The saved
-local `quote_id` and backend `estimate_id` are separate. The saved approval expires
-at the earlier of the backend expiry and 15 minutes. Before the first submission,
-the CLI refreshes Quote and refuses changed amounts, pricing/Policy versions or
-billing parameters until a new estimate is approved.
+`evolink estimate` reads the published full pricing policy for the canonical model.
+The local `quote_id` stores input binding, pricing fingerprint, integer UC subtotal
+and expiry; there is no backend `estimate_id`. Approval expires at the earlier of
+catalog freshness and 15 minutes. Before first submission, the CLI reads the rules
+again and refuses changed prices, policy or usage until a new estimate is approved.
+Neither backend Quote nor new OAuth quote access is required. Existing login,
+shared MCP key, quota and permissions remain.
 
-Use `evolink estimate --refresh-quote ID` to create a fresh approval for the same
-saved input and budget. It cannot refresh a submitted or uncertain submission.
-Unknown submission recovery retains the original backend quote and request ID.
-Known tasks remain readable after quote expiry; an expired uncertain submission
-requires checking the original task rather than creating another paid request.
+Use `evolink estimate --refresh-quote ID` for an unsubmitted approval. It preserves
+input and an explicit user budget, creates a new local approval and requires user
+confirmation again. Unknown recovery keeps the original input and request ID;
+a failed replay cannot prove the first submission was free. Known tasks remain
+readable after expiry; check the original task before preparing another request.
 
-Supply measured billing data with `--pricing-parameters '{"input_seconds":5.77}'`
-when the published Policy requires it. `--pricing-source public_reference`
-provides a read-only preview and does not create a paid submission approval.
-Backend media Quote and MCP OAuth access must be available; a rejection is shown
-without substituting public prices. Quote does not reserve quota, and the
-current gateway does not yet enforce a final `max_cost_usd` settlement cap.
+Supply required measured or expected billing usage with
+`--pricing-parameters '{"input_seconds":5.77}'`. Default `--pricing-source pricing_rules`
+and old `account`/`public_reference` aliases use the same published full rules.
+Partial estimates name missing usage and cannot check a budget. Estimates exclude
+personal discounts and do not reserve quota or guarantee the final charge.

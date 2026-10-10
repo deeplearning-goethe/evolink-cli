@@ -4,8 +4,10 @@ import { z } from 'zod';
 import { submitTask } from '../services/api-client.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { formatIssues, validateInput } from '../services/param-validator.js';
-import { estimateCost, formatEstimateRange } from '../services/pricing-client.js';
-import { ApprovedAccountQuote, QuoteParameters, QuoteError, checkApprovedAccountQuote, accountCostEstimate } from '../services/pricing-quote-client.js';
+import { formatEstimateRange } from '../services/pricing-client.js';
+import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/pricing-quote-client.js';
+import { ApprovedRulesEstimate, createRulesEstimate, checkRulesApproval, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
+import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { CLIENT_REQUEST_ID_PATTERN, newRunId } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failure, money, ok, progressReporter, usdOf } from './shared.js';
@@ -47,6 +49,8 @@ function rangeText(estimate) {
 }
 /** Why max_cost_usd could not be checked, and what the assistant can do next. */
 function uncheckedCap(estimate, pricingWarning) {
+    if (estimate.uncheckable_reason === 'usage')
+        return ['published pricing rules need additional billing usage to calculate a complete estimate', `Provide the missing expected or measured usage in pricing_parameters. ${estimate.possible_extras.join(' ')}`];
     if (estimate.uncheckable_reason === 'output_duration') {
         return ['the generated output duration is not fixed, so the declared seconds cannot establish an upper bound', 'Use an explicit duration if the model accepts it; otherwise ask the user whether to proceed without a cap.'];
     }
@@ -92,7 +96,8 @@ function registerGenerate(server, config, kind) {
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
             max_cost_usd: z.number().positive().max(10_000).optional()
                 .describe('Compatibility option for a budget explicitly specified by the user. Compare the submission estimate against that budget; never derive this value from the estimate. This does not limit the final charge. Refuses when the estimate is incomplete or exceeds the budget.'),
-            account_quote: ApprovedAccountQuote.optional().describe('Account quote approval returned by estimate_cost, for exactly the same input. Client-side preflight only; backend binding and final caps are not yet supported.'),
+            account_quote: ApprovedAccountQuote.optional().describe('Legacy approval. Refresh with estimate_cost and obtain user approval before using the new pricing rules.'),
+            pricing_quote: ApprovedRulesEstimate.optional().describe('Client approval record from estimate_cost, for exactly this input. Rechecked against fresh pricing rules before submission; does not bind final settlement.'),
             pricing_parameters: QuoteParameters.optional().describe('The same explicit billing usage passed to estimate_cost.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
@@ -124,7 +129,7 @@ function registerGenerate(server, config, kind) {
         let clientRequestId;
         let acceptedTaskId;
         try {
-            const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false, skipPricing: Boolean(args.account_quote) });
+            const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false, skipPricing: true });
             if (!entry) {
                 const suggestions = suggestModels(catalog, args.model, kind);
                 return failure(`Unknown ${kind} model "${args.model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs. Nothing was submitted or charged.`, { error: { category: 'not_found', param: 'model' }, suggestions, charged: 'no' });
@@ -152,8 +157,12 @@ function registerGenerate(server, config, kind) {
                 warnings.push('This model\'s parameters are not documented here, so the input was not checked before sending.');
             }
             // media_seconds only prices the request; the body below is built from input alone.
-            const account = args.account_quote ? checkApprovedAccountQuote(args.account_quote, entry.id, input, args.media_seconds, args.pricing_parameters, args.max_cost_usd) : undefined;
-            const estimate = account ? accountCostEstimate(account) : estimateCost(entry.priced, kind, input, entry.spec, { mediaSeconds: args.media_seconds });
+            if (args.account_quote)
+                throw new QuoteError('quote_refresh_required', 'Refresh the legacy account estimate with estimate_cost and obtain user approval.');
+            const rulesEstimate = await createRulesEstimate(entry, input, { mediaSeconds: args.media_seconds, pricingParameters: args.pricing_parameters });
+            if (args.pricing_quote)
+                checkRulesApproval(args.pricing_quote, rulesEstimate);
+            const estimate = rulesEstimate.estimate;
             if (args.max_cost_usd !== undefined) {
                 if (estimate.uncheckable_reason !== undefined || estimate.status !== 'estimated' || estimate.max_usd === undefined) {
                     const [reason, next] = uncheckedCap(estimate, catalog.pricingWarning);
@@ -163,7 +172,7 @@ function registerGenerate(server, config, kind) {
                         charged: 'no',
                     });
                 }
-                if (estimate.max_usd > args.max_cost_usd) {
+                if (rulesBudgetExceeded(rulesEstimate.amounts.uc, args.max_cost_usd)) {
                     return failure(`The estimated cost ${rangeText(estimate)} is above max_cost_usd $${formatUsd(args.max_cost_usd)}. Nothing was submitted or charged. Lower the duration, count or quality, or ask the user to raise the cap.`, {
                         error: { category: 'invalid_request', param: 'max_cost_usd' },
                         estimate,
@@ -171,6 +180,8 @@ function registerGenerate(server, config, kind) {
                     });
                 }
             }
+            if (estimate.status === 'needs_input')
+                throw new QuoteError('quote_usage_required', 'No charge can be estimated yet; supply the missing pricing usage before submission.');
             clientRequestId = args.client_request_id ?? newRunId();
             const body = { ...input, model: entry.id };
             const submitted = await submitTask(config, {
@@ -222,8 +233,9 @@ function registerGenerate(server, config, kind) {
             return ok(lines.join('\n'), {
                 ...view.structured,
                 submitted: { model: entry.id, input },
-                pricing_scope: account ? 'account' : 'public_default_group',
-                ...(account ? { estimate_id: account.estimate_id } : {}),
+                pricing_scope: 'public_default',
+                pricing_source: 'pricing_rules',
+                amounts: rulesEstimate.amounts,
                 final_budget_enforced: false,
                 client_request_id: clientRequestId,
                 replayed: submitted.idempotency_replayed === true,
@@ -234,6 +246,8 @@ function registerGenerate(server, config, kind) {
             }, view.resources);
         }
         catch (error) {
+            if (error instanceof PricingRulesError)
+                return failure('The pricing rules could not be verified. Nothing was submitted or charged.', { error: { category: 'estimate_unavailable', code: error.code }, charged: 'no', submission_state: 'not_submitted' });
             if (error instanceof QuoteError)
                 return failure(`${error.message} Nothing was submitted or charged.`, { error: { category: 'estimate_unavailable', code: error.code }, charged: 'no', submission_state: 'not_submitted' });
             // clientRequestId is set right before the submit, so it also tells whether a request may have gone out.

@@ -82,11 +82,11 @@ Use `--json` for commands consumed by the assistant. Progress is on stderr; stdo
 For setup problems, run `evolink doctor --agent NAME --json` if the installed version supports the agent option; otherwise use `doctor --json`. Read every failed or skipped check. On Linux, login and later commands need the same unlocked Secret Service/D-Bus session. On SSH hosts, opening the link on another computer requires forwarding the loopback callback port; `--no-browser` does not solve callback routing. Report connection, model discovery and assistant skill discovery separately.
 
 
-Account estimates use the authenticated backend Quote and expire no later than
-its server expiry. Keep the local quote ID and backend estimate ID distinct.
-Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; retain
-the saved input and user budget and obtain approval again. Supply required billing
+Estimates use published full pricing rules and show public default prices, excluding
+personal discounts. The local approval expires no later than the rules' freshness.
+Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
+the input and explicit user budget and obtain approval again. Supply missing billing
 usage with `--pricing-parameters JSON`; never invent unknown token counts or media
-lengths. A public reference preview cannot authorize paid generation. If backend
-Quote is unavailable, report the error and preserve the budget. Final settlement
-caps still require gateway/Worker support.
+lengths. Partial subtotals cannot check a budget. If rules are unavailable or change,
+pause and preserve the budget. Actual usage can change the final charge; final
+settlement caps require gateway/Worker support.
