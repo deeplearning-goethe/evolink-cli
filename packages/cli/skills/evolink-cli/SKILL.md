@@ -79,3 +79,13 @@ Use `generate` for the first submission of an approved quote. `tasks resume` is 
 Use `--json` for commands consumed by the assistant. Progress is on stderr; stdout is one JSON envelope with `schema_version: 1`. `ok: false` and a nonzero exit code indicate a command error; a successful task query reporting `status: failed` is a task outcome, not a failed CLI invocation. Read the error's recovery details before retrying. For `invalid_status`, use `error.details.allowed_values` and correct only the free query; local status validation occurs before a platform request. Never guess an enum, interpret an empty list as a service failure, or resubmit a paid task to fix a query error. Run `evolink --help` for the maintained command reference and `evolink tasks list --help` for task filters.
 
 For setup problems, run `evolink doctor --agent NAME --json` if the installed version supports the agent option; otherwise use `doctor --json`. Read every failed or skipped check. On Linux, login and later commands need the same unlocked Secret Service/D-Bus session. On SSH hosts, opening the link on another computer requires forwarding the loopback callback port; `--no-browser` does not solve callback routing. Report connection, model discovery and assistant skill discovery separately.
+
+
+Account estimates use the authenticated backend Quote and expire no later than
+its server expiry. Keep the local quote ID and backend estimate ID distinct.
+Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; retain
+the saved input and user budget and obtain approval again. Supply required billing
+usage with `--pricing-parameters JSON`; never invent unknown token counts or media
+lengths. A public reference preview cannot authorize paid generation. If backend
+Quote is unavailable, report the error and preserve the budget. Final settlement
+caps still require gateway/Worker support.

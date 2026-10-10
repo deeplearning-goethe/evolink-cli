@@ -35,6 +35,8 @@ export async function loadCatalog(config, pricingOptions = {}) {
         entries.set(model.model_id, { id: model.model_id, kind, aliases: model.aliases, title: model.display_name,
             ...(spec ? { spec: { ...spec, model: model.model_id } } : {}) });
     }
+    if (pricingOptions.skipPricing)
+        return { entries: [...entries.values()] };
     let pricingWarning;
     try {
         const pricing = await getPricing(pricingOptions);

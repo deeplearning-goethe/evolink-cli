@@ -5,6 +5,7 @@ import { submitTask } from '../services/api-client.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { formatIssues, validateInput } from '../services/param-validator.js';
 import { estimateCost, formatEstimateRange } from '../services/pricing-client.js';
+import { ApprovedAccountQuote, QuoteParameters, QuoteError, checkApprovedAccountQuote, accountCostEstimate } from '../services/pricing-quote-client.js';
 import { CLIENT_REQUEST_ID_PATTERN, newRunId } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failure, money, ok, progressReporter, usdOf } from './shared.js';
@@ -91,6 +92,8 @@ function registerGenerate(server, config, kind) {
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
             max_cost_usd: z.number().positive().max(10_000).optional()
                 .describe('Optional estimate-based submission cap, not a final settlement guarantee: refuses to submit when fresh public prices are unavailable, the estimate is higher or published rules cannot cover the full request. Per-second video requests with video_urls, video_url or source_task_id cannot use this cap, even with media_seconds.'),
+            account_quote: ApprovedAccountQuote.optional().describe('Account quote approval returned by estimate_cost, for exactly the same input. Client-side preflight only; backend binding and final caps are not yet supported.'),
+            pricing_parameters: QuoteParameters.optional().describe('The same explicit billing usage passed to estimate_cost.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title, ...PAID },
@@ -121,7 +124,7 @@ function registerGenerate(server, config, kind) {
         let clientRequestId;
         let acceptedTaskId;
         try {
-            const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false });
+            const { catalog, entry } = await resolveModel(args.model, config, { fresh: true, allowStale: false, skipPricing: Boolean(args.account_quote) });
             if (!entry) {
                 const suggestions = suggestModels(catalog, args.model, kind);
                 return failure(`Unknown ${kind} model "${args.model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs. Nothing was submitted or charged.`, { error: { category: 'not_found', param: 'model' }, suggestions, charged: 'no' });
@@ -149,7 +152,8 @@ function registerGenerate(server, config, kind) {
                 warnings.push('This model\'s parameters are not documented here, so the input was not checked before sending.');
             }
             // media_seconds only prices the request; the body below is built from input alone.
-            const estimate = estimateCost(entry.priced, kind, input, entry.spec, { mediaSeconds: args.media_seconds });
+            const account = args.account_quote ? checkApprovedAccountQuote(args.account_quote, entry.id, input, args.media_seconds, args.pricing_parameters, args.max_cost_usd) : undefined;
+            const estimate = account ? accountCostEstimate(account) : estimateCost(entry.priced, kind, input, entry.spec, { mediaSeconds: args.media_seconds });
             if (args.max_cost_usd !== undefined) {
                 if (estimate.uncheckable_reason !== undefined || estimate.status !== 'estimated' || estimate.max_usd === undefined) {
                     const [reason, next] = uncheckedCap(estimate, catalog.pricingWarning);
@@ -218,7 +222,8 @@ function registerGenerate(server, config, kind) {
             return ok(lines.join('\n'), {
                 ...view.structured,
                 submitted: { model: entry.id, input },
-                pricing_scope: 'public_default_group',
+                pricing_scope: account ? 'account' : 'public_default_group',
+                ...(account ? { estimate_id: account.estimate_id } : {}),
                 final_budget_enforced: false,
                 client_request_id: clientRequestId,
                 replayed: submitted.idempotency_replayed === true,
@@ -229,6 +234,8 @@ function registerGenerate(server, config, kind) {
             }, view.resources);
         }
         catch (error) {
+            if (error instanceof QuoteError)
+                return failure(`${error.message} Nothing was submitted or charged.`, { error: { category: 'estimate_unavailable', code: error.code }, charged: 'no', submission_state: 'not_submitted' });
             // clientRequestId is set right before the submit, so it also tells whether a request may have gone out.
             return errorResult(error, { paid: clientRequestId !== undefined, clientRequestId, taskId: acceptedTaskId,
                 phase: acceptedTaskId ? 'accepted' : clientRequestId ? 'submit_started' : 'before_submit' });

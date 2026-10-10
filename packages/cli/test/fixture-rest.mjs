@@ -15,6 +15,22 @@ export async function restFixture(state, req, res, url, body, send) {
       capabilities: [kind(id)], protocols: [{ image: 'openai-images', video: 'evolink-video-generations', audio: 'openai-audio' }[kind(id)]], lifecycle: 'active' })) }); return true;
   }
   if (url.pathname === '/v1/catalog/health') { send(200, { models: models.map(model_id => ({ model_id, status: 'available' })) }); return true; }
+  if (url.pathname.endsWith('/pricing-rules')) {
+    const id = url.pathname.split('/')[4], type = kind(id);
+    const price = { uc: '13600', credits: '1.36', cny: '0.136', usd: '0.02' };
+    const zero = { uc: '0', credits: '0', cny: '0', usd: '0' };
+    const component = { id: 'output', role: 'output', dimension: 'request', sku_id: id, unit: 'request',
+      billing_unit_size: 1, display_unit_size: 1, rate: price, minimum_charge: zero,
+      billing_rule: 'per_call', pricing_status: 'available', effective_at: '2026-10-01T00:00:00Z', tiers: [],
+      quantity_rule: { op: 'constant', value: '1' }, rounding: { point: 'per_component_subtotal', mode: 'ceil' } };
+    const parameters = type === 'image' ? [{ name: 'image_count', type: 'integer', minimum: '1', maximum: '10', default: '1' }] : [];
+    if (id.includes('token')) parameters.push({ name: 'input_tokens', type: 'integer', default: '0' });
+    if (id === 'fixture-partial-video') parameters.push({ name: 'input_seconds', type: 'decimal', default: '0' });
+    send(200, { meta: { schema_version: '2', catalog_version: 'cat_fixture', pricing_version: 'prc_fixture', price_scope: 'public_default',
+      currency: 'USD', exchange_rate_version: 'pricing-fx/v1:USD-CNY=6.8', updated_at: '2026-10-01T00:00:00Z', fresh_until: new Date(Date.now() + 300000).toISOString() },
+      model: { model_id: id, product_id: id, operation: `${type}_generation`, modality: type, lifecycle: 'active', pricing_status: 'available',
+        settlement_basis: 'request_only', policy_version: 1, policy_checksum: 'a'.repeat(64), policy_source: 'published', parameters, components: [component] } }); return true;
+  }
   if (url.pathname === '/web/api/models/pricing') {
     if (state.estimateFailure) { send(503, {}); return true; }
     const data = models.flatMap(id => [{ sku_id: id, sku_name: 'output', model_name: id, model_type: kind(id),
@@ -25,6 +41,20 @@ export async function restFixture(state, req, res, url, body, send) {
     send(200, { success: true, data }); return true;
   }
   if (!req.headers.authorization?.startsWith('Bearer ')) { send(401, {}); return true; }
+  if (url.pathname === '/v1/agent-estimates') {
+    const request = JSON.parse(body); state.quoteRequests ??= []; state.quoteRequests.push(request);
+    if (state.estimateFailure || state.quoteFailure) { send(state.quoteFailure || 503, { error: { code: 'pricing_unavailable', message: 'Account quote unavailable.' } }); return true; }
+    const id = request.model_id, n = Number(request.parameters.image_count || 1), uc = Math.round(n * 13600 * state.multiplier);
+    const amounts = { uc: String(uc), credits: String(uc / 10000), cny: String(uc / 100000), usd: String(uc / 680000) };
+    const zero = { uc: '0', credits: '0', cny: '0', usd: '0' };
+    send(200, { estimate_id: `est_${randomUUID()}`, catalog_version: 'cat_fixture', pricing_version: `prc_fixture_${state.multiplier}`,
+      exchange_rate_version: 'pricing-fx/v1:USD-CNY=6.8', price_scope: 'account', policy_version: 1, policy_checksum: 'a'.repeat(64),
+      model_id: id, product_id: id, operation: request.operation, settlement_basis: 'request_only', currency: 'USD', amount: amounts.usd, amounts,
+      components: [{ id: 'output', role: 'output', dimension: 'request', sku_id: id, quantity: '1', billed_quantity: '1', unit: 'request',
+        unit_price: amounts.usd, subtotal: amounts.usd, unit_price_amounts: amounts, subtotal_amounts: amounts, minimum_charge_amounts: zero,
+        tier_multiplier: '1', minimum_charge_applied: false, billing_rule: 'per_call', applied_rules: [] }],
+      assumptions: [], expires_at: new Date(Date.now() + 300000).toISOString() }); return true;
+  }
   if (url.pathname === '/v1/credits') {
     state.calls.push({ name: 'check_balance', args: {} });
     if (state.balanceFailure) { send(503, { error: { message: 'Fixture balance unavailable.' } }); return true; }

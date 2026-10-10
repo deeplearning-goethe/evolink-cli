@@ -5,6 +5,8 @@ import { getCredits } from '../services/api-client.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { formatIssues, validateInput } from '../services/param-validator.js';
 import { estimateCost, formatEstimateRange } from '../services/pricing-client.js';
+import { PricingRulesError } from '../services/pricing-rules-client.js';
+import { createAccountQuote, QuoteError, QuoteParameters } from '../services/pricing-quote-client.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 import { currentCredentialMode } from '../request-context.js';
@@ -21,19 +23,24 @@ export function registerEstimateCost(server, config) {
             model: z.string().min(1).max(128).describe('Model ID, e.g. "seedance-2.0-text-to-video".'),
             input: z.record(z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
+            pricing_source: z.enum(['account', 'public_reference']).default('account').describe('Account uses authenticated backend Quote. Public reference only previews default prices and cannot be saved as an account quote.'),
+            pricing_parameters: QuoteParameters.optional().describe('Measured or expected billing usage declared by the pricing policy, such as input_seconds. Do not include user_group, prices or generation prompts.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
-    }, async ({ model, input, media_seconds: mediaSeconds }) => {
+    }, async ({ model, input, media_seconds: mediaSeconds, pricing_source: pricingSource, pricing_parameters: pricingParameters }) => {
         try {
-            const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false });
+            const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false, skipPricing: pricingSource === 'account' });
             if (!entry) {
                 const suggestions = suggestModels(catalog, model);
                 return failure(`Unknown model "${model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs.`, { error: { category: 'not_found', param: 'model' }, suggestions });
             }
             const values = input ?? {};
             const validation = entry.spec ? validateInput(entry.spec, values) : undefined;
-            const estimate = estimateCost(entry.priced, entry.kind, values, entry.spec, { mediaSeconds });
+            if (pricingSource === 'account' && validation?.errors.length)
+                return failure('The generation input is invalid; no account quote was requested.', { input_valid: false, problems: validation.errors, error: { category: 'invalid_request' }, charged: 'no' });
+            const account = pricingSource === 'account' ? await createAccountQuote(config, entry, values, { mediaSeconds, pricingParameters }) : undefined;
+            const estimate = account?.estimate ?? estimateCost(entry.priced, entry.kind, values, entry.spec, { mediaSeconds });
             const lines = [`Estimate for ${entry.id} (${entry.kind}); nothing was submitted or charged.`];
             if (!validation) {
                 lines.push('Input not checked: this model\'s parameters are not documented here.');
@@ -68,7 +75,10 @@ export function registerEstimateCost(server, config) {
             const structured = {
                 model: entry.id,
                 type: entry.kind,
-                pricing_scope: 'public_default_group',
+                pricing_scope: account ? 'account' : 'public_default_group',
+                pricing_source: account ? 'account' : 'public_reference',
+                ...(account ? { account_quote: account.approval, estimate_id: account.quote.estimate_id,
+                    pricing_parameters: account.approval.parameters, expires_at: account.quote.expires_at } : {}),
                 final_budget_enforced: false,
                 input_valid: validation ? validation.errors.length === 0 : null,
                 problems: validation?.errors ?? [],
@@ -122,15 +132,30 @@ export function registerEstimateCost(server, config) {
             catch {
                 lines.push('Balance: could not be read right now.');
             }
-            if (catalog.pricingWarning) {
+            if (catalog.pricingWarning && !account) {
                 lines.push(`Note: ${catalog.pricingWarning}`);
                 structured.pricing_warning = catalog.pricingWarning;
             }
-            lines.push('This is an estimate from published prices. The amount actually reserved is shown when the task is submitted, and the final charge when it finishes.');
+            if (account)
+                lines.push(`Account quote: ${account.quote.estimate_id}; valid until ${account.quote.expires_at}.`, 'This account quote does not reserve quota or enforce a final spending cap. The task reports the reserved and final amounts.');
+            else
+                lines.push('Public reference estimate only. It is not an account quote or a final spending cap.');
             return ok(lines.join('\n'), structured);
         }
         catch (error) {
-            return errorResult(error);
+            if (error instanceof PricingRulesError)
+                return failure('The model pricing rules could not be verified. No account quote or generation was created.', {
+                    error: { category: 'estimate_unavailable', code: error.code, status: error.status }, pricing_source: pricingSource,
+                    submission_allowed: false, final_budget_enforced: false, charged: 'no'
+                });
+            if (error instanceof QuoteError)
+                return failure(`${error.message} Nothing was submitted or charged.`, {
+                    error: { category: 'estimate_unavailable', code: error.code, ...(error.param ? { param: error.param } : {}) },
+                    pricing_source: pricingSource, submission_allowed: false, final_budget_enforced: false, charged: 'no'
+                });
+            const failed = errorResult(error);
+            return { ...failed, structuredContent: { ...failed.structuredContent, pricing_source: pricingSource,
+                    submission_allowed: false, final_budget_enforced: false, charged: 'no' } };
         }
     });
 }

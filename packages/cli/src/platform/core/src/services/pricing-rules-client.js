@@ -26,7 +26,7 @@ function fraction(value) {
     const [whole, part = ''] = value.split('.');
     return [BigInt(whole + part), 10n ** BigInt(part.length)];
 }
-const Money = z.object({ uc: decimal, credits: decimal, cny: decimal, usd: decimal })
+export const PricingMoney = z.object({ uc: decimal, credits: decimal, cny: decimal, usd: decimal })
     .refine(value => {
     // Live configuration rates can contain fractional UC (e.g. 1102.5),
     // although the initial HTML describes UC as an integer. Settlement
@@ -47,7 +47,7 @@ const ExpressionSchema = z.lazy(() => z.object({
 }).refine(node => node.op !== 'lookup' || (node.key !== undefined && node.values !== undefined), 'Lookup expressions require a key and a values table.'));
 const Rounding = z.object({ point: z.string().max(80), mode: z.string().max(40) });
 const rateFields = {
-    sku_id: z.string().min(1).max(100), rate: Money, official_rate: Money.optional(), minimum_charge: Money,
+    sku_id: z.string().min(1).max(100), rate: PricingMoney, official_rate: PricingMoney.optional(), minimum_charge: PricingMoney,
     billing_rule: z.string().min(1).max(60), pricing_status: z.enum(['available', 'unavailable']),
     effective_at: z.string().datetime({ offset: true }),
 };
@@ -152,7 +152,7 @@ async function readBody(response) {
         reader.releaseLock();
     }
 }
-export async function getPricingRules(input) {
+export async function getPricingRules(input, options = {}) {
     const query = PricingRulesQuery.parse(input), base = controlBaseURL();
     const url = new URL(query.model ? `${base}/v1/catalog/models/${encodeURIComponent(query.model)}/pricing-rules`
         : `${base}/v1/catalog/pricing-rules`);
@@ -161,7 +161,7 @@ export async function getPricingRules(input) {
             url.searchParams.set(key, query[key]);
     }
     const key = url.href, old = cache.get(key);
-    if (old && old.expires > Date.now())
+    if (!options.fresh && old && old.expires > Date.now())
         return { body: old.body, source: 'cache' };
     const existing = pending.get(key);
     if (existing)

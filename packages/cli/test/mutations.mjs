@@ -20,7 +20,7 @@ const mutants = [
   ['oauth-token-scope', 'src/oauth.mjs', "(!value.scope || value.scope.split(' ').includes('mcp'))", 'true'],
   ['oauth-new-grant-refresh', 'src/oauth.mjs', "parameters.grant_type === 'refresh_token' ? prior?.refresh_token : undefined", 'prior?.refresh_token'],
   ['approval', 'src/media.mjs', 'requireThat(confirmed || resume,', 'requireThat(true,'],
-  ['fresh-price', 'src/media.mjs', 'priceFingerprint(fresh) === quote.fingerprint', 'true'],
+  ['fresh-price', 'src/media.mjs', 'resume && account_quote || priceFingerprint(fresh) === quote.fingerprint', 'true'],
   ['cap-direction', 'src/media.mjs', 'quote.estimate.max_usd <= cap', 'quote.estimate.max_usd >= cap'],
   ['partial-cap', 'src/media.mjs', "quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd)", 'Number.isFinite(quote.estimate.max_usd)'],
   ['invalid-input', 'src/media.mjs', 'quote.input_valid !== false', 'true'],

@@ -15,3 +15,13 @@ Always show the interval, account-wide scope, completed-task cost, missing-cost 
 `--max-cost-usd` protects the submission estimate. It does not cap the final charge. Respect the user cap across retries and changed inputs; do not remove/increase it to get a successful response. Unknown totals, token usage, generated audio duration or incompletely priced reference inputs can make a cap uncheckable. Explain the returned uncertainty and await explicit acceptance of a change in scope or budget.
 
 A final task/workflow cap requires server-side reservation and settlement enforcement with an authoritative quote and ledger. This client cannot create that guarantee by polling, summing history or stopping local waiting. Do not label this version as supporting final settlement budgets or downloadable invoices.
+
+
+Account estimates use the authenticated backend Quote and expire no later than
+its server expiry. Keep the local quote ID and backend estimate ID distinct.
+Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; retain
+the saved input and user budget and obtain approval again. Supply required billing
+usage with `--pricing-parameters JSON`; never invent unknown token counts or media
+lengths. A public reference preview cannot authorize paid generation. If backend
+Quote is unavailable, report the error and preserve the budget. Final settlement
+caps still require gateway/Worker support.

@@ -4,7 +4,9 @@ Generate images, video, music and speech directly through the EvoLink platform A
 
 The package calls the EvoLink platform API directly using the assistant's terminal. Requires Node.js 22+.
 
-Quotes and submissions refresh public default-group prices. A failed refresh cannot use an old price to pass a spending cap. Numeric prices retain their published precision; incomplete SKU prices and known unpublished video billing factors produce a partial estimate. Quotes report `pricing_scope: public_default_group` and `final_budget_enforced: false`. Account-specific authoritative quotes and a final settlement cap require platform support.
+The account Quote changes described below are unreleased and require backend enablement.
+
+Account estimates use authenticated backend Quote and preserve exact decimal-string amounts. A failed refresh cannot authorize a new submission. Public default prices remain an explicit read-only preview. Account Quote requires gateway support; a final settlement cap still requires GroAPI/Worker enforcement. Responses report `final_budget_enforced: false`.
 
 ## Status and installation
 
@@ -82,7 +84,7 @@ evolink tasks wait TASK_ID --json
 evolink download TASK_ID --output /absolute/result.png --json
 ```
 
-For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
+For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes expire at the earlier of the backend expiry and 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
 `--max-cost-usd` is an estimate-based submission guard, not a final-settlement guarantee. A complete estimate automatically uses its quoted maximum as this guard unless the user supplied a cap. Incomplete or unknown totals cannot use it. `--media-seconds` is a pricing hint, never a model parameter. Token-billed and unknown-duration models require explicit acceptance of their billing uncertainty; a missing price is refused.
 
@@ -195,7 +197,7 @@ Development starts in `deeplearning-goethe/evolink-cli`. After acceptance, repos
 
 ## Platform and MCP paths
 
-The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Total and daily limits, model permissions and pause apply to both clients; logging out revokes only the current OAuth session. Separate keys are optional when a project needs independent limits. Platform-owned media estimates remain follow-up work.
+The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Total and daily limits, model permissions and pause apply to both clients; logging out revokes only the current OAuth session. Separate keys are optional when a project needs independent limits. Backend parameterized media Quote and its OAuth route must be enabled for account estimates.
 
 The CLI vendors the reviewed shared platform module from the MCP repository with a SHA-256 source/artifact manifest in `src/platform/source.json`. Refresh it on the test host using `scripts/sync-platform-client.mjs`; never edit generated files. The MCP SDK is a development dependency for compatibility fixtures only. No extra package or MCP plugin installation is needed by CLI users.
 
@@ -223,3 +225,24 @@ See [Gemini trusted folders](https://geminicli.com/docs/cli/trusted-folders/) an
 Generation errors preserve the saved quote and request ID when acceptance or charging is uncertain. `charged: no` alone does not authorize a new request: `submission_state` must also establish `not_submitted` or `rejected`. Recover uncertain submissions with the original quote, and query a known task. A new generation needs a fresh estimate and user approval.
 
 A failed/cancelled task does not establish a refund. `tasks get` can successfully return that task, while `tasks wait` exits nonzero with the same task and billing details. `billing.refund_status` reports account-balance evidence: `unknown`, `pending`, `failed`, `completed`, or `not_required`. A completed refund includes recorded credits and time; key-limit restoration remains unknown. Old gateways without billing fields retain unknown status, rather than claiming zero charge or a completed refund.
+
+### Account quotes and refresh
+
+`evolink estimate` uses authenticated backend account Quote by default. The saved
+local `quote_id` and backend `estimate_id` are separate. The saved approval expires
+at the earlier of the backend expiry and 15 minutes. Before the first submission,
+the CLI refreshes Quote and refuses changed amounts, pricing/Policy versions or
+billing parameters until a new estimate is approved.
+
+Use `evolink estimate --refresh-quote ID` to create a fresh approval for the same
+saved input and budget. It cannot refresh a submitted or uncertain submission.
+Unknown submission recovery retains the original backend quote and request ID.
+Known tasks remain readable after quote expiry; an expired uncertain submission
+requires checking the original task rather than creating another paid request.
+
+Supply measured billing data with `--pricing-parameters '{"input_seconds":5.77}'`
+when the published Policy requires it. `--pricing-source public_reference`
+provides a read-only preview and does not create a paid submission approval.
+Backend media Quote and MCP OAuth access must be available; a rejection is shown
+without substituting public prices. Quote does not reserve quota, and the
+current gateway does not yet enforce a final `max_cost_usd` settlement cap.
