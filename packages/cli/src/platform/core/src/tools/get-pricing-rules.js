@@ -7,7 +7,7 @@ import { failure, ok, READ_ONLY } from './shared.js';
 export function registerPricingRules(server) {
     server.registerTool('get_pricing_rules', {
         title: 'Read public pricing rules',
-        description: 'Read schema-2 public default pricing rules, decimal-string rates including fractional UC, minimum charges, tiers and optional full expressions. Free and anonymous upstream. The returned price_selection identifies route-priority prices or legacy minimum configuration prices. Published production coverage is currently text-only. These are public reference rates, not account prices, live availability, a task quote, a bill or a final spending cap. Do not substitute these rules for media estimate_cost or assume empty media results are free.',
+        description: 'Read schema-2 public default pricing rules, decimal-string rates including fractional UC, minimum charges, tiers and optional full expressions. Free and anonymous upstream. The returned price_selection, when present, identifies route-priority prices or legacy minimum configuration prices. Coverage follows the returned published policies and supported legacy text adapters, including media when available. These are public reference rates, not account prices, live availability, a task quote, a bill or a final spending cap. Do not substitute these rules for media estimate_cost or assume empty media results are free.',
         inputSchema: PricingRulesQuery.shape,
         annotations: { title: 'Read public pricing rules', ...READ_ONLY },
     }, async (input) => {
@@ -21,7 +21,7 @@ export function registerPricingRules(server) {
                     : 'Legacy public rates use the lowest configured price, which can include an unavailable route and differ from the web-price reference.',
                 'Public default configuration prices may differ from routed settlement, account-group prices, discounts and promotions.',
                 'No task quote or final spending cap was established. Do not multiply unit rates into a bill; minimum charges, tiers and rounding apply.',
-                'Current published coverage is text-only. Empty image, video or audio results mean rules are not published, not zero cost.',
+                'Coverage follows the models returned for this query. Empty results mean no matching public rules were returned, not zero cost.',
             ];
             const lines = [`Public pricing rules (${body.meta.price_scope}; ${selection}; ${source}); ${models.length} model(s).`, ...warnings];
             for (const model of models) {

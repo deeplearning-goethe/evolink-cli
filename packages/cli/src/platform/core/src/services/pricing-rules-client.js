@@ -7,7 +7,11 @@ import { DEFAULT_READ_TIMEOUT_MS, evoHeaders, fetchWithTimeout, timeoutFromEnv }
 const MAX_BODY_BYTES = 2 * 1024 * 1024;
 const MAX_CACHE_ENTRIES = 64;
 const CACHE_TTL_MS = 60_000;
+// Media policies nest arrays and lookup keys around their expressions. Keep
+// bounded JSON traversal while allowing the published schema's deeper trees.
+const MAX_JSON_DEPTH = 64;
 const decimal = z.string().max(64).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/);
+const signedDecimal = z.string().max(64).regex(/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/);
 const identifier = (max) => z.string().trim().max(max).regex(/^[a-z0-9][a-z0-9._:-]*$/);
 const optionalFilter = (schema) => z.preprocess(value => typeof value === 'string' && value.trim() === '' ? undefined : value, schema.optional());
 export const PricingRulesQuery = z.object({
@@ -34,10 +38,13 @@ const Money = z.object({ uc: decimal, credits: decimal, cny: decimal, usd: decim
     return credits * 10000n * udc === uc * cd && cny * 100000n * udc === uc * yd
         && (delta < 0n ? -delta : delta) * 100000000n <= 680000n * ud * udc;
 }, 'Currency fields must represent the same UC amount.');
+const LookupValues = z.record(z.string().min(1).max(100), signedDecimal)
+    .refine(values => Object.keys(values).length > 0 && Object.keys(values).length <= 100, 'Lookup tables must contain between 1 and 100 entries.');
 const ExpressionSchema = z.lazy(() => z.object({
     op: z.string().min(1).max(40), name: z.string().max(100).optional(), value: z.string().max(128).optional(),
     args: z.array(ExpressionSchema).max(32).optional(),
-}));
+    key: ExpressionSchema.optional(), values: LookupValues.optional(),
+}).refine(node => node.op !== 'lookup' || (node.key !== undefined && node.values !== undefined), 'Lookup expressions require a key and a values table.'));
 const Rounding = z.object({ point: z.string().max(80), mode: z.string().max(40) });
 const rateFields = {
     sku_id: z.string().min(1).max(100), rate: Money, official_rate: Money.optional(), minimum_charge: Money,
@@ -47,6 +54,7 @@ const rateFields = {
 const Tier = z.object({ ...rateFields, multiplier: decimal.refine(value => /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)
         && fraction(value)[0] > 0n), when: ExpressionSchema.optional() });
 const Component = z.object({ ...rateFields, id: z.string().min(1).max(100), role: z.string().min(1).max(100),
+    label_key: z.string().min(1).max(100).optional(),
     dimension: z.string().min(1).max(100), unit: z.string().min(1).max(100),
     billing_unit_size: z.number().int().positive().max(1_000_000_000), display_unit_size: z.number().int().positive().max(1_000_000_000),
     condition: ExpressionSchema.optional(), quantity_rule: ExpressionSchema.optional(), rounding: Rounding.optional(),
@@ -55,7 +63,8 @@ const Component = z.object({ ...rateFields, id: z.string().min(1).max(100), role
 const Parameter = z.object({ name: z.string().min(1).max(100), type: z.string().min(1).max(60),
     required: z.boolean().optional(), default: z.union([z.string(), z.number(), z.boolean(), z.null()]).optional(),
     enum: z.array(z.union([z.string(), z.number(), z.boolean()])).max(100).optional(),
-    description: z.string().max(2000).optional(), minimum: decimal.optional(), maximum: decimal.optional(),
+    values: z.array(z.union([z.string(), z.number(), z.boolean()])).max(100).optional(),
+    description: z.string().max(2000).optional(), minimum: signedDecimal.optional(), maximum: signedDecimal.optional(),
 });
 const Model = z.object({
     model_id: identifier(100), product_id: identifier(100), operation: identifier(50),
@@ -87,7 +96,7 @@ export class PricingRulesError extends Error {
     }
 }
 function bounded(value, depth = 0, budget = { nodes: 0 }) {
-    if (depth > 24 || ++budget.nodes > 100_000)
+    if (depth > MAX_JSON_DEPTH || ++budget.nodes > 100_000)
         return false;
     if (Array.isArray(value))
         return value.every(item => bounded(item, depth + 1, budget));

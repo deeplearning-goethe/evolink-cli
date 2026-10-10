@@ -1,11 +1,40 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { Api } from '../src/api.mjs';
 import { validateCommand, dispatch } from '../src/cli.mjs';
 import { commandHelp } from '../src/help.mjs';
+import { resetPricingRulesCacheForTests } from '../src/platform/core/src/services/pricing-rules-client.js';
+
+test.beforeEach(resetPricingRulesCacheForTests);
+
+const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-public-20261010.json', import.meta.url), 'utf8'));
+function mediaBody(modality) {
+  const data = structuredClone(snapshot);
+  data.meta.fresh_until = new Date(Date.now() + 300000).toISOString();
+  if (modality) data.models = data.models.filter(row => row.modality === modality);
+  return data;
+}
+
+test('CLI shared parser preserves the full 211-model response and each media modality anonymously', async () => {
+  for (const modality of [undefined, 'image', 'video', 'audio']) {
+    const data = mediaBody(modality);
+    const client = new Api({ server: new URL('https://mcp.evolink.ai/mcp'),
+      access: () => assert.fail('Anonymous media rules must not read credentials'),
+    }, { fetchFn: async (_url, init) => {
+      assert.equal(new Headers(init.headers).get('Authorization'), null);
+      return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
+    } });
+    const result = await client.call('get_pricing_rules', { ...(modality ? { modality } : {}), view: 'full' }, { requireCapability: true });
+    assert.deepEqual(result.models, data.models);
+    assert.equal(result.quote_established, false); assert.equal(result.final_budget_enforced, false);
+    assert.doesNotMatch(result.text, /text-only/i);
+  }
+  assert.doesNotMatch(commandHelp(['models', 'pricing']).description, /text-only/i);
+});
 
 function body() { return { meta: { schema_version: '2', catalog_version: 'cat_fixture', pricing_version: 'prc_fixture',
   price_scope: 'public_default', currency: 'USD', exchange_rate_version: 'pricing-fx/v1:USD-CNY=6.8',
