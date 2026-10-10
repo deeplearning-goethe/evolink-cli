@@ -4,7 +4,9 @@ Generate images, video, music and speech directly through the EvoLink platform A
 
 The package calls the EvoLink platform API directly using the assistant's terminal. Requires Node.js 22+.
 
-Quotes and submissions refresh public default-group prices. A failed refresh cannot use an old price to pass a spending cap. Numeric prices retain their published precision; incomplete SKU prices and known unpublished video billing factors produce a partial estimate. Quotes report `pricing_scope: public_default_group` and `final_budget_enforced: false`. Account-specific authoritative quotes and a final settlement cap require platform support.
+The pricing-rules estimation changes described below are an unreleased candidate.
+
+Estimates use the two published full pricing-rules endpoints and exact UC arithmetic, including resolution, tiers, minimum charges and rounding. Public default prices exclude personal discounts. A failed refresh cannot authorize a new submission. Final settlement caps still require GroAPI/Worker enforcement; responses report `final_budget_enforced: false`.
 
 ## Status and installation
 
@@ -75,16 +77,16 @@ For an idempotent installation prompt, check Node.js 22+ and `evolink --version`
 ```sh
 evolink models search --type image --query seedream --json
 evolink models show MODEL --json
-evolink estimate --model MODEL --input-file input.json --max-cost-usd 0.10 --json
+evolink estimate --model MODEL --input-file input.json --json
 # After the user approves the returned quote:
 evolink generate image --quote QUOTE_ID --confirm --json
 evolink tasks wait TASK_ID --json
 evolink download TASK_ID --output /absolute/result.png --json
 ```
 
-For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
+For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes expire at the earlier of the backend expiry and 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
-`--max-cost-usd` is an estimate-based submission guard, not a final-settlement guarantee. A complete estimate automatically uses its quoted maximum as this guard unless the user supplied a cap. Incomplete or unknown totals cannot use it. `--media-seconds` is a pricing hint, never a model parameter. Token-billed and unknown-duration models require explicit acceptance of their billing uncertainty; a missing price is refused.
+Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused.
 
 A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
 
@@ -133,6 +135,15 @@ The CLI persists the request ID before paid submission. Recovery reuses that ID;
 Uploads stream up to 95 MiB directly to the file service using a short-lived upload token issued by the platform. The OAuth access token is never sent to the file service. `uploads get` reads a saved local receipt. A lost response without a saved receipt reports `outcome_unknown` and `result_verified: false`; it does not retry or claim that a result was recovered. The file service has no lookup by client request ID. Legacy proxy slots can be recovered with CLI 0.6.0. Downloads use a product User-Agent, validate redirect destinations, check content types and common media file headers, stream at most 1 GiB per result, and refuse to overwrite existing files. HTTP 200 HTML/error documents are rejected with `invalid_download_content`, with no final file left behind. Header checks do not fully decode codecs. These commands transfer originals and do not alter the generated content or guarantee host inline previews. Missing files/directories, denied permissions and exhausted disk space have separate error codes; fix the local problem and retry the same task's download.
 
 ## Discovery, task pages and all-result delivery
+
+Read structured public configuration prices without logging in:
+
+```sh
+evolink models pricing --model gemini-2.5-pro --view full --json
+evolink models pricing --modality text --lifecycle active --json
+```
+
+This uses `GET /v1/catalog/pricing-rules` (or the single-model route), preserves decimal-string amounts (including fractional UC rates), pricing versions, minimum charges and tier expressions, and revalidates bounded caches with ETag. Full media rules preserve signed parameter bounds, allowed `values`, lookup keys and multiplier tables, and nested expressions. `meta.price_selection=route_priority` identifies the web-aligned route-priority reference; absent metadata or `configured_minimum` means legacy lowest configuration prices. Public defaults can differ from account discounts and failover settlement; unavailable models still have reference prices. Coverage follows the returned published policies and supported legacy text adapters; empty results mean no matching public rules were returned. This command does not create a quote, calculate a bill or authorize a spending cap. Continue using `estimate` with the exact media input and keep its uncertainty and budget guards.
 
 Every command supports local `--help --json`, with option enums, bounds and defaults. New discovery tools and page/model/until filters come from the bundled shared platform module. The CLI checks bundled operation capabilities and reports `capability_unavailable` before calling an unsupported tool or sending an unsupported filter.
 
@@ -186,7 +197,7 @@ Development starts in `deeplearning-goethe/evolink-cli`. After acceptance, repos
 
 ## Platform and MCP paths
 
-The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Total and daily limits, model permissions and pause apply to both clients; logging out revokes only the current OAuth session. Separate keys are optional when a project needs independent limits. Platform-owned media estimates remain follow-up work.
+The CLI uses REST and does not connect to the hosted MCP server. Browser chat clients continue to use remote MCP. Both paths currently share Passport resource permissions and the internal `EvoLink MCP (OAuth)` account limit. The authorization resource remains `https://mcp.evolink.ai/mcp`; it is distinct from the REST API destination. The gateway MCP emergency switch still applies to both paths. Total and daily limits, model permissions and pause apply to both clients; logging out revokes only the current OAuth session. Separate keys are optional when a project needs independent limits. Backend parameterized media Quote and its OAuth route must be enabled for account estimates.
 
 The CLI vendors the reviewed shared platform module from the MCP repository with a SHA-256 source/artifact manifest in `src/platform/source.json`. Refresh it on the test host using `scripts/sync-platform-client.mjs`; never edit generated files. The MCP SDK is a development dependency for compatibility fixtures only. No extra package or MCP plugin installation is needed by CLI users.
 
@@ -214,3 +225,25 @@ See [Gemini trusted folders](https://geminicli.com/docs/cli/trusted-folders/) an
 Generation errors preserve the saved quote and request ID when acceptance or charging is uncertain. `charged: no` alone does not authorize a new request: `submission_state` must also establish `not_submitted` or `rejected`. Recover uncertain submissions with the original quote, and query a known task. A new generation needs a fresh estimate and user approval.
 
 A failed/cancelled task does not establish a refund. `tasks get` can successfully return that task, while `tasks wait` exits nonzero with the same task and billing details. `billing.refund_status` reports account-balance evidence: `unknown`, `pending`, `failed`, `completed`, or `not_required`. A completed refund includes recorded credits and time; key-limit restoration remains unknown. Old gateways without billing fields retain unknown status, rather than claiming zero charge or a completed refund.
+
+### Rules estimates and refresh
+
+`evolink estimate` reads the published full pricing policy for the canonical model.
+The local `quote_id` stores input binding, pricing fingerprint, integer UC subtotal
+and expiry; there is no backend `estimate_id`. Approval expires at the earlier of
+catalog freshness and 15 minutes. Before first submission, the CLI reads the rules
+again and refuses changed prices, policy or usage until a new estimate is approved.
+Neither backend Quote nor new OAuth quote access is required. Existing login,
+shared MCP key, quota and permissions remain.
+
+Use `evolink estimate --refresh-quote ID` for an unsubmitted approval. It preserves
+input and an explicit user budget, creates a new local approval and requires user
+confirmation again. Unknown recovery keeps the original input and request ID;
+a failed replay cannot prove the first submission was free. Known tasks remain
+readable after expiry; check the original task before preparing another request.
+
+Supply required measured or expected billing usage with
+`--pricing-parameters '{"input_seconds":5.77}'`. Default `--pricing-source pricing_rules`
+and old `account`/`public_reference` aliases use the same published full rules.
+Partial estimates name missing usage and cannot check a budget. Estimates exclude
+personal discounts and do not reserve quota or guarantee the final charge.

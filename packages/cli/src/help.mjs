@@ -17,12 +17,18 @@ const COMMANDS = {
   balance: ['', 'Read account balance and the shared CLI/MCP OAuth key limits. Free.', {}],
   'models search': ['[options]', 'Search currently available models; search order is not a quality ranking.', { query: string('Search keywords'), type: allMedia, limit: integer(1, 50, 20), page: integer(1, 100000, 1) }],
   'models show': ['MODEL', 'Read documented parameters, example input, reference fields and pricing. Free.', {}],
+  'models pricing': ['[options]', 'Read public default pricing rules without login. Decimal-string rates, minimums, tiers and expressions are configuration references, not account prices, quotes, bills or final spending caps. Coverage follows returned policies and legacy text adapters; empty results do not mean free.', {
+    model: string('Exact model ID; omit for the filtered list'), 'product-id': string('Product ID'), operation: string('Operation, e.g. text_generation'),
+    modality: choice(['text', 'image', 'video', 'audio']), lifecycle: choice(['active', 'preview', 'deprecated']), view: { ...choice(['summary', 'full']), default: 'full' },
+  }],
   'models schema': ['MODEL', 'Read versioned input and generation-submission response schemas. The response schema may omit final task outputs; runtime constraints also apply.', {}],
   'models recommend': ['--type TYPE [options]', 'Compare documented available alternatives with selection reasons. Unit rates are not total quotes.', { type: media, query: string('Search keywords; every term must match'), references: string('Comma-separated image,video,audio'), limit: integer(1, 10, 3) }],
   'docs search': ['--query TEXT [options]', 'Search versioned official model reference excerpts, not the live full website.', { query: string('Required model reference keywords'), type: allMedia, limit: integer(1, 20, 5) }],
-  estimate: ['--model MODEL --input-file FILE [options]', 'Prepare a 15-minute quote. Show cost uncertainties and obtain user approval. max-cost-usd checks the submission estimate; it does not cap final settlement.', {
+  estimate: ['--model MODEL --input-file FILE [options] | --refresh-quote ID', 'Prepare an account estimate valid until the backend expiry, at most 15 minutes. Show the estimated cost and material uncertainty, then obtain user approval. No spending cap is created from the estimate.', {
     model: string('Required model ID'), input: string('JSON object; mutually exclusive with input-file'), 'input-file': string('Local JSON file; mutually exclusive with input'), prompt: string('Optional prompt'),
-    'max-cost-usd': { type: 'number', exclusive_minimum: 0, maximum: 10000 }, 'media-seconds': { type: 'number', exclusive_minimum: 0, maximum: 3600 },
+    'pricing-source': choice(['account', 'public_reference']), 'pricing-parameters': string('JSON object containing declared billing usage'),
+    'refresh-quote': string('Refresh an unsubmitted saved quote with its existing input and budget'),
+    'max-cost-usd': { type: 'number', exclusive_minimum: 0, maximum: 10000, description: 'Compatibility option for an explicit user budget: compare the estimate only; it does not cap the final charge' }, 'media-seconds': { type: 'number', exclusive_minimum: 0, maximum: 3600 },
   }],
   'tasks get': ['TASK_ID', 'Read one task. A failed task status is a successful query outcome. Free.', {}],
   'tasks wait': ['TASK_ID [options]', 'Wait locally. Ctrl-C stops waiting; the submitted task continues. Free.', { timeout: integer(1, 86400, 1800) }],

@@ -56,10 +56,14 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
   models show MODEL              Read parameters and pricing (free)
+  models pricing [--model MODEL] [--modality TYPE] [--view summary|full]
+                                 Read public default rules; not a quote (no login)
   models schema MODEL            Read versioned input/submission schemas (free)
   models recommend --type TYPE [--query TEXT] [--references image,video,audio]
   docs search --query TEXT        Search official model reference excerpts (free)
-  estimate --model MODEL --input-file FILE [--max-cost-usd USD] [--media-seconds N]
+  estimate --model MODEL --input-file FILE [--media-seconds N]
+           [--pricing-parameters JSON] [--pricing-source pricing_rules]
+  estimate --refresh-quote ID      Refresh saved input and budget; approval required
   generate image|video|audio --quote ID --confirm [--wait] [--timeout SECONDS]
   tasks get ID | tasks wait ID [--timeout SECONDS]
   tasks list [--type TYPE] [--status STATUS] [--since TIME] [--limit N]
@@ -98,8 +102,8 @@ Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
 
-const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'input', 'input-file', 'prompt', 'media-seconds',
-  'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
+const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle', 'input', 'input-file', 'prompt', 'media-seconds',
+  'pricing-source', 'pricing-parameters', 'refresh-quote', 'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
 for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
 function number(value, name, min, max, integer = false) {
@@ -115,9 +119,10 @@ export function validateCommand(args, options) {
     setup: [1, 'agent', 'no-browser', 'timeout'],
     'auth login': [2, 'no-browser', 'timeout'], 'auth status': [2], 'auth logout': [2], balance: [1],
     'models search': [2, 'query', 'type', 'limit', 'page'], 'models show': [3], 'models schema': [3],
+    'models pricing': [2, 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle'],
     'models recommend': [2, 'type', 'query', 'references', 'limit'], 'docs search': [2, 'query', 'type', 'limit'],
     usage: [1, 'since', 'until', 'type', 'model', 'max-pages'],
-    estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd'],
+    estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd', 'pricing-source', 'pricing-parameters', 'refresh-quote'],
     'generate image': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate video': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate audio': [2, 'quote', 'confirm', 'wait', 'timeout'],
     'tasks get': [3], 'tasks wait': [3, 'timeout'], 'tasks batch': [2, 'ids'], 'tasks list': [2, 'type', 'status', 'since', 'until', 'model', 'page', 'limit'], 'tasks resume': [2, 'quote'],
     upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index', 'all', 'output-dir', 'template', 'resume'],
@@ -179,9 +184,15 @@ async function estimateArgs(options) {
     requireThat(input.prompt === undefined || input.prompt === options.prompt, 'invalid_input', 'prompt was supplied twice with different values.');
     input.prompt = options.prompt;
   }
+  let pricingParameters;
+  if (options['pricing-parameters'] !== undefined) {
+    try { pricingParameters = JSON.parse(options['pricing-parameters']); } catch { throw new CliError('invalid_input', 'pricing-parameters must contain valid JSON.'); }
+    requireThat(pricingParameters && typeof pricingParameters === 'object' && !Array.isArray(pricingParameters), 'invalid_input', 'pricing-parameters must be a JSON object.');
+  }
+  requireThat(options['pricing-source'] === undefined || ['pricing_rules', 'account', 'public_reference'].includes(options['pricing-source']), 'invalid_option', 'pricing-source must be pricing_rules (account/public_reference remain compatibility aliases).');
   const media = number(options['media-seconds'], 'media-seconds', Number.MIN_VALUE, 3600);
   const cap = number(options['max-cost-usd'], 'max-cost-usd', Number.MIN_VALUE, 10_000);
-  return { model: options.model, input, ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
+  return { model: options.model, input, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
 export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome }) {
@@ -195,6 +206,14 @@ export async function dispatch(positionals, options, { state, server, credential
   }
   if (command === 'balance') return client.call('check_balance');
   if (command === 'models') {
+    if (action === 'pricing') return client.call('get_pricing_rules', {
+      ...(options.model !== undefined ? { model: options.model } : {}),
+      ...(options.modality !== undefined ? { modality: options.modality } : {}),
+      ...(options.view !== undefined ? { view: options.view } : {}),
+      ...(options['product-id'] !== undefined ? { product_id: options['product-id'] } : {}),
+      ...(options.operation !== undefined ? { operation: options.operation } : {}),
+      ...(options.lifecycle !== undefined ? { lifecycle: options.lifecycle } : {}),
+    }, { requireCapability: true });
     if (action === 'show' && id) return client.call('get_model', { model: id });
     if (action === 'schema' && id) {
       const model = await client.call('get_model', { model: id });
@@ -210,7 +229,14 @@ export async function dispatch(positionals, options, { state, server, credential
   if (command === 'docs') return client.call('search_docs', { query: options.query, type: options.type || 'all', limit: number(options.limit, 'limit', 1, 20, true) || 5 }, { requireCapability: true });
   if (command === 'usage') return client.call('get_task_usage', { since: options.since || '30d', until: options.until, model: options.model, type: options.type,
     max_pages: number(options['max-pages'], 'max-pages', 1, 20, true) || 5 }, { requireCapability: true });
-  if (command === 'estimate') return media.estimate(await estimateArgs(options));
+  if (command === 'estimate') {
+    if (options['refresh-quote']) {
+      requireThat(!['model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd', 'pricing-source', 'pricing-parameters'].some(key => options[key] !== undefined),
+        'invalid_option', 'refresh-quote reuses the saved input and budget; do not combine it with new estimate parameters.');
+      return media.refresh(options['refresh-quote']);
+    }
+    return media.estimate(await estimateArgs(options));
+  }
   if (command === 'generate') {
     requireThat(options.quote, 'missing_quote', 'Run estimate and obtain user approval before generation.');
     requireThat(!['model', 'input', 'input-file', 'prompt', 'max-cost-usd', 'media-seconds'].some(k => options[k] !== undefined), 'quote_changed', 'Generation uses the saved quote. Change inputs by preparing a new estimate.');

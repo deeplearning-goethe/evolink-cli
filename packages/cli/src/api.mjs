@@ -31,6 +31,19 @@ export class Api {
     if (requireCapability) requireThat(this.platform.supports(name, requiredInputs),
       'capability_unavailable', 'This CLI does not contain the requested platform capability. Update the CLI; no request was sent.',
       { tool: name, required_inputs: requiredInputs, request_sent: false });
+    // Public configuration rules do not require login, refresh or key access.
+    if (name === 'get_pricing_rules') {
+      const result = await this.platform.call(name, args, {
+        http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli',
+          version: CLI_VERSION, controlBaseUrl: this.apiUrl.origin },
+      });
+      const data = result.structuredContent;
+      const text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
+      if (result.isError || data?.ok === false) throw new CliError(this.signal?.aborted ? 'interrupted' : data?.error?.code || data?.error?.category || 'api_failed',
+        safeMessage(text || 'Public pricing rules could not be read.'), data, this.signal?.aborted ? 130 : 1);
+      requireThat(data?.ok === true, 'unsupported_response', 'EvoLink returned no structured pricing rules.');
+      return { ...data, text };
+    }
     for (let attempt = 0; attempt < 2; attempt++) {
       const access = await this.credentials.access(attempt > 0);
       const result = await this.platform.call(name, args, this.context(access, name));

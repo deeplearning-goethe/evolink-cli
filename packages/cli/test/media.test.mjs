@@ -100,12 +100,25 @@ test('caps, billing statuses, validity and balances: seeded cross combinations',
   assert.doesNotThrow(() => checkEstimate({ input_valid: null, estimate: { status: 'token_billed' } }));
 });
 
-test('a complete quote automatically forwards its maximum as a submission guard', async t => {
-  const { data, media } = await context(t);
+test('an invalid input is refused even when the user supplies no budget', async t => {
+  const { media, mcp, state, data } = await context(t);
+  const call = mcp.call.bind(mcp);
+  mcp.call = async (name, args) => name === 'estimate_cost'
+    ? { ...await call(name, args), input_valid: false, problems: [{ param: 'prompt', message: 'Required input is missing.' }] }
+    : call(name, args);
+  await assert.rejects(media.estimate({ model: 'image', input: {} }), { code: 'invalid_input' });
+  assert.equal(data.calls.some(call => call.name.startsWith('generate_')), false);
+  await assert.rejects(fs.stat(path.join(state.home, 'quotes')), { code: 'ENOENT' });
+});
+
+test('a complete quote shows its estimate without inventing or forwarding a spending cap', async t => {
+  const { data, media, state } = await context(t);
   const q = await media.estimate({ model: 'image', input: { prompt: 'price guard' } });
-  assert.equal(q.max_cost_usd, 0.02); assert.equal(q.cap_source, 'quote');
+  assert.equal(q.estimate.max_usd, 0.02);
+  assert.equal(Object.hasOwn(q, 'max_cost_usd'), false); assert.equal(Object.hasOwn(q, 'cap_source'), false);
+  assert.equal(Object.hasOwn((await state.read('quotes', q.quote_id)).args, 'max_cost_usd'), false);
   await media.generate('image', q.quote_id, { confirmed: true });
-  assert.equal(data.calls.find(c => c.name === 'generate_image').args.max_cost_usd, 0.02);
+  assert.equal(Object.hasOwn(data.calls.find(c => c.name === 'generate_image').args, 'max_cost_usd'), false);
 });
 
 test('invalid command options fail before any task is submitted', () => {

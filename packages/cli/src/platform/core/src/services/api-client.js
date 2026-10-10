@@ -155,6 +155,11 @@ export async function getAvailableModelIds(config) {
     }
     return data.data.map(model => model.id);
 }
+/** Read-only account Quote. It reuses the caller's API key or MCP OAuth token. */
+export async function requestAccountQuote(config, body) {
+    const result = await rawRequest(config, { method: 'POST', path: '/v1/agent-estimates', body, tool: 'estimate_cost' });
+    return result.data;
+}
 /** @deprecated kept for callers outside the tools; use submitTask. */
 export async function apiRequest(config, options) {
     if (options.method !== 'POST' || !options.body) {

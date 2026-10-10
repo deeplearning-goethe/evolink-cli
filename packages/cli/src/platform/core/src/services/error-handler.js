@@ -283,7 +283,7 @@ export function classifyGatewayError(status, body, retryAfterMs, headerRequestId
     const error = envelope(body);
     const rawCode = text(error.code)?.toLowerCase();
     const knownCodes = new Set([...ACCOUNT_CODES, ...KEY_QUOTA_CODES, ...KEY_DAILY_CODES, ...CONTENT_CODES, ...UNAVAILABLE_CODES, ...CONNECTION_ENDED_CODES, ...SERVICE_CODES,
-        'mcp_paused', 'mcp_key_expired', 'mcp_channel_disabled', 'key_disabled', 'key_expired', 'key_model_not_allowed', 'idempotency_conflict', 'paid_outcome_unknown', 'agent_session_unavailable', 'mcp_connection_create_failed', 'mcp_token_invalid', 'user_disabled', 'upload_token_rate_limited', 'upload_token_unavailable', 'service_unavailable', 'invalid_token', 'internal_error', 'invalid_parameters', 'invalid_parameter', 'invalid_media_url', 'invalid_request']);
+        'mcp_paused', 'mcp_key_expired', 'mcp_channel_disabled', 'key_disabled', 'key_expired', 'key_model_not_allowed', 'idempotency_conflict', 'paid_outcome_unknown', 'agent_session_unavailable', 'mcp_connection_create_failed', 'mcp_token_invalid', 'user_disabled', 'upload_token_rate_limited', 'upload_token_unavailable', 'service_unavailable', 'invalid_token', 'internal_error', 'invalid_parameters', 'invalid_parameter', 'invalid_media_url', 'invalid_request', 'unsupported_parameters', 'estimate_unsupported', 'pricing_policy_not_found', 'pricing_unavailable', 'model_access_denied', 'ip_restricted']);
     const code = rawCode && knownCodes.has(rawCode) ? rawCode : undefined;
     const mode = currentCredentialMode();
     const mcpScope = text(error.limit_scope)?.toLowerCase() === 'mcp';
@@ -303,6 +303,13 @@ export function classifyGatewayError(status, body, retryAfterMs, headerRequestId
         idempotency_conflict: 'This request ID is already associated with a different request.',
         outcome_unknown: 'The earlier submission outcome is unknown.',
     }[category] ?? 'EvoLink could not complete this operation.';
+    if (code === 'unsupported_parameters' || code === 'estimate_unsupported') {
+        message = 'Account media quotes are not enabled at this gateway. Preserve the generation input and budget; retry when backend quoting is available.';
+    }
+    if (code === 'pricing_policy_not_found')
+        message = 'This model has no published policy available for an account quote.';
+    if (code === 'pricing_unavailable')
+        message = 'The account quote is temporarily unavailable. Preserve the input and budget and retry later.';
     if (status === 415 && category === 'invalid_request')
         message = 'The request uses an unsupported file type or media format.';
     const details = {};

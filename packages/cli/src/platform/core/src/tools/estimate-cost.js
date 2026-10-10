@@ -4,7 +4,10 @@ import { z } from 'zod';
 import { getCredits } from '../services/api-client.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { formatIssues, validateInput } from '../services/param-validator.js';
-import { estimateCost, formatEstimateRange } from '../services/pricing-client.js';
+import { formatEstimateRange } from '../services/pricing-client.js';
+import { PricingRulesError } from '../services/pricing-rules-client.js';
+import { QuoteError, QuoteParameters } from '../services/pricing-quote-client.js';
+import { createRulesEstimate } from '../services/pricing-rules-estimate.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 import { currentCredentialMode } from '../request-context.js';
@@ -21,19 +24,24 @@ export function registerEstimateCost(server, config) {
             model: z.string().min(1).max(128).describe('Model ID, e.g. "seedance-2.0-text-to-video".'),
             input: z.record(z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
+            pricing_source: z.enum(['pricing_rules', 'account', 'public_reference']).default('pricing_rules').describe('Use published full pricing rules for public default estimates. The old account/public_reference values are compatibility aliases; neither requests a backend account quote.'),
+            pricing_parameters: QuoteParameters.optional().describe('Measured or expected billing usage declared by the pricing policy, such as input_seconds. Do not include user_group, prices or generation prompts.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
-    }, async ({ model, input, media_seconds: mediaSeconds }) => {
+    }, async ({ model, input, media_seconds: mediaSeconds, pricing_source: pricingSource, pricing_parameters: pricingParameters }) => {
         try {
-            const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false });
+            const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false, skipPricing: true });
             if (!entry) {
                 const suggestions = suggestModels(catalog, model);
                 return failure(`Unknown model "${model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs.`, { error: { category: 'not_found', param: 'model' }, suggestions });
             }
             const values = input ?? {};
             const validation = entry.spec ? validateInput(entry.spec, values) : undefined;
-            const estimate = estimateCost(entry.priced, entry.kind, values, entry.spec, { mediaSeconds });
+            if (validation?.errors.length)
+                return failure('The generation input is invalid; no estimate was created.', { input_valid: false, problems: validation.errors, error: { category: 'invalid_request' }, charged: 'no' });
+            const rulesEstimate = await createRulesEstimate(entry, values, { mediaSeconds, pricingParameters });
+            const estimate = rulesEstimate.estimate;
             const lines = [`Estimate for ${entry.id} (${entry.kind}); nothing was submitted or charged.`];
             if (!validation) {
                 lines.push('Input not checked: this model\'s parameters are not documented here.');
@@ -68,7 +76,16 @@ export function registerEstimateCost(server, config) {
             const structured = {
                 model: entry.id,
                 type: entry.kind,
-                pricing_scope: 'public_default_group',
+                pricing_scope: 'public_default',
+                pricing_source: 'pricing_rules',
+                pricing_quote: rulesEstimate.approval,
+                amounts: rulesEstimate.amounts,
+                components: rulesEstimate.components,
+                pricing_parameters: rulesEstimate.parameters,
+                policy_version: rulesEstimate.rule.policy_version,
+                policy_checksum: rulesEstimate.rule.policy_checksum,
+                settlement_basis: rulesEstimate.rule.settlement_basis,
+                expires_at: rulesEstimate.approval.expires_at,
                 final_budget_enforced: false,
                 input_valid: validation ? validation.errors.length === 0 : null,
                 problems: validation?.errors ?? [],
@@ -122,15 +139,23 @@ export function registerEstimateCost(server, config) {
             catch {
                 lines.push('Balance: could not be read right now.');
             }
-            if (catalog.pricingWarning) {
-                lines.push(`Note: ${catalog.pricingWarning}`);
-                structured.pricing_warning = catalog.pricingWarning;
-            }
-            lines.push('This is an estimate from published prices. The amount actually reserved is shown when the task is submitted, and the final charge when it finishes.');
+            lines.push(`Estimate valid until ${rulesEstimate.approval.expires_at}.`, 'Public default estimate; account discounts are not included. Confirm this estimated cost before generation. Final charges depend on actual usage.');
             return ok(lines.join('\n'), structured);
         }
         catch (error) {
-            return errorResult(error);
+            if (error instanceof PricingRulesError)
+                return failure('The model pricing rules could not be verified. No estimate or generation was created.', {
+                    error: { category: 'estimate_unavailable', code: error.code, status: error.status }, pricing_source: pricingSource,
+                    submission_allowed: false, final_budget_enforced: false, charged: 'no'
+                });
+            if (error instanceof QuoteError)
+                return failure(`${error.message} Nothing was submitted or charged.`, {
+                    error: { category: 'estimate_unavailable', code: error.code, ...(error.param ? { param: error.param } : {}) },
+                    pricing_source: pricingSource, submission_allowed: false, final_budget_enforced: false, charged: 'no'
+                });
+            const failed = errorResult(error);
+            return { ...failed, structuredContent: { ...failed.structuredContent, pricing_source: pricingSource,
+                    submission_allowed: false, final_budget_enforced: false, charged: 'no' } };
         }
     });
 }

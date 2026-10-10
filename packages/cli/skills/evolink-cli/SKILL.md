@@ -11,9 +11,11 @@ After loading this skill, continue the requested workflow by executing its requi
 
 ## Quote failure and budget rules
 
-- A user-specified budget is mandatory on **every** estimate attempt: include `--max-cost-usd` with the same amount. Removing that flag is changing the user's request, even though estimation itself is free.
+- By default, show the estimated cost and ask for approval. Do not invent or display an additional spending cap, and never derive `max_cost_usd` from the quote.
+- If the user explicitly specifies a budget, compare the estimate with it and preserve that budget on every attempt. The compatibility option `--max-cost-usd` carries this estimate comparison; it does not limit the final charge. Pause if the estimate exceeds the budget or is incomplete. If the user requires a guaranteed final maximum, explain that this client cannot enforce it before obtaining approval for any changed requirement.
 - If the host denies an estimate command by policy, **stop this task for the current turn**. Tell the user that the quote is unavailable and the estimate needs permission. Do not issue another estimate command with fewer flags, a different shell or another tool. Resume only after the host's normal permission flow permits the original request with its unchanged budget.
 - If estimation fails, there is no usable quote and no generation to approve. Catalog starting prices cannot replace a task's total. Report the failure and retain the budget; do not request generation confirmation or submit a paid task.
+- When supported, `models pricing --model MODEL --view full --json` reads public default rules without login. Coverage follows the returned published policies and legacy text adapters; missing rules do not mean free. Preserve fractional UC decimal strings, signed parameter bounds, allowed `values`, lookup keys and tables, nested expressions, minimum charges, tiers, price scope and validity. `meta.price_selection=route_priority` means a web-aligned reference; absent metadata means legacy minimum configuration prices. Public rates may differ from account prices and failover settlement. This response never replaces `estimate`, creates a quote or establishes a final spending cap.
 
 ## Connect
 
@@ -47,7 +49,7 @@ For image edits, reference-based video, speech or music, read [media workflows](
 - When comparing reference support, retrieving schemas or searching model documentation, read [Discovery and delivery extensions](references/capabilities.md). Use `models recommend`, `models schema` and `docs search` only when the installed CLI supports them. Keep the user's chosen model; recommendations explain alternatives, not automatic approval.
 - For a local reference, run `evolink upload /absolute/path --json` and use its `file_url` in the model input. A chat attachment must have a readable local file or public URL. Keep the original `upload_id` if a response is lost. `uploads get ID` reads the saved receipt and, when supported by the file service, recovers a completed upload without resending bytes. If it returns `outcome_unknown` and `result_verified: false`, no result was verified; check the user's files before uploading again. A missing receipt from an older service does not prove the file failed to arrive. Legacy MCP upload slots require the older CLI version.
 - Prepare a JSON input file using the model's documented parameters. Run `evolink estimate --model MODEL --input-file /absolute/input.json --json`, adding `--max-cost-usd` only for a user-specified cap. `--media-seconds` is an estimation hint, not a model `duration` parameter or a billing guarantee.
-- Show the user the model, input/reference, number/duration, output settings, estimated total and material uncertainties. For token billing or unknown duration, show the rates and state that the total is unknown. A partial estimate is not an upper bound. Spending caps currently protect the submission estimate, not final settlement.
+- Show the user the model, input/reference, number/duration, output settings, estimated total and material uncertainties. For token billing or unknown duration, show the rates and state that the total is unknown. A partial estimate is not a total. Do not add a separate cap to the default confirmation; if the user gave a budget, say whether the estimate fits it.
 
 Only a successful `estimate` response with `ok: true` and a returned `quote_id` can be approved. For invalid input, unavailable pricing, insufficient balance or an uncheckable cap, report the error and correct that problem before quoting again with the same budget. Do not invent a total or quote ID, run `generate --confirm`, or disable host permission controls.
 
@@ -78,3 +80,13 @@ Use `generate` for the first submission of an approved quote. `tasks resume` is 
 Use `--json` for commands consumed by the assistant. Progress is on stderr; stdout is one JSON envelope with `schema_version: 1`. `ok: false` and a nonzero exit code indicate a command error; a successful task query reporting `status: failed` is a task outcome, not a failed CLI invocation. Read the error's recovery details before retrying. For `invalid_status`, use `error.details.allowed_values` and correct only the free query; local status validation occurs before a platform request. Never guess an enum, interpret an empty list as a service failure, or resubmit a paid task to fix a query error. Run `evolink --help` for the maintained command reference and `evolink tasks list --help` for task filters.
 
 For setup problems, run `evolink doctor --agent NAME --json` if the installed version supports the agent option; otherwise use `doctor --json`. Read every failed or skipped check. On Linux, login and later commands need the same unlocked Secret Service/D-Bus session. On SSH hosts, opening the link on another computer requires forwarding the loopback callback port; `--no-browser` does not solve callback routing. Report connection, model discovery and assistant skill discovery separately.
+
+
+Estimates use published full pricing rules and show public default prices, excluding
+personal discounts. The local approval expires no later than the rules' freshness.
+Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
+the input and explicit user budget and obtain approval again. Supply missing billing
+usage with `--pricing-parameters JSON`; never invent unknown token counts or media
+lengths. Partial subtotals cannot check a budget. If rules are unavailable or change,
+pause and preserve the budget. Actual usage can change the final charge; final
+settlement caps require gateway/Worker support.

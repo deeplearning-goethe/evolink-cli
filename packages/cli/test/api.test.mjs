@@ -65,7 +65,7 @@ test('a cached price cannot authorize a quote or capped submit after pricing fai
   const { f, media, client } = await context(t);
   await client.call('get_model', { model: 'fixture-image' });
   f.estimateFailure = true;
-  await assert.rejects(media.estimate({ model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }), { code: 'uncheckable_cap' });
+  await assert.rejects(media.estimate({ model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }), { code: 'estimate_unavailable' });
   await assert.rejects(client.call('generate_image', { model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }));
   assert.equal(f.paid.size, 0);
 });
@@ -293,7 +293,7 @@ test('ambiguous paid responses retain the original quote and independent accepte
       if (new URL(url).pathname === `/v1/${kind === 'image' ? 'images' : kind === 'video' ? 'videos' : 'audios'}/generations`) {
         ledger.add(new Headers(options.headers).get('idempotency-key'));
         if (broken) {
-          if (fault === '503') return new Response(JSON.stringify({ error: { code: 'service_unavailable', message: 'Bearer sk-synthetic secret.upstream.test' } }), { status: 503 });
+          if (fault === '503') return new Response(JSON.stringify({ error: { code: 'estimate_unavailable', message: 'Bearer sk-synthetic secret.upstream.test' } }), { status: 503 });
           if (fault === 'body') return { ok: true, headers: new Headers(), text: async () => { throw new Error('secret.upstream.test'); } };
           return new Response('{}');
         }
@@ -310,4 +310,15 @@ test('ambiguous paid responses retain the original quote and independent accepte
     assert.equal(recovered.client_request_id, saved.client_request_id);
     assert.equal(ledger.size, 1); assert.equal(f.paid.size, 1);
   }
+});
+
+
+test('public_reference compatibility estimates full rules and refuses unavailable prices', async t => {
+  const { f, media } = await context(t);
+  const args = { model: 'fixture-image', input: { prompt: 'reference only' }, pricing_source: 'public_reference' };
+  const first = await media.estimate(args);
+  assert.equal(first.estimate.status, 'estimated'); assert.ok(first.quote_id);
+  f.estimateFailure = true;
+  await assert.rejects(media.estimate(args), error => error.details.submission_allowed === false);
+  assert.equal(f.paid.size, 0);
 });
