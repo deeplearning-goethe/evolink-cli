@@ -100,6 +100,17 @@ test('caps, billing statuses, validity and balances: seeded cross combinations',
   assert.doesNotThrow(() => checkEstimate({ input_valid: null, estimate: { status: 'token_billed' } }));
 });
 
+test('an invalid input is refused even when the user supplies no budget', async t => {
+  const { media, mcp, state, data } = await context(t);
+  const call = mcp.call.bind(mcp);
+  mcp.call = async (name, args) => name === 'estimate_cost'
+    ? { ...await call(name, args), input_valid: false, problems: [{ param: 'prompt', message: 'Required input is missing.' }] }
+    : call(name, args);
+  await assert.rejects(media.estimate({ model: 'image', input: {} }), { code: 'invalid_input' });
+  assert.equal(data.calls.some(call => call.name.startsWith('generate_')), false);
+  await assert.rejects(fs.stat(path.join(state.home, 'quotes')), { code: 'ENOENT' });
+});
+
 test('a complete quote shows its estimate without inventing or forwarding a spending cap', async t => {
   const { data, media, state } = await context(t);
   const q = await media.estimate({ model: 'image', input: { prompt: 'price guard' } });
