@@ -9,7 +9,7 @@ import { setup } from '../src/setup.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { skillStatus, installSkill } from '../src/skills.mjs';
 import { State } from '../src/state.mjs';
-import { Credentials, callbackListener } from '../src/auth.mjs';
+import { Credentials, callbackListener, loginLandingUrl, siteLocale } from '../src/auth.mjs';
 import { Mcp } from './legacy-mcp.mjs';
 import { CliError } from '../src/errors.mjs';
 import { fixture, MemoryVault } from './fixture.mjs';
@@ -21,6 +21,20 @@ async function temporary(t) {
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   return home;
 }
+/** Follows redirects only between loopback addresses, the way the tests' browser should. */
+async function followLoopback(url) {
+  let next = new URL(url);
+  for (let hop = 0; hop < 5; hop++) {
+    const response = await fetch(next, { redirect: 'manual' });
+    const location = response.headers.get('location');
+    if (!location) return response;
+    const target = new URL(location, next);
+    if (!['127.0.0.1', '[::1]', 'localhost'].includes(target.hostname)) return response;
+    next = target;
+  }
+  throw new Error('too many loopback redirects');
+}
+
 async function context(t) {
   const f = await fixture(); t.after(f.close);
   const home = await temporary(t), vault = new MemoryVault(), state = new State(path.join(home, 'state'));
@@ -28,7 +42,9 @@ async function context(t) {
   const mcp = new Mcp(credentials);
   const login = credentials.login.bind(credentials);
   const progress = [];
-  credentials.login = options => login({ ...options, browser: async url => { await fetch(url); } });
+  // A browser follows the fixture's redirect to the loopback callback, which now sends it
+  // on to the public site; the test stops there instead of leaving the machine.
+  credentials.login = options => login({ ...options, browser: async url => { await followLoopback(url); } });
   return { f, home, vault, state, credentials, mcp,
     options: { state, server: f.server, credentials, mcp, skillHome: home, agent: 'codex', progress: text => progress.push(text) }, progress };
 }
@@ -143,11 +159,13 @@ test('callbacks reject repeat use, timeouts and cancellation without echoing aut
   try {
     const url = new URL(accepted.redirectUrl);
     url.searchParams.set('state', 'fixture-state'); url.searchParams.set('iss', 'https://passport.evolink.ai'); url.searchParams.set('code', 'fixture-private-code');
-    const response = await fetch(url), html = await response.text();
-    assert.equal(response.status, 200); assert.match(response.headers.get('content-security-policy'), /nonce-/);
-    assert.ok(html.includes('history.replaceState')); assert.ok(!html.includes('fixture-private-code'));
+    const response = await fetch(url, { redirect: 'manual', headers: { 'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8' } });
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), 'https://evolink.ai/zh/mcp?login=cli');
+    assert.ok(!response.headers.get('location').includes('fixture-private-code'));
+    assert.equal(await response.text(), '');
     assert.equal(await accepted.code, 'fixture-private-code');
-    assert.equal((await fetch(url)).status, 410);
+    assert.equal((await fetch(url, { redirect: 'manual' })).status, 410);
   } finally { await accepted.close(); }
   const timeout = await callbackListener({ state: 'fixture', issuer: 'https://passport.evolink.ai', timeout: 10 });
   try { await assert.rejects(timeout.code, { code: 'login_timeout' }); } finally { await timeout.close(); }
@@ -184,5 +202,39 @@ test('setup and login timeout/agent/browser argument combinations preserve bound
     const valid = timeout.trim() !== '' && Number.isInteger(Number(timeout)) && Number(timeout) >= 30 && Number(timeout) <= 900;
     if (valid) assert.doesNotThrow(() => validateCommand(command, options));
     else assert.throws(() => validateCommand(command, options), { code: 'invalid_option' });
+  }
+});
+
+test('the login landing page follows the browser language and never carries the code (seed 20261012)', () => {
+  const cases = [
+    ['zh-CN,zh;q=0.9,en;q=0.8', 'zh', 'https://evolink.ai/zh/mcp?login=cli'],
+    ['en-US,en;q=0.9', 'en', 'https://evolink.ai/mcp?login=cli'],
+    ['de-DE,de;q=0.9,en;q=0.7', 'de', 'https://evolink.ai/de/mcp?login=cli'],
+    ['fr', 'fr', 'https://evolink.ai/fr/mcp?login=cli'],
+    ['es-419;q=0.8,en;q=0.5', 'es', 'https://evolink.ai/es/mcp?login=cli'],
+    ['ja,en-US;q=0.9', 'ja', 'https://evolink.ai/ja/mcp?login=cli'],
+    ['ko-KR', 'ko', 'https://evolink.ai/ko/mcp?login=cli'],
+    ['pt-BR,pt;q=0.9', 'en', 'https://evolink.ai/mcp?login=cli'],
+    ['', 'en', 'https://evolink.ai/mcp?login=cli'],
+    [undefined, 'en', 'https://evolink.ai/mcp?login=cli'],
+    ['zh;q=0.3, ja;q=0.8', 'ja', 'https://evolink.ai/ja/mcp?login=cli'],
+    ['en;q=0, zh', 'zh', 'https://evolink.ai/zh/mcp?login=cli'],
+    ['*', 'en', 'https://evolink.ai/mcp?login=cli'],
+    ['zh;q=abc,fr', 'fr', 'https://evolink.ai/fr/mcp?login=cli'],
+  ];
+  for (const [header, locale, landing] of cases) {
+    assert.equal(siteLocale(header), locale, `locale for ${header}`);
+    assert.equal(loginLandingUrl(header), landing, `landing for ${header}`);
+  }
+  // Seeded random mixes of the site's languages always pick the heaviest listed one.
+  const languages = ['en', 'zh', 'de', 'fr', 'es', 'ja', 'ko'];
+  let seed = 20261012;
+  const random = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed / 2147483648; };
+  for (let i = 0; i < 200; i++) {
+    const picked = languages.filter(() => random() < 0.5);
+    const weights = picked.map(() => Math.round(random() * 9 + 1) / 10);
+    const header = picked.map((lang, k) => `${lang};q=${weights[k]}`).join(',');
+    const best = picked.length ? picked[weights.indexOf(Math.max(...weights))] : 'en';
+    assert.equal(siteLocale(header), best, header);
   }
 });

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { authorize, refresh, metadata } from './oauth.mjs';
 import { hash } from './state.mjs';
-import { authFetch, ISSUER, SERVER } from './network.mjs';
+import { authFetch, ISSUER, SERVER, SITE } from './network.mjs';
 import { CliError, requireThat } from './errors.mjs';
 
 export class Vault {
@@ -82,6 +82,26 @@ export function openBrowser(url, onFailure = () => {}) {
   child.unref();
 }
 
+// The site's languages; English has no path prefix.
+const SITE_LOCALES = ['en', 'zh', 'de', 'fr', 'es', 'ja', 'ko'];
+
+/** The site language the browser prefers (Accept-Language, by weight then order); English when none of the site's languages is listed. */
+export function siteLocale(acceptLanguage = '') {
+  const ranked = String(acceptLanguage ?? '').split(',').map((part, index) => {
+    const [tag, ...params] = part.trim().split(';');
+    const q = params.map(p => p.trim()).find(p => p.startsWith('q='));
+    const weight = q ? Number(q.slice(2)) : 1;
+    return { lang: tag.trim().toLowerCase().split('-')[0], weight: Number.isFinite(weight) ? weight : 0, index };
+  }).filter(entry => /^[a-z]+$/.test(entry.lang) && entry.weight > 0).sort((a, b) => b.weight - a.weight || a.index - b.index);
+  return ranked.map(entry => entry.lang).find(lang => SITE_LOCALES.includes(lang)) ?? 'en';
+}
+
+/** Where the browser goes once it has handed the authorization code to the CLI: the site's MCP page in its language. */
+export function loginLandingUrl(acceptLanguage) {
+  const locale = siteLocale(acceptLanguage);
+  return `${SITE}/${locale === 'en' ? '' : `${locale}/`}mcp?login=cli`;
+}
+
 export async function callbackListener({ state, issuer, timeout = 180_000, signal }) {
   let settled = false;
   let resolveCode, rejectCode;
@@ -105,12 +125,13 @@ export async function callbackListener({ state, issuer, timeout = 180_000, signa
     const value = url.searchParams.get('code');
     if (!value) { res.writeHead(400); res.end('Missing login code.'); return; }
     settled = true;
-    const nonce = randomBytes(16).toString('base64url');
-    res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`);
-    res.writeHead(200);
-    res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>EvoLink approval received</title><script nonce="${nonce}">history.replaceState(null, '', '/oauth/callback');</script><h1>EvoLink approval received</h1><p>Return to your assistant to finish checking the connection. You can close this window.</p><p>授权已收到。请返回助手完成连接检查，然后关闭此窗口。</p></html>`);
+    // The browser has delivered the code. Send it on to the site's MCP page in its own
+    // language instead of showing a bare local page; the code is not part of that URL.
+    res.setHeader('Location', loginLandingUrl(req.headers['accept-language']));
+    res.writeHead(302);
+    res.end();
     resolveCode(value);
+    return;
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const timer = setTimeout(() => { settled = true; rejectCode(new CliError('login_timeout', 'Login timed out. Start a new login and use its new browser link.', { recovery: 'evolink auth login', timeout_seconds: timeout / 1000 })); }, timeout);
