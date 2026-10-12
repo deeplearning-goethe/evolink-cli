@@ -9,6 +9,7 @@ export const SERVER = 'https://mcp.evolink.ai/mcp';
 export const ISSUER = 'https://passport.evolink.ai';
 export const API = 'https://api.evolink.ai';
 export const FILES = 'https://files-api.evolink.ai';
+export const SITE = 'https://evolink.ai';
 export const USER_AGENT = `EvoLinkCLI/${CLI_VERSION}`;
 export const loopback = url => url.protocol === 'http:' && ['127.0.0.1', '[::1]'].includes(url.hostname);
 

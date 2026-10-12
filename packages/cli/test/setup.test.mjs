@@ -9,7 +9,7 @@ import { setup } from '../src/setup.mjs';
 import { doctor } from '../src/doctor.mjs';
 import { skillStatus, installSkill } from '../src/skills.mjs';
 import { State } from '../src/state.mjs';
-import { Credentials, callbackListener } from '../src/auth.mjs';
+import { Credentials, callbackListener, LOGIN_LANDING_URL } from '../src/auth.mjs';
 import { Mcp } from './legacy-mcp.mjs';
 import { CliError } from '../src/errors.mjs';
 import { fixture, MemoryVault } from './fixture.mjs';
@@ -145,7 +145,10 @@ test('callbacks reject repeat use, timeouts and cancellation without echoing aut
     url.searchParams.set('state', 'fixture-state'); url.searchParams.set('iss', 'https://passport.evolink.ai'); url.searchParams.set('code', 'fixture-private-code');
     const response = await fetch(url), html = await response.text();
     assert.equal(response.status, 200); assert.match(response.headers.get('content-security-policy'), /nonce-/);
+    assert.equal(LOGIN_LANDING_URL, 'https://evolink.ai/mcp?login=cli');
+    assert.ok(html.includes(`location.replace('${LOGIN_LANDING_URL}')`)); assert.ok(html.includes(`content="0;url=${LOGIN_LANDING_URL}"`));
     assert.ok(html.includes('history.replaceState')); assert.ok(!html.includes('fixture-private-code'));
+    assert.ok(!/[\u4e00-\u9fff]/.test(html)); assert.match(html, /<html lang="en">/);
     assert.equal(await accepted.code, 'fixture-private-code');
     assert.equal((await fetch(url)).status, 410);
   } finally { await accepted.close(); }

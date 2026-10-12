@@ -177,7 +177,7 @@ Final task/workflow budgets require authoritative server-side reservation and se
 
 ## Authentication and state
 
-Login discovers Passport directly and uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
+Login discovers Passport directly and uses a native public OAuth client, PKCE, a loopback callback and `mcp offline_access` on the existing Passport service. After the approval, the loopback callback hands the browser on to the EvoLink MCP page (`?login=cli`), where the site picks the language; the authorization code is never part of that URL. Dynamically registered clients currently appear as unverified on the consent page. Device-code login is not included in this release.
 
 Tokens are stored only in the OS credential store. Linux requires a running Secret Service keyring; the CLI does not silently fall back to an in-memory kernel store or plaintext credential files. A one-command OAuth access token can be passed through stdin with `--token-stdin`, never as a command argument. `auth logout` revokes this session and preserves the account's shared MCP key.
 

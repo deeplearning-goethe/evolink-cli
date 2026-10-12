@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { authorize, refresh, metadata } from './oauth.mjs';
 import { hash } from './state.mjs';
-import { authFetch, ISSUER, SERVER } from './network.mjs';
+import { authFetch, ISSUER, SERVER, SITE } from './network.mjs';
 import { CliError, requireThat } from './errors.mjs';
 
 export class Vault {
@@ -82,6 +82,10 @@ export function openBrowser(url, onFailure = () => {}) {
   child.unref();
 }
 
+/** Where the browser goes once it has handed the authorization code to the CLI. The site picks the
+ * page language itself (its saved choice, then the browser language, English otherwise). */
+export const LOGIN_LANDING_URL = `${SITE}/mcp?login=cli`;
+
 export async function callbackListener({ state, issuer, timeout = 180_000, signal }) {
   let settled = false;
   let resolveCode, rejectCode;
@@ -105,12 +109,16 @@ export async function callbackListener({ state, issuer, timeout = 180_000, signa
     const value = url.searchParams.get('code');
     if (!value) { res.writeHead(400); res.end('Missing login code.'); return; }
     settled = true;
+    // The browser has delivered the code. Hand it on to the EvoLink site, which confirms the
+    // approval in the right language; the code is not part of that URL. The English text
+    // below is only seen if the site cannot be reached.
     const nonce = randomBytes(16).toString('base64url');
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     res.setHeader('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'`);
     res.writeHead(200);
-    res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>EvoLink approval received</title><script nonce="${nonce}">history.replaceState(null, '', '/oauth/callback');</script><h1>EvoLink approval received</h1><p>Return to your assistant to finish checking the connection. You can close this window.</p><p>授权已收到。请返回助手完成连接检查，然后关闭此窗口。</p></html>`);
+    res.end(`<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="refresh" content="0;url=${LOGIN_LANDING_URL}"><title>EvoLink approval received</title><script nonce="${nonce}">history.replaceState(null, '', '/oauth/callback');location.replace('${LOGIN_LANDING_URL}');</script><h1>EvoLink approval received</h1><p>Return to your assistant to finish checking the connection. <a href="${LOGIN_LANDING_URL}">Continue to EvoLink</a></p></html>`);
     resolveCode(value);
+    return;
   });
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   const timer = setTimeout(() => { settled = true; rejectCode(new CliError('login_timeout', 'Login timed out. Start a new login and use its new browser link.', { recovery: 'evolink auth login', timeout_seconds: timeout / 1000 })); }, timeout);
