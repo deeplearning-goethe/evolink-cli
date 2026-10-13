@@ -48,7 +48,7 @@ const COMMANDS = {
   }],
   'skills install': ['[options]', 'Install or synchronize bundled skill files; protect modified files and back up replacements.', { agent, 'replace-modified': flag }],
   'skills status': ['[options]', 'Compare installed skill contents and package version.', { agent }],
-  doctor: ['[options]', 'Check prerequisites, connection, model discovery and skill contents separately. Free.', { agent }],
+  doctor: ['[options]', 'Check prerequisites, connection, model discovery, skill contents and CLI updates separately. An available update, and installed skill findings without --agent, are guidance only. Free.', { agent }],
 };
 for (const type of ['image', 'video', 'audio']) COMMANDS[`generate ${type}`] = [
   '--quote ID --confirm [options]', 'Submit the saved quote after explicit user approval. Changes require a new quote. Never call generate to poll progress.',

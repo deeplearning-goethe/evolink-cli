@@ -27,7 +27,7 @@ async function setup(t) {
   f.tasks.set(task.task_id, task);
   const cli = async args => {
     const child = spawn(process.execPath, [bin, ...args, '--server', f.server.href, '--token-stdin', '--json'],
-      { env: { ...process.env, EVOLINK_CLI_HOME: home }, stdio: ['pipe', 'pipe', 'pipe'] });
+      { env: { ...process.env, EVOLINK_CLI_HOME: home, HOME: home, USERPROFILE: home }, stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdin.end('fixture-acceptance-token');
     let out = '', err = '';
     child.stdout.on('data', b => out += b); child.stderr.on('data', b => err += b);
@@ -162,7 +162,7 @@ test('doctor reports all prerequisites, skips unsafe connection attempts and pre
   ];
   for (const c of cases) {
     f.calls.length = 0;
-    const result = await doctor({ state, server: f.server, credentials: c, mcp, platform: 'linux', remote: true });
+    const result = await doctor({ state, server: f.server, credentials: c, mcp, platform: 'linux', remote: true, skillHome: home });
     assert.equal(result.checks.length, 6);
     assert.equal(result.ok, c === credentials);
     assert.equal(result.checks.find(c => c.name === 'connection').status, result.ok ? 'passed' : 'skipped');
@@ -178,6 +178,6 @@ test('doctor reports all prerequisites, skips unsafe connection attempts and pre
   const healthy = await cli(['doctor']);
   assert.equal(healthy.code, 0); assert.equal(healthy.view.ok, true);
   assert.equal(healthy.view.checks.every(c => c.status === 'passed'), true);
-  const old = await doctor({ state, server: f.server, credentials, mcp, version: 'v20.0.0' });
+  const old = await doctor({ state, server: f.server, credentials, mcp, version: 'v20.0.0', skillHome: home });
   assert.equal(old.ok, false); assert.equal(old.checks[0].error.code, 'unsupported_runtime');
 });

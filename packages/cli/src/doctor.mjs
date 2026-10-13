@@ -5,6 +5,17 @@ import { skillStatus } from './skills.mjs';
 import { CLI_VERSION } from './version.mjs';
 import { updateAdvice } from './update.mjs';
 
+const SKILL_REFRESH = new Set(['outdated', 'legacy', 'unmanaged']);
+// Without --agent, report installed copies only: a CLI used without skills is healthy.
+function installedSkills(result) {
+  const installations = result.installations.filter(i => i.status !== 'missing')
+    .map(({ path: file, status, installed_cli_version }) => ({ path: file, status, installed_cli_version }));
+  const status = !installations.length ? 'not_installed'
+    : installations.some(i => i.status !== 'current' && !SKILL_REFRESH.has(i.status)) ? 'needs_attention'
+    : installations.some(i => SKILL_REFRESH.has(i.status)) ? 'outdated' : 'current';
+  return { agent: 'all', status, cli_version: result.cli_version, installations };
+}
+
 export async function prerequisites({ state, credentials, version = process.version, platform = process.platform }) {
   const checks = [];
   async function check(name, action) {
@@ -38,6 +49,8 @@ export async function verifyModels(client) {
 export async function doctor({ state, server, credentials, client, mcp = client, version = process.version, platform = process.platform,
   remote = !!process.env.SSH_CONNECTION, agent, skillHome, update }) {
   client = mcp;
+  // The registry request runs alongside the account checks and never fails doctor.
+  const updating = update?.().catch(() => undefined);
   const { runtime, storage, auth, checks } = await prerequisites({ state, credentials, version, platform });
   const login = auth?.authenticated === true;
   if (auth) checks.push(login ? { name: 'login', status: 'passed' } : {
@@ -57,25 +70,28 @@ export async function doctor({ state, server, credentials, client, mcp = client,
     try { const details = await verifyModels(client); models = true; checks.push({ name: 'models', status: 'passed', ...details }); }
     catch (error) { checks.push({ name: 'models', status: 'failed', error: errorView(error) }); }
   } else checks.push({ name: 'models', status: 'skipped', reason: 'Verify the account connection first.' });
-  let skills;
+  let skills, installed;
   if (agent !== undefined) {
     try {
       skills = await skillStatus({ home: skillHome, agent });
       checks.push({ name: 'skills', status: skills.current ? 'passed' : 'failed', ...skills });
     } catch (error) { checks.push({ name: 'skills', status: 'failed', error: errorView(error) }); }
+  } else {
+    try { installed = installedSkills(await skillStatus({ home: skillHome })); }
+    catch (error) { installed = { agent: 'all', status: 'unavailable', error: errorView(error) }; }
   }
-  let updateInfo;
-  if (update) {
-    updateInfo = await update();
-    checks.push({ name: 'update', status: 'passed', ...updateInfo });
-  }
+  // An available update is guidance, not a failed check.
+  const updateInfo = await updating;
   const guidance = [];
   const advice = updateAdvice(updateInfo);
   if (advice) guidance.push(advice);
   if (platform === 'linux') guidance.push('Linux needs an unlocked Secret Service keyring in the current D-Bus session. Run login and later commands in that same session; tokens are never saved to plaintext files.');
   if (remote) guidance.push('SSH login redirects the browser to 127.0.0.1 on the CLI host. Use SSH local port forwarding for the callback port printed in the authorization link, or run the CLI on your local computer. --no-browser only prints the link; it does not forward the callback.');
+  if (installed?.status === 'outdated') guidance.push(`Installed evolink-cli skill files are older than CLI ${CLI_VERSION}. Run evolink skills install, then ask your assistant to reload the skill.`);
+  if (installed?.status === 'needs_attention') guidance.push('An installed evolink-cli skill has local changes or conflicts with another skill. Review evolink skills status --json; replace local changes only by choice with --replace-modified.');
   return { ok: !!runtime && !!storage && connected && models && (agent === undefined || skills?.current === true),
     cli_version: CLI_VERSION, node: version, server: server.href, ...(auth ? { auth } : {}), ...(updateInfo ? { update: updateInfo } : {}),
     ...(authorization ? { authorization } : {}), ...(client.apiUrl ? { transport: 'rest', api_origin: client.apiUrl.origin } : {}),
-    connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked', checks, guidance };
+    connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked',
+    ...(installed ? { skills: installed } : {}), checks, guidance };
 }

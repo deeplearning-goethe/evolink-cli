@@ -46,7 +46,7 @@ The skill is bundled with the package. By default it installs into `~/.agents/sk
 
 After upgrading the npm package, run `evolink skills install` again to refresh the installed skill copies, then verify that the assistant discovers the updated skill. Open a new conversation only if discovery does not refresh. Fix reusable guidance in `skills/evolink-cli/SKILL.md` in this package; editing only a local installed copy will not distribute the fix.
 
-`setup`, `doctor` and `auth login` compare the installed version with the latest npm release when the registry is reachable and report `update.latest_version` and `update.update_available`; loopback test servers and `EVOLINK_CLI_UPDATE_CHECK=0` skip the check. A bilingual local callback page after browser approval, instead of a return to evolink.ai, means the installed CLI is older than 0.9.1: upgrade, then run `evolink skills install`.
+`setup`, `doctor` and `auth login` compare the installed version with the latest npm release and report `update`; other commands print a short notice at most once a day (see [Update notices](#update-notices)). A bilingual local callback page after browser approval, instead of a return to evolink.ai, means the installed CLI is older than 0.9.1: upgrade, then run `evolink skills install`.
 
 ## Setup and skill updates
 
@@ -73,6 +73,22 @@ evolink skills install --agent codex --replace-modified --json
 Replacement backs up the previous skill directory under `~/.evolink-media/skill-backups/`, outside assistant discovery folders. Untracked user assets are preserved, and an installation failure rolls back completed directory swaps. Unowned skills, damaged manifests and symbolic-link destinations require resolving the conflict first. After upgrading the CLI, run `skills status` and `skills install` to synchronize its bundle; npm upgrades do not automatically update assistant skill folders.
 
 For an idempotent installation prompt, check Node.js 22+ and `evolink --version` before installing; reuse a suitable installed CLI. In a released version supporting `setup`, use it with the current assistant's name. With older versions, retain the four separate setup steps above, reuse a working login, and explicitly verify balance, model discovery and assistant skill discovery. Installation authorization does not authorize a paid test generation.
+
+## Update notices
+
+Starting with CLI 0.10.0, `setup`, `doctor` and `auth login` ask the npm registry for the latest `@evolinkai/cli` release every time and report `update`: `status` (`available`, `current`, `unknown` or `disabled`), `update_available`, `current_version`, `latest_version` and the update `command`. An available update is guidance only; it never fails setup or doctor, and login and setup print one extra progress line.
+
+Other commands, except the offline `auth status`, reuse a registry answer from the last 24 hours, or ask again. When a newer stable release exists, they print one line on stderr after the command's own output:
+
+```text
+EvoLink CLI 0.10.1 is available (installed 0.10.0). Update with npm install -g @evolinkai/cli@latest, then run evolink skills install.
+```
+
+The same release is announced at most once a day; stdout and `--json` envelopes are unchanged, and the notice never changes the exit code. A check sends one anonymous `GET` for the package's dist-tags to `registry.npmjs.org` with the CLI User-Agent, waits at most 3 seconds, and stores its result in the state directory (`update-check/npm.json`). It uses the same `fetch` as the CLI's other requests, so proxy settings such as Node's `NODE_USE_ENV_PROXY=1` with `HTTPS_PROXY` apply alike; a request still open at the deadline does not keep the process running. Help output, invalid commands and loopback test resources never trigger it.
+
+Set `EVOLINK_CLI_UPDATE_CHECK=0` to turn these checks off; `NO_UPDATE_NOTIFIER` with any value (the update-notifier convention) and a `CI` variable other than `0` or `false` also turn them off. To check by hand, compare `evolink --version` with `npm view @evolinkai/cli version`, or watch the repository's GitHub Releases (`cli-v*` tags).
+
+Without `--agent`, `evolink doctor` also inspects installed skill copies for all supported assistants. `skills.status` is `not_installed`, `current`, `outdated`, `needs_attention` or `unavailable`. Outdated copies add guidance to run `evolink skills install`; local changes and conflicts are reported without being replaced. These findings do not change `ok`; `doctor --agent NAME` keeps checking the selected skill as a required step.
 
 ## Quoted generation
 

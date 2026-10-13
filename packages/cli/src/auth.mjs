@@ -165,6 +165,8 @@ export class Credentials {
     requireThat(!this.token, 'invalid_option', 'auth login cannot use --token-stdin.');
     requireThat(Number.isInteger(timeout) && timeout >= 30_000 && timeout <= 900_000, 'invalid_option', 'Login timeout must be between 30 and 900 seconds.');
     return this.lock(async () => {
+      // The registry request runs alongside the browser approval and never changes the login outcome.
+      const updating = update?.().catch(() => undefined);
       progress('Login: preparing browser authorization.');
       await this.vault.read();
       const provider = this.provider();
@@ -193,13 +195,19 @@ export class Credentials {
         requireThat(result === 'AUTHORIZED', 'login_failed', 'Login could not finish.');
         progress('Login: complete. Verify the connection with evolink balance --json.');
         const outcome = { authenticated: true, server: this.server.href, credential_storage: 'os_keyring' };
-        if (update) {
-          // Say now when this release is behind, while the terminal is still in front of the user.
-          outcome.update = await update();
-          const advice = updateAdvice(outcome.update);
+        // Say now when this release is behind, while the terminal is still in front of the user.
+        const updateInfo = await updating;
+        if (updateInfo) {
+          outcome.update = updateInfo;
+          const advice = updateAdvice(updateInfo);
           if (advice) progress(advice);
         }
         return outcome;
+      } catch (error) {
+        // An outdated release is a likely reason for a failed login; an interrupted one needs no hint.
+        const hint = error.code !== 'interrupted' && updateAdvice(await updating);
+        if (hint) progress(hint);
+        throw error;
       } finally { await listener.close(); }
     });
   }

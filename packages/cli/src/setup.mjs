@@ -11,6 +11,8 @@ export async function setup({ state, server, credentials, client, mcp = client, 
   client = mcp;
   validateAgent(agent);
   return state.lock('setup', async () => {
+    // The registry request runs alongside setup and never changes its outcome.
+    const updating = update?.().catch(() => undefined);
     const steps = [];
     let phase = 'preflight', connected = false, models = false, skills, authorization, result;
     const recovery = () => `evolink setup --agent ${agent}${noBrowser ? ' --no-browser' : ''}`;
@@ -70,10 +72,11 @@ export async function setup({ state, server, credentials, client, mcp = client, 
         connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked',
         ...(skills ? { skills } : {}), steps, error: view, recovery: recovery() };
     }
-    if (update) {
+    const updateInfo = await updating;
+    if (updateInfo) {
       // An outdated release explains stale behaviour; report it with either outcome.
-      result.update = await update();
-      const advice = updateAdvice(result.update);
+      result.update = updateInfo;
+      const advice = updateAdvice(updateInfo);
       if (advice) progress(advice);
     }
     return result;
