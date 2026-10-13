@@ -1,6 +1,6 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
-import { publicIdentifier, publicLabel, publicNumber } from './public-error.js';
+import { publicIdentifier, publicLabel, publicNumber, publicText } from './public-error.js';
 import { currentCredentialMode } from '../request-context.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL, siteUrl } from './http-policy.js';
 import { trackedLink } from './utm.js';
@@ -403,7 +403,7 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
     request_cancelled: {
-        suggestion: 'The task was cancelled. Check this task’s billing state before deciding whether to request another generation.',
+        suggestion: 'The task was cancelled or interrupted before it completed.',
         retryable: false,
     },
     resource_not_found: {
@@ -411,11 +411,13 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
     generation_timeout: {
-        suggestion: 'The generation timed out. Check the original task and its billing state before considering another generation.',
+        suggestion: 'The generation timed out. Retain the task ID before considering another generation.',
         retryable: true,
     },
+    // A task fails with this code when the upstream channel is rate-limited or out of capacity.
+    // The user's balance and key limits are checked at submission and refuse the request instead.
     quota_exceeded: {
-        suggestion: `The generation encountered a quota limit. Check balance and limits before requesting another generation; top up at ${TOP_UP_URL} if the balance is low.`,
+        suggestion: 'The upstream channel’s capacity or rate limit was reached. This is not the user’s balance or key limit. Wait before considering another generation.',
         retryable: true,
     },
     resource_exhausted: {
@@ -427,11 +429,11 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
     service_error: {
-        suggestion: 'The generation service reported an error. Retain the task ID and check its billing state.',
+        suggestion: 'The generation service reported an error. Retain the task ID.',
         retryable: true,
     },
     service_unavailable: {
-        suggestion: 'The generation service was temporarily unavailable. Retain the task ID and check its billing state.',
+        suggestion: 'The generation service was temporarily unavailable. Retain the task ID.',
         retryable: true,
     },
     unknown_error: {
@@ -439,19 +441,55 @@ const TASK_ERROR_MAP = {
         retryable: false,
     },
 };
+/** A rule-specific code: invalid_* names an input the user can fix; the rest have no fixed guidance. */
+const RULE_INPUT_ERROR = {
+    suggestion: 'Fix the input this code names, checking this model’s get_model rules.',
+    retryable: false,
+};
+const RULE_ERROR = {
+    suggestion: 'EvoLink reported this error code for the task. Retain the task ID and give it to EvoLink support if the cause is unclear.',
+    retryable: false,
+};
+/**
+ * The code the user sees on the API, so the user and the assistant name the same error.
+ * channel_* codes describe EvoLink's own upstream channel accounts, which the user cannot fix;
+ * the user-facing code for them is service_unavailable.
+ */
+export function publicTaskErrorCode(value) {
+    const code = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!/^[a-z][a-z0-9_]{0,63}$/.test(code))
+        return 'unknown_error';
+    return code.startsWith('channel_') ? 'service_unavailable' : code;
+}
 export function getTaskErrorInfo(code) {
-    const info = TASK_ERROR_MAP[code] ?? TASK_ERROR_MAP.unknown_error;
-    // The top-up link is tagged for the caller when the hint is shown, not when the table is built.
-    return info.suggestion.includes(TOP_UP_URL)
-        ? { ...info, suggestion: info.suggestion.replace(TOP_UP_URL, trackedLink(TOP_UP_URL, 'top_up')) }
-        : info;
+    return Object.prototype.hasOwnProperty.call(TASK_ERROR_MAP, code) ? TASK_ERROR_MAP[code]
+        : code.startsWith('invalid_') ? RULE_INPUT_ERROR : RULE_ERROR;
+}
+/** Longest gateway explanation passed on for one failed task, in characters. */
+const TASK_MESSAGE_MAX = 1000;
+/**
+ * The gateway's explanation of a failed task, as API users see it, on one line: secrets,
+ * service addresses and links other than EvoLink docs are removed. It says why the task failed;
+ * what to do next still comes from the suggestion.
+ */
+export function publicTaskMessage(value) {
+    if (typeof value !== 'string')
+        return undefined;
+    // Four live rules type the upload-guide link as "https: //"; repair it rather than drop it.
+    const text = publicText(value.replace(/https: \/\/evolink\.ai\//g, 'https://evolink.ai/'))
+        .replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '')
+        .replace(/\s+/g, ' ').trim();
+    if (!text)
+        return undefined;
+    const chars = [...text];
+    return chars.length > TASK_MESSAGE_MAX ? `${chars.slice(0, TASK_MESSAGE_MAX - 1).join('').trimEnd()}…` : text;
 }
 export function publicTaskError(error = {}) {
-    const code = Object.prototype.hasOwnProperty.call(TASK_ERROR_MAP, error.code ?? '')
-        ? error.code : 'unknown_error';
+    const code = publicTaskErrorCode(error.code);
     const info = getTaskErrorInfo(code);
-    return { code, message: code === 'unknown_error' ? 'Generation failed; the cause is unknown.'
-            : `Generation did not complete (${code}).`, ...info };
+    const message = publicTaskMessage(error.message)
+        ?? (code === 'unknown_error' ? 'Generation failed; the cause is unknown.' : `Generation did not complete (${code}).`);
+    return { code, message, ...info };
 }
 export function formatTaskError(error) {
     const info = publicTaskError(error);

@@ -150,8 +150,10 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         else if (p.type === 'boolean' && typeof value !== 'boolean') {
             fail('invalid_quote_parameter', `Pricing parameter ${name} must be boolean.`, name);
         }
+        // Published enums may spell numbers as strings ("5") while the generation input carries a number (5);
+        // lookup expressions compare by text, so the allowed-value check does the same.
         const allowed = p.values ?? p.enum;
-        if (allowed && !allowed.some(candidate => candidate === value))
+        if (allowed && !allowed.some(candidate => String(candidate) === String(value)))
             fail('invalid_quote_parameter', `Pricing parameter ${name} is not an allowed value.`, name);
         parameters[name] = value;
     }

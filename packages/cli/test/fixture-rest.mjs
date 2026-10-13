@@ -9,7 +9,8 @@ export async function restFixture(state, req, res, url, body, send) {
   state.restCalls ??= []; state.restCalls.push({ path: url.pathname, method: req.method, headers: req.headers });
   const raw = task => ({ id: task.task_id, model: task.model || 'fixture-image', type: task.type || 'image',
     created: Math.floor(Date.now() / 1000), progress: task.progress ?? 5, status: task.status,
-    results: task.results?.map(result => result.url), usage: { credits_used: task.charged_credits ?? 1.36 } });
+    results: task.results?.map(result => result.url), usage: { credits_used: task.charged_credits ?? 1.36 },
+    ...(task.error ? { error: task.error } : {}) });
   if (url.pathname === '/v1/catalog/models') {
     send(200, { models: models.map(id => ({ model_id: id, display_name: id, aliases: [id === 'fixture-partial-video' ? 'seedance-2.0-reference-to-video' : aliases[kind(id)]],
       capabilities: [kind(id)], protocols: [{ image: 'openai-images', video: 'evolink-video-generations', audio: 'openai-audio' }[kind(id)]], lifecycle: 'active' })) }); return true;

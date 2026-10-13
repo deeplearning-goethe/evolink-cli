@@ -2,6 +2,7 @@
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { z } from 'zod';
 import { listTasks, queryTasks } from '../services/api-client.js';
+import { publicTaskErrorCode } from '../services/error-handler.js';
 import { READ_ONLY, errorResult, failure, money, ok, usdOf } from './shared.js';
 import { TASK_ID } from './get-task.js';
 import { RESULT_DELIVERY_GUIDANCE, RESULT_DELIVERY_INSTRUCTIONS, RESULT_LINK_HOURS, resultDeliveryMarkdown, resultLinks, resultResources, taskOutputs } from './task-format.js';
@@ -39,8 +40,9 @@ function rowFromTask(task) {
         row.charged_credits = used;
         row.charged_usd = task.usage?.cost?.usd ?? usdOf(used);
     }
-    if (task.error?.code)
-        row.error_code = task.error.code;
+    // The same user-facing code as get_task, never an upstream channel code.
+    if (task.status === 'failed' || task.error?.code)
+        row.error_code = publicTaskErrorCode(task.error?.code);
     return row;
 }
 function rowLine(row) {
@@ -123,8 +125,9 @@ export function registerListTasks(server, config) {
                 items = items.filter(item => item.created_at * 1000 >= sinceMs);
             if (untilMs !== undefined)
                 items = items.filter(item => item.created_at * 1000 <= untilMs);
-            // The list endpoint omits result links; read finished tasks in one batch to include them.
-            const finished = items.filter(item => item.status === 'completed' && item.has_results).map(item => item.id).slice(0, MAX_IDS);
+            // The list endpoint omits result links and error codes; read those tasks in one batch to include them.
+            const finished = items.filter(item => item.status === 'completed' && item.has_results || item.status === 'failed')
+                .map(item => item.id).slice(0, MAX_IDS);
             const details = new Map();
             if (finished.length > 0) {
                 for (const task of await queryTasks(config, finished))
@@ -146,8 +149,6 @@ export function registerListTasks(server, config) {
                     row.charged_credits = item.credits_used;
                     row.charged_usd = usdOf(item.credits_used);
                 }
-                if (item.has_error)
-                    row.error_code = 'failed';
                 return row;
             });
             const filters = [status && `status ${status}`, type && `type ${type}`, model && `model ${model}`, since && `since ${since}`, until && `until ${until}`].filter(Boolean).join(', ');
