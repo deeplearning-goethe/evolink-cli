@@ -12,7 +12,7 @@ const login = { 'no-browser': flag, timeout: integer(30, 900, 180) };
 const COMMANDS = {
   setup: ['[options]', 'Reuse or finish login, install and verify the skill. Free.', { agent, ...login }],
   'auth login': ['[options]', 'Browser OAuth login. Keep the command running until the callback completes.', login],
-  'auth status': ['', 'Check this CLI login without spending money.', {}],
+  'auth status': ['', 'Offline view of the saved login. The access token renews automatically before each command; an elapsed access_token_expires_at is not an expired login. Verify with balance.', {}],
   'auth logout': ['', 'Revoke this CLI session; other OAuth sessions retain access.', {}],
   balance: ['', 'Read account balance and the shared CLI/MCP OAuth key limits. Free.', {}],
   'models search': ['[options]', 'Search currently available models; search order is not a quality ranking.', { query: string('Search keywords'), type: allMedia, limit: integer(1, 50, 20), page: integer(1, 100000, 1) }],

@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { authorize, refresh, metadata } from './oauth.mjs';
+import { updateAdvice } from './update.mjs';
 import { hash } from './state.mjs';
 import { authFetch, ISSUER, SERVER, SITE } from './network.mjs';
 import { CliError, requireThat } from './errors.mjs';
@@ -57,8 +58,10 @@ export class OAuthProvider {
     const issuer = this.server.href === SERVER ? ISSUER : this.server.origin;
     requireThat(tokens.issuer === issuer && tokens.token_type?.toLowerCase() === 'bearer', 'invalid_token_response', 'The login service returned an unsupported token.');
     const prior = await this.vault.read();
+    // A refresh keeps the original sign-in time; status shows it as logged_in_at.
+    const loggedInAt = this.newLogin ? new Date().toISOString() : prior?.logged_in_at;
     await this.vault.write({ tokens, binding: this.newLogin ? randomUUID() : prior?.binding || randomUUID(),
-      expires_at: Date.now() + (tokens.expires_in ?? 300) * 1000 });
+      expires_at: Date.now() + (tokens.expires_in ?? 300) * 1000, ...(loggedInAt ? { logged_in_at: loggedInAt } : {}) });
   }
   async saveCodeVerifier(value) { this.verifier = value; }
   async codeVerifier() { requireThat(this.verifier, 'login_expired', 'Start login again.'); return this.verifier; }
@@ -85,6 +88,9 @@ export function openBrowser(url, onFailure = () => {}) {
 /** Where the browser goes once it has handed the authorization code to the CLI. The site picks the
  * page language itself (its saved choice, then the browser language, English otherwise). */
 export const LOGIN_LANDING_URL = `${SITE}/mcp?login=cli`;
+
+/** Shown with auth status so an assistant does not treat a lapsed access token as an expired login. */
+export const STATUS_NOTE = 'The access token is short-lived and renews automatically before each command, so an elapsed access_token_expires_at does not mean the login expired. Verify the login with evolink balance --json; sign in again only when authenticated is false or a command reports login_required or login_expired.';
 
 export async function callbackListener({ state, issuer, timeout = 180_000, signal }) {
   let settled = false;
@@ -155,7 +161,7 @@ export class Credentials {
       return { access_token: saved.tokens.access_token, binding: saved.binding };
     });
   }
-  async login({ noBrowser = false, timeout = 180_000, progress = () => {}, browser = openBrowser, signal } = {}) {
+  async login({ noBrowser = false, timeout = 180_000, progress = () => {}, browser = openBrowser, signal, update } = {}) {
     requireThat(!this.token, 'invalid_option', 'auth login cannot use --token-stdin.');
     requireThat(Number.isInteger(timeout) && timeout >= 30_000 && timeout <= 900_000, 'invalid_option', 'Login timeout must be between 30 and 900 seconds.');
     return this.lock(async () => {
@@ -186,14 +192,28 @@ export class Credentials {
         }
         requireThat(result === 'AUTHORIZED', 'login_failed', 'Login could not finish.');
         progress('Login: complete. Verify the connection with evolink balance --json.');
-        return { authenticated: true, server: this.server.href, credential_storage: 'os_keyring' };
+        const outcome = { authenticated: true, server: this.server.href, credential_storage: 'os_keyring' };
+        if (update) {
+          // Say now when this release is behind, while the terminal is still in front of the user.
+          outcome.update = await update();
+          const advice = updateAdvice(outcome.update);
+          if (advice) progress(advice);
+        }
+        return outcome;
       } finally { await listener.close(); }
     });
   }
+  /** Offline view of the saved login. The access token renews itself before each command, so an elapsed
+   * access_token_expires_at is not an expired login; only a failed renewal (login_expired) is. */
   async status() {
     if (this.token) return { authenticated: true, credential_storage: 'stdin', server: this.server.href };
     const saved = await this.vault.read();
-    return { authenticated: !!saved?.tokens, server: this.server.href, credential_storage: 'os_keyring', expires_at: saved ? new Date(saved.expires_at).toISOString() : undefined };
+    if (!saved?.tokens) return { authenticated: false, server: this.server.href, credential_storage: 'os_keyring', text: `Not signed in to ${this.server.href}. Run evolink auth login.` };
+    return { authenticated: true, server: this.server.href, credential_storage: 'os_keyring',
+      ...(saved.logged_in_at ? { logged_in_at: saved.logged_in_at } : {}),
+      access_token_expires_at: Number.isFinite(saved.expires_at) ? new Date(saved.expires_at).toISOString() : undefined,
+      access_token_renewal: 'automatic', login_check: 'evolink balance --json', note: STATUS_NOTE,
+      text: `Signed in to ${this.server.href}; credentials are in the OS keyring. ${STATUS_NOTE}` };
   }
   async logout() {
     requireThat(!this.token, 'invalid_option', 'auth logout requires the stored login.');

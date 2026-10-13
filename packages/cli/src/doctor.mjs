@@ -3,6 +3,7 @@ import path from 'node:path';
 import { CliError, errorView, requireThat } from './errors.mjs';
 import { skillStatus } from './skills.mjs';
 import { CLI_VERSION } from './version.mjs';
+import { updateAdvice } from './update.mjs';
 
 export async function prerequisites({ state, credentials, version = process.version, platform = process.platform }) {
   const checks = [];
@@ -21,7 +22,11 @@ export async function prerequisites({ state, credentials, version = process.vers
     finally { await fs.rm(probe, { recursive: true, force: true }); }
     return { writable: true };
   });
-  const auth = await check('credential_storage', () => credentials.status());
+  const auth = await check('credential_storage', async () => {
+    // The offline explanation stays out of the check row; doctor verifies the login itself.
+    const { text, note, ...view } = await credentials.status();
+    return view;
+  });
   return { runtime, storage, auth, checks };
 }
 export async function verifyModels(client) {
@@ -31,7 +36,7 @@ export async function verifyModels(client) {
   return { verified: true, models_available: true };
 }
 export async function doctor({ state, server, credentials, client, mcp = client, version = process.version, platform = process.platform,
-  remote = !!process.env.SSH_CONNECTION, agent, skillHome }) {
+  remote = !!process.env.SSH_CONNECTION, agent, skillHome, update }) {
   client = mcp;
   const { runtime, storage, auth, checks } = await prerequisites({ state, credentials, version, platform });
   const login = auth?.authenticated === true;
@@ -59,11 +64,18 @@ export async function doctor({ state, server, credentials, client, mcp = client,
       checks.push({ name: 'skills', status: skills.current ? 'passed' : 'failed', ...skills });
     } catch (error) { checks.push({ name: 'skills', status: 'failed', error: errorView(error) }); }
   }
+  let updateInfo;
+  if (update) {
+    updateInfo = await update();
+    checks.push({ name: 'update', status: 'passed', ...updateInfo });
+  }
   const guidance = [];
+  const advice = updateAdvice(updateInfo);
+  if (advice) guidance.push(advice);
   if (platform === 'linux') guidance.push('Linux needs an unlocked Secret Service keyring in the current D-Bus session. Run login and later commands in that same session; tokens are never saved to plaintext files.');
   if (remote) guidance.push('SSH login redirects the browser to 127.0.0.1 on the CLI host. Use SSH local port forwarding for the callback port printed in the authorization link, or run the CLI on your local computer. --no-browser only prints the link; it does not forward the callback.');
   return { ok: !!runtime && !!storage && connected && models && (agent === undefined || skills?.current === true),
-    cli_version: CLI_VERSION, node: version, server: server.href, ...(auth ? { auth } : {}),
+    cli_version: CLI_VERSION, node: version, server: server.href, ...(auth ? { auth } : {}), ...(updateInfo ? { update: updateInfo } : {}),
     ...(authorization ? { authorization } : {}), ...(client.apiUrl ? { transport: 'rest', api_origin: client.apiUrl.origin } : {}),
     connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked', checks, guidance };
 }

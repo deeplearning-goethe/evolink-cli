@@ -10,6 +10,7 @@ import { commandHelp } from './help.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { doctor } from './doctor.mjs';
 import { setup } from './setup.mjs';
+import { updateCheck, updateCheckEnabled } from './update.mjs';
 import { CLI_VERSION } from './version.mjs';
 import { CliError, requireThat, errorView, localFile } from './errors.mjs';
 
@@ -52,7 +53,7 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
                                  Reuse or finish login, install skills and verify (free)
   auth login [--no-browser] [--timeout SECONDS]
                                  Sign in; keep this command running for the callback
-  auth status | auth logout      Check or revoke this CLI session
+  auth status | auth logout      Check the saved login offline, or revoke it
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
   models show MODEL              Read parameters and pricing (free)
@@ -94,6 +95,7 @@ Run evolink tasks list --help for filter details and recovery caveats.
 Each command accepts --help --json for its machine-readable command reference.
 Model/docs/usage capabilities come from the bundled shared platform module.
 After upgrading the package, run evolink skills install to refresh its skill.
+setup, doctor and auth login report update_available with the latest release.
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
@@ -196,11 +198,13 @@ async function estimateArgs(options) {
 }
 
 export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome }) {
+  // Production commands may compare this release with the npm registry; loopback test resources never do.
+  const update = updateCheckEnabled(server) ? () => updateCheck() : undefined;
   client = mcp;
   const [command, action, id] = positionals;
   const media = new Media({ client, state, server });
   if (command === 'auth') {
-    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
+    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress, update });
     if (action === 'status') return credentials.status();
     if (action === 'logout') return credentials.logout();
   }
@@ -274,8 +278,8 @@ export async function dispatch(positionals, options, { state, server, credential
   if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent, replaceModified: options['replace-modified'] });
   if (command === 'skills' && action === 'status') return skillStatus({ home: skillHome, agent: options.agent });
   if (command === 'setup') return setup({ state, server, credentials, client, agent: options.agent, skillHome,
-    noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
-  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome });
+    noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress, update });
+  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome, update });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 

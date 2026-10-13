@@ -40,11 +40,13 @@ else
 fi
 ```
 
-Check Node.js and npm separately when installation is needed. In PowerShell, use `Get-Command evolink -ErrorAction SilentlyContinue` inside an `if`. If installation already succeeded, check PATH and the active Node/npm installation. Do not suppress actual version, runtime or installation failures with `|| true`. `auth status --json` returning `ok: true` and `authenticated: false` means sign-in is needed; an error should be resolved before login.
+Check Node.js and npm separately when installation is needed. In PowerShell, use `Get-Command evolink -ErrorAction SilentlyContinue` inside an `if`. If installation already succeeded, check PATH and the active Node/npm installation. Do not suppress actual version, runtime or installation failures with `|| true`. `auth status --json` returning `ok: true` and `authenticated: false` means sign-in is needed; an error should be resolved before login. A saved login reports `access_token_expires_at`; the short-lived access token renews automatically before each command, so an elapsed time there is not an expired login. Verify a saved login with `evolink balance --json`, and sign in again only on `authenticated: false` or a `login_required`/`login_expired` error.
 
 The skill is bundled with the package. By default it installs into `~/.agents/skills/evolink-cli` (Codex, Cursor, Gemini CLI, OpenCode and Copilot CLI), `~/.claude/skills/evolink-cli` (Claude Code), `~/.openclaw/skills/evolink-cli` (OpenClaw) and `~/.hermes/skills/evolink-cli` (Hermes). Select one with `skills install --agent NAME`; run `--help` for the supported names. Verify discovery in the assistant rather than treating a written skill file as proof of integration. Browser-only chat assistants should keep using the hosted MCP connection. See [Claude Code skill locations](https://code.claude.com/docs/en/skills) and [Cursor skill locations](https://cursor.com/docs/skills).
 
 After upgrading the npm package, run `evolink skills install` again to refresh the installed skill copies, then verify that the assistant discovers the updated skill. Open a new conversation only if discovery does not refresh. Fix reusable guidance in `skills/evolink-cli/SKILL.md` in this package; editing only a local installed copy will not distribute the fix.
+
+`setup`, `doctor` and `auth login` compare the installed version with the latest npm release when the registry is reachable and report `update.latest_version` and `update.update_available`; loopback test servers and `EVOLINK_CLI_UPDATE_CHECK=0` skip the check. A bilingual local callback page after browser approval, instead of a return to evolink.ai, means the installed CLI is older than 0.9.1: upgrade, then run `evolink skills install`.
 
 ## Setup and skill updates
 

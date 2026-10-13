@@ -64,6 +64,11 @@ const mutants = [
   ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
+  ['auth-status-offline', 'src/auth.mjs', 'if (!saved?.tokens) return {', 'if (!saved?.tokens || saved.expires_at <= Date.now()) return {'],
+  ['login-update-advice', 'src/auth.mjs', 'if (advice) progress(advice);', 'if (false) progress(advice);'],
+  ['doctor-update-advice', 'src/doctor.mjs', 'if (advice) guidance.push(advice);', 'if (false) guidance.push(advice);'],
+  ['update-direction', 'src/update.mjs', 'update_available: comparison > 0', 'update_available: comparison >= 0'],
+  ['update-loopback', 'src/update.mjs', 'return !loopback(server) &&', 'return true &&'],
 ];
 
 let killed = 0;
@@ -85,6 +90,9 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']
       : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']
+      : name.startsWith('update-') ? ['update.test.mjs']
+      : ['auth-status-offline', 'login-update-advice'].includes(name) ? ['auth.test.mjs']
+      : name === 'doctor-update-advice' ? ['setup.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = name === 'callback-state' ? ['--test-name-pattern=callback rejects wrong state'] : [];

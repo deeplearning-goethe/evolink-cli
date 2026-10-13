@@ -189,3 +189,25 @@ test('setup and login timeout/agent/browser argument combinations preserve bound
     else assert.throws(() => validateCommand(command, options), { code: 'invalid_option' });
   }
 });
+
+test('doctor and setup report the latest published release without changing their own outcome', async t => {
+  const { options } = await context(t);
+  const update = async () => ({ cli_version: '0.9.2', latest_version: '0.9.3', update_available: true, checked: true, upgrade_command: 'npm install -g @evolinkai/cli@latest' });
+  const progress = [];
+  const result = await setup({ ...options, progress: message => progress.push(message), update });
+  assert.equal(result.ok, true); assert.equal(result.update.latest_version, '0.9.3');
+  assert.ok(progress.some(message => message.includes('0.9.3') && message.includes('skills install')));
+  const report = await doctor({ ...options, agent: 'codex', update });
+  assert.equal(report.ok, true); assert.equal(report.checks.length, 8);
+  const check = report.checks.find(c => c.name === 'update');
+  assert.equal(check.status, 'passed'); assert.equal(check.update_available, true); assert.equal(report.update.latest_version, '0.9.3');
+  assert.ok(report.guidance.some(line => line.includes('0.9.3') && line.includes('npm install -g @evolinkai/cli@latest')));
+  assert.equal('note' in report.checks.find(c => c.name === 'credential_storage'), false);
+  const current = async () => ({ cli_version: '0.9.3', latest_version: '0.9.3', update_available: false, checked: true });
+  const quiet = await doctor({ ...options, agent: 'codex', update: current });
+  assert.equal(quiet.guidance.some(line => line.includes('npm install')), false); assert.equal(quiet.update.update_available, false);
+  const offline = await doctor({ ...options, agent: 'codex' });
+  assert.equal(offline.checks.length, 7); assert.equal('update' in offline, false);
+  const failed = await setup({ ...options, credentials: { status: async () => { throw new CliError('credential_store_unavailable', 'Unlock secure storage.'); } }, update });
+  assert.equal(failed.ok, false); assert.equal(failed.update.update_available, true);
+});

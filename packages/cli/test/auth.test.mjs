@@ -60,3 +60,35 @@ test('error envelopes preserve recovery information and remove credential materi
   for (const secret of ['test-secret', 'private-access', 'private-refresh', 'private-upload', 'private-binding']) assert.ok(!serialized.includes(secret));
   assert.equal(result.details.quote_id, 'quote-id'); assert.equal(result.details.recovery, 'tasks resume');
 });
+
+test('auth status is an offline view: an elapsed access token renews itself and is not an expired login', async t => {
+  const f = await fixture(); t.after(f.close);
+  const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-status-')); t.after(() => fs.rm(home, { recursive: true, force: true }));
+  const vault = new MemoryVault(); const state = new State(home);
+  const credentials = new Credentials({ server: f.server, state, vault });
+  const before = await credentials.status();
+  assert.equal(before.authenticated, false); assert.match(before.text, /auth login/); assert.equal('access_token_expires_at' in before, false);
+  const progress = [];
+  const update = async () => ({ cli_version: '0.9.2', latest_version: '0.9.3', update_available: true, checked: true, upgrade_command: 'npm install -g @evolinkai/cli@latest' });
+  const login = await credentials.login({ progress: message => progress.push(message), browser: async url => { await fetch(url); }, update });
+  assert.equal(login.authenticated, true); assert.equal(login.update.latest_version, '0.9.3');
+  assert.ok(progress.some(message => message.includes('0.9.3') && message.includes('npm install -g @evolinkai/cli@latest') && message.includes('skills install')));
+  const signedIn = await credentials.status();
+  assert.equal(signedIn.authenticated, true); assert.equal('expires_at' in signedIn, false);
+  assert.ok(Date.parse(signedIn.access_token_expires_at) > Date.now()); assert.ok(Date.parse(signedIn.logged_in_at) <= Date.now());
+  assert.equal(signedIn.access_token_renewal, 'automatic'); assert.equal(signedIn.login_check, 'evolink balance --json');
+  assert.match(signedIn.note, /does not mean the login expired/); assert.match(signedIn.text, /balance --json/);
+  // The access token lapsed (for example overnight): status still reports the saved login and the next command renews.
+  vault.value.expires_at = 0;
+  const elapsed = await credentials.status();
+  assert.equal(elapsed.authenticated, true); assert.equal(elapsed.access_token_expires_at, new Date(0).toISOString());
+  assert.equal(elapsed.logged_in_at, signedIn.logged_in_at);
+  assert.ok((await credentials.access()).access_token); assert.equal(f.refreshCount, 1);
+  const renewed = await credentials.status();
+  assert.ok(Date.parse(renewed.access_token_expires_at) > Date.now()); assert.equal(renewed.logged_in_at, signedIn.logged_in_at);
+  const quiet = await credentials.login({ progress: message => progress.push(message), browser: async url => { await fetch(url); },
+    update: async () => ({ cli_version: '0.9.2', latest_version: '0.9.2', update_available: false, checked: true }) });
+  assert.equal(quiet.update.update_available, false);
+  assert.equal(progress.filter(message => message.includes('npm install')).length, 1);
+  assert.equal('update' in await credentials.login({ progress: () => {}, browser: async url => { await fetch(url); } }), false);
+});
