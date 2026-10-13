@@ -161,7 +161,11 @@ export class Media {
       const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
       const task = await this.client.call('get_task', { task_id: taskId, wait_seconds: Math.min(30, remaining) });
       if (task.status === 'completed') return task;
-      if (['failed', 'cancelled'].includes(task.status)) throw new CliError('task_failed', 'The generation task did not complete.', { task });
+      // task.error.code is the shared core's user-facing code, the one the API reports.
+      if (['failed', 'cancelled'].includes(task.status)) {
+        throw new CliError('task_failed', `The generation task ${task.status === 'failed' ? 'failed' : 'was cancelled'}${
+          task.error?.code ? ` with error code ${task.error.code}` : ''}.`, { task });
+      }
       progress(`${task.task_id}: ${task.status}${task.progress !== undefined ? ` (${task.progress}%)` : ''}`);
       if (Date.now() >= deadline) throw new CliError('wait_timeout', 'The task is still running. Continue with tasks wait.', { task_id: taskId });
       await new Promise(resolve => { const timer = setTimeout(done, 500); function done() { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); } signal?.addEventListener('abort', done, { once: true }); });

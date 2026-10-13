@@ -28,6 +28,11 @@ export function publicText(value) {
                 && ['/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname)
                 && [...url.searchParams].every(([key, v]) => key.startsWith('utm_') && /^[a-z0-9_-]{1,80}$/i.test(v) || key === 'tab' && v === 'mcp'))
                 return value;
+            // Official documentation pages, which gateway task errors link to (for example the upload guide).
+            if (url.origin === 'https://evolink.ai' && !url.username && !url.password
+                && /^\/docs\/[A-Za-z0-9_.\/-]*$/.test(url.pathname) && !url.pathname.includes('//') && /^(#[A-Za-z0-9_-]{1,80})?$/.test(url.hash)
+                && [...url.searchParams].every(([key, v]) => key.startsWith('utm_') && /^[a-z0-9_-]{1,80}$/i.test(v)))
+                return value;
         }
         catch { }
         return '[service address]';

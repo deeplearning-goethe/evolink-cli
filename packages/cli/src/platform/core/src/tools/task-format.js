@@ -20,6 +20,8 @@ export const RESULT_DELIVERY_INSTRUCTIONS = [
 /** Compact tool description; the full contract is sent in server instructions and completed results. */
 export const RESULT_DELIVERY_GUIDANCE = 'On completion, promptly deliver original links with the 24-hour expiry and delivery_markdown. Edit only when the user explicitly requests or authorizes post-processing. Keep original links alongside optional embedded MCP thumbnails; do not add remote-image Markdown or use image syntax for video/audio.';
 export const TERMINAL_STATUSES = new Set(['completed', 'failed', 'cancelled']);
+/** The gateway charges nothing for a failed task and releases its reservation (refund, or expiry as a backstop). */
+export const FAILED_TASK_BILLING = 'The task failed, so it is not charged. The credits reserved at submission are returned automatically.';
 const MEDIA_EXTENSIONS = {
     png: { kind: 'image', mimeType: 'image/png' },
     jpg: { kind: 'image', mimeType: 'image/jpeg' },
@@ -187,6 +189,7 @@ export function describeTask(task) {
         const billing = taskBilling(task);
         structured.billing = billing;
         lines.push(`Error: ${info.code} — ${info.message}`);
+        let verify = ' Query get_task again to verify billing.';
         if (billing.refund_status === 'completed') {
             lines.push(`Account balance refund completed: ${money(billing.refunded_credits)}. Key limit restoration is unknown.`);
             structured.refunded = true;
@@ -200,10 +203,15 @@ export function describeTask(task) {
         else if (billing.refund_status === 'not_required') {
             lines.push('The billing record reports no account balance refund required. Check the recorded charge before requesting another generation.');
         }
+        else if (status === 'failed' && billing.charge_status !== 'charged') {
+            lines.push(FAILED_TASK_BILLING);
+            structured.billing_note = FAILED_TASK_BILLING;
+            verify = '';
+        }
         else {
             lines.push('Charge and refund completion cannot be verified from the available billing evidence. Query this task again or contact EvoLink support.');
         }
-        const next = `${info.suggestion} Query get_task again to verify billing. Do not generate again automatically. Another generation is a separately paid task: obtain a fresh estimate and explicit user approval first.`;
+        const next = `${info.suggestion}${verify} Do not generate again automatically. Another generation is a separately paid task: obtain a fresh estimate and explicit user approval first.`;
         lines.push(`Next step: ${next}`);
         structured.error = { ...info, suggestion: next };
     }

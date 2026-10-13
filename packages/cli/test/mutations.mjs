@@ -102,6 +102,13 @@ const mutants = [
   ['plain-doctor-ok', 'src/doctor.mjs', '(agent === undefined || skills?.current === true)', "(agent === undefined ? installed?.status !== 'outdated' : skills?.current === true)"],
   ['plain-doctor-attention', 'src/doctor.mjs', "installations.some(i => i.status !== 'current' && !SKILL_REFRESH.has(i.status)) ? 'needs_attention'", "false ? 'needs_attention'"],
   ['plain-doctor-refresh', 'src/doctor.mjs', "new Set(['outdated', 'legacy', 'unmanaged'])", "new Set(['legacy', 'unmanaged'])"],
+  ['failed-wait-code', 'src/media.mjs', "task.error?.code ? ` with error code ${task.error.code}` : ''", "''"],
+  ['failed-wait-status', 'src/media.mjs', "task.status === 'failed' ? 'failed' : 'was cancelled'", "'failed'"],
+  ['failed-shared-channel', 'src/platform/core/src/services/error-handler.js', "code.startsWith('channel_') ? 'service_unavailable' : code", 'code'],
+  ['failed-shared-billing', 'src/platform/core/src/tools/task-format.js', "status === 'failed' && billing.charge_status !== 'charged'", 'false'],
+  ['failed-shared-list', 'src/platform/core/src/tools/list-tasks.js', "|| item.status === 'failed'", ''],
+  ['failed-shared-message', 'src/platform/core/src/services/error-handler.js', 'publicTaskMessage(error.message)', 'undefined'],
+  ['failed-shared-docs-link', 'src/platform/core/src/services/public-error.js', "&& !url.pathname.includes('//')", '&& false'],
 ];
 
 // Mutants of the update and login changes run only the test that covers them, which keeps the CI matrix fast.
@@ -136,6 +143,7 @@ for (const [name, file, before, after] of selected) {
     const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'error-refusal-evidence' ? ['media.test.mjs']
+      : name.startsWith('failed-') ? ['failed-task.test.mjs']
       : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']

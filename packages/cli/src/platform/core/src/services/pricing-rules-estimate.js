@@ -3,6 +3,13 @@
 import { z } from 'zod';
 import { getPricingRules } from './pricing-rules-client.js';
 import { QuoteError, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
+/**
+ * How long an approval from estimate_cost may be passed to generate_*. The rules' own
+ * `fresh_until` is a short refresh window (minutes); people confirming a price in a chat
+ * need longer. generate_* re-evaluates the current rules and refuses with `price_changed`
+ * when the price moved, so a longer approval cannot submit at a stale price.
+ */
+export const APPROVAL_TTL_MS = 30 * 60_000;
 function fail(code, message) { throw new QuoteError(code, message); }
 function gcd(a, b) { while (b)
     [a, b] = [b, a % b]; return a < 0n ? -a : a; }
@@ -204,7 +211,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         fail('invalid_pricing_expression', 'The estimated charge exceeds its supported range.');
     const amounts = amountsForUC(String(total)), requestHash = quoteRequestHash(entry.id, input, options.mediaSeconds, options.pricingParameters);
     const approval = { source: 'pricing_rules', price_scope: 'public_default', model_id: entry.id,
-        request_hash: requestHash, total_uc: amounts.uc, expires_at: body.meta.fresh_until,
+        request_hash: requestHash, total_uc: amounts.uc, expires_at: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
         fingerprint: quoteRequestHash(entry.id, { rules: economicRules(rule), parameters: params,
             exchange_rate_version: body.meta.exchange_rate_version, components, missing: [...missing].sort(), total_uc: amounts.uc }) };
     const estimate = { status: missing.size ? components.length ? 'partial' : 'needs_input' : 'estimated', min_usd: Number(amounts.usd), max_usd: Number(amounts.usd),

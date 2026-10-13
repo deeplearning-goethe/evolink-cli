@@ -24,7 +24,11 @@ test('rules estimate saves approval and expiry, refreshes before submit, and kee
   assert.equal(q.pricing_scope, 'public_default'); assert.equal(q.final_budget_enforced, false);
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(saved.backend_estimate_id, undefined); assert.equal(q.estimate_id, undefined);
-  assert.equal(saved.expires_at, Date.parse(q.pricing_quote.expires_at));
+  // The core approves a rules estimate for 30 minutes; the saved local quote keeps the CLI's own 15-minute limit, never longer than the approval.
+  const approval = Date.parse(q.pricing_quote.expires_at);
+  assert.ok(Math.abs(approval - saved.created_at - 30 * 60_000) < 5_000, `approval ${approval - saved.created_at} ms`);
+  assert.ok(Math.abs(saved.expires_at - saved.created_at - 15 * 60_000) < 5_000, `local ${saved.expires_at - saved.created_at} ms`);
+  assert.ok(saved.expires_at <= approval);
   assert.equal(saved.args.max_cost_usd, 0.05); assert.equal(saved.args.pricing_quote.total_uc, '27200');
   const result = await media.generate('image', q.quote_id, { confirmed: true });
   const submitted = await state.read('quotes', q.quote_id);
