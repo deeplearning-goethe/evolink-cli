@@ -96,7 +96,7 @@ test('auth status is an offline view: an elapsed access token renews itself and 
   assert.equal(unchecked.authenticated, true); assert.equal('update' in unchecked, false);
 });
 
-test('a failed login still names an available update; an interrupted login does not', async t => {
+test('a failed login still names an available update; an interrupted login does not', { timeout: 30_000 }, async t => {
   const f = await fixture(); t.after(f.close);
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-login-update-')); t.after(() => fs.rm(home, { recursive: true, force: true }));
   const credentials = new Credentials({ server: f.server, state: new State(home), vault: new MemoryVault() });

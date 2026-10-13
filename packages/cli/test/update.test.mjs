@@ -121,7 +121,7 @@ test(`seeded version triples keep precedence antisymmetric, transitive and core-
   }
 });
 
-test('every switch, convention and server combination is honored in priority order', async () => {
+test('every switch, convention and server combination is honored in priority order', { timeout: 30_000 }, async () => {
   assert.equal(UPDATE_CHECK_ENV, 'EVOLINK_CLI_UPDATE_CHECK');
   assert.equal(updateCheckDisabled({}, serverURL()), undefined);
   assert.equal(updateCheckDisabled({}, LOOPBACK), 'loopback_server');
@@ -205,7 +205,8 @@ test(`cache state, registry answer, writable state and forced checks combine int
   }
 });
 
-test('a forced check reports a newer release, stays quiet otherwise, never throws and counts abandoned requests', async () => {
+// Explicit timeouts: a mutant that removes the deadline must fail here, not hang the test process.
+test('a forced check reports a newer release, stays quiet otherwise, never throws and counts abandoned requests', { timeout: 10_000 }, async () => {
   const check = (fetchFn, current = '0.9.2') => checkForUpdate({ state: memoryState(), server: serverURL(), env: {}, fetchFn, now: () => T0, current, force: true, timeout: 50 });
   const reply = (status, body) => async (url, init) => {
     assert.equal(url, UPDATE_URL); assert.equal(init.redirect, 'error'); assert.match(init.headers['User-Agent'], /^EvoLinkCLI\//);
@@ -244,7 +245,7 @@ test('a forced check reports a newer release, stays quiet otherwise, never throw
   assert.equal(updateAdvice(undefined), undefined);
 });
 
-test('notices repeat a release at most once per interval and announce a newer release after the next check', async t => {
+test('notices repeat a release at most once per interval and announce a newer release after the next check', { timeout: 10_000 }, async t => {
   const home = await temporary(t), state = new State(path.join(home, 'notices'));
   let latest = '1.6.0';
   const calls = [];
@@ -269,7 +270,7 @@ test('notices repeat a release at most once per interval and announce a newer re
   assert.equal(await notice(2 * HOUR, '1.5.0', interrupted), message('1.7.0'));
 });
 
-test('an unwritable state directory keeps ordinary commands offline but not forced checks', async t => {
+test('an unwritable state directory keeps ordinary commands offline but not forced checks', { timeout: 10_000 }, async t => {
   const home = await temporary(t), file = path.join(home, 'file');
   await fs.writeFile(file, 'not a directory');
   const state = new State(path.join(file, 'state')), fake = registry(BEHAVIOURS.newer);
