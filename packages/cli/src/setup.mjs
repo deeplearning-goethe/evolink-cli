@@ -2,16 +2,19 @@ import { prerequisites, verifyModels } from './doctor.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { CliError, errorView, requireThat } from './errors.mjs';
 import { CLI_VERSION } from './version.mjs';
+import { updateAdvice } from './update.mjs';
 
 const LOGIN_ERRORS = new Set(['login_required', 'invalid_session', 'login_expired']);
 
 export async function setup({ state, server, credentials, client, mcp = client, agent = 'all', skillHome, noBrowser = false,
-  timeout = 180_000, signal, progress = () => {}, version, platform }) {
+  timeout = 180_000, signal, progress = () => {}, version, platform, update }) {
   client = mcp;
   validateAgent(agent);
   return state.lock('setup', async () => {
+    // The registry request runs alongside setup and never changes its outcome.
+    const updating = update?.().catch(() => undefined);
     const steps = [];
-    let phase = 'preflight', connected = false, models = false, skills, authorization;
+    let phase = 'preflight', connected = false, models = false, skills, authorization, result;
     const recovery = () => `evolink setup --agent ${agent}${noBrowser ? ' --no-browser' : ''}`;
     try {
       progress('Setup: checking runtime, local state and secure credential storage.');
@@ -58,16 +61,24 @@ export async function setup({ state, server, credentials, client, mcp = client, 
       const status = await skillStatus({ home: skillHome, agent });
       requireThat(status.current, 'skill_changed', 'The skill changed during setup. Check evolink skills status before continuing.');
       progress('Setup: CLI connection, models and skill files verified. Ask your assistant to confirm skill discovery.');
-      return { ok: true, setup_complete: true, cli_version: CLI_VERSION, agent, server: server.href,
+      result = { ok: true, setup_complete: true, cli_version: CLI_VERSION, agent, server: server.href,
         connection_verified: connected, model_discovery_verified: models, skills, steps,
         ...(authorization ? { authorization } : {}), ...(client.apiUrl ? { transport: 'rest', api_origin: client.apiUrl.origin } : {}),
         assistant_discovery: 'not_checked', next_step: skills.next_step };
     } catch (error) {
       const view = errorView(error);
       steps.push({ name: phase, status: 'failed', error: view });
-      return { ok: false, setup_complete: false, cli_version: CLI_VERSION, agent, phase,
+      result = { ok: false, setup_complete: false, cli_version: CLI_VERSION, agent, phase,
         connection_verified: connected, model_discovery_verified: models, assistant_discovery: 'not_checked',
         ...(skills ? { skills } : {}), steps, error: view, recovery: recovery() };
     }
+    const updateInfo = await updating;
+    if (updateInfo) {
+      // An outdated release explains stale behaviour; report it with either outcome.
+      result.update = updateInfo;
+      const advice = updateAdvice(updateInfo);
+      if (advice) progress(advice);
+    }
+    return result;
   });
 }

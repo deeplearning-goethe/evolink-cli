@@ -64,7 +64,62 @@ const mutants = [
   ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
+  ['auth-status-offline', 'src/auth.mjs', 'if (!saved?.tokens) return {', 'if (!saved?.tokens || saved.expires_at <= Date.now()) return {'],
+  ['login-update-advice', 'src/auth.mjs', 'if (advice) progress(advice);', 'if (false) progress(advice);'],
+  ['login-update-isolation', 'src/auth.mjs', 'const updating = update?.().catch(() => undefined);', 'const updating = update?.();'],
+  ['login-failure-advice', 'src/auth.mjs', 'if (hint) progress(hint);', ''],
+  ['login-interrupt-quiet', 'src/auth.mjs', "error.code !== 'interrupted' && ", ''],
+  ['doctor-update-advice', 'src/doctor.mjs', 'if (advice) guidance.push(advice);', 'if (false) guidance.push(advice);'],
+  ['doctor-update-isolation', 'src/doctor.mjs', 'const updating = update?.().catch(() => undefined);', 'const updating = update?.();'],
+  ['setup-update-isolation', 'src/setup.mjs', 'const updating = update?.().catch(() => undefined);', 'const updating = update?.();'],
+  ['update-equal-version', 'src/update.mjs', "compareVersions(latest, current) > 0 ? 'available'", "compareVersions(latest, current) >= 0 ? 'available'"],
+  ['update-older-version', 'src/update.mjs', "compareVersions(latest, current) > 0 ? 'available'", "compareVersions(latest, current) !== 0 ? 'available'"],
+  ['update-stable-only', 'src/update.mjs', "requireThat(stable(latest), 'update_check_failed'", "requireThat(parseVersion(latest), 'update_check_failed'"],
+  ['update-body-limit', 'src/update.mjs', 'size <= MAX_BODY', 'true'],
+  ['update-deadline', 'src/update.mjs', 'timer = setTimeout(stop, timeout);', 'timer = undefined;'],
+  ['update-abandoned-count', 'src/update.mjs', 'if (!settled) abandoned++;', ''],
+  ['update-opt-out', 'src/update.mjs', 'if (OFF.includes(normalized(env[UPDATE_CHECK_ENV]))) return UPDATE_CHECK_ENV;', ''],
+  ['update-opt-out-values', 'src/update.mjs', "const OFF = ['0', 'false', 'no', 'off'];", "const OFF = ['0'];"],
+  ['update-no-update-notifier', 'src/update.mjs', "if (env.NO_UPDATE_NOTIFIER !== undefined) return 'NO_UPDATE_NOTIFIER';", ''],
+  ['update-ci', 'src/update.mjs', "if (normalized(env.CI) && !OFF.includes(normalized(env.CI))) return 'CI';", ''],
+  ['update-loopback', 'src/update.mjs', "if (server && loopback(server)) return 'loopback_server';", ''],
+  ['update-cache-interval', 'src/update.mjs', 'if (force || !recent(saved.checked_at, time))', 'if (true)'],
+  ['update-forced-check', 'src/update.mjs', 'if (force || !recent(saved.checked_at, time))', 'if (!recent(saved.checked_at, time))'],
+  ['update-clock-skew', 'src/update.mjs', 'at <= time + CLOCK_SKEW && ', ''],
+  ['update-keep-verified', 'src/update.mjs', 'const latest = stable(saved.latest_version)', 'const latest = !failed && stable(saved.latest_version)'],
+  ['update-claim-first', 'src/update.mjs', "catch { if (!force) return view('unknown', null, { reason: 'state_unavailable' }); }", 'catch { /* continue */ }'],
+  ['update-forced-claim', 'src/update.mjs', "if (!force) return view('unknown', null, { reason: 'state_unavailable' });", "return view('unknown', null, { reason: 'state_unavailable' });"],
+  ['update-notice-throttle', 'src/update.mjs', 'saved.notified_version === result.latest_version && recent(saved.notified_at, time)', 'false'],
+  ['update-notice-aborted', 'src/update.mjs', "if (result.status !== 'available' || options.signal?.aborted) return undefined;", "if (result.status !== 'available') return undefined;"],
+  ['update-stderr', 'src/cli.mjs', 'io.stderr.write(notice', 'io.stdout.write(notice'],
+  ['update-help-check', 'src/cli.mjs', 'const reference = commandHelp(positionals);', 'checkUpdate(); const reference = commandHelp(positionals);'],
+  ['update-before-validation', 'src/cli.mjs', 'validateCommand(positionals, options);', 'checkUpdate(); validateCommand(positionals, options);'],
+  ['update-after-validation', 'src/cli.mjs', 'const server = serverURL(options.server);', 'const server = serverURL(options.server); checkUpdate(server);'],
+  ['update-command-notice', 'src/cli.mjs', "if (!NO_UPDATE_NOTICE.has(positionals[0]) && !NO_UPDATE_NOTICE.has(positionals.slice(0, 2).join(' '))) checkUpdate(server);", ''],
+  ['update-auth-status-offline', 'src/cli.mjs', "new Set(['setup', 'doctor', 'auth login', 'auth status'])", "new Set(['setup', 'doctor', 'auth login'])"],
+  ['update-doctor-ok', 'src/doctor.mjs', 'return { ok: !!runtime', 'return { ok: updateInfo?.update_available !== true && !!runtime'],
+  ['plain-doctor-skills', 'src/doctor.mjs', 'installed = installedSkills(await skillStatus({ home: skillHome }));', 'installed = undefined;'],
+  ['plain-doctor-ok', 'src/doctor.mjs', '(agent === undefined || skills?.current === true)', "(agent === undefined ? installed?.status !== 'outdated' : skills?.current === true)"],
+  ['plain-doctor-attention', 'src/doctor.mjs', "installations.some(i => i.status !== 'current' && !SKILL_REFRESH.has(i.status)) ? 'needs_attention'", "false ? 'needs_attention'"],
+  ['plain-doctor-refresh', 'src/doctor.mjs', "new Set(['outdated', 'legacy', 'unmanaged'])", "new Set(['legacy', 'unmanaged'])"],
 ];
+
+// Mutants of the update and login changes run only the test that covers them, which keeps the CI matrix fast.
+const PATTERNS = {
+  'callback-state': 'callback rejects wrong state',
+  ...Object.fromEntries([
+    [['update-equal-version', 'update-older-version', 'update-stable-only', 'update-body-limit', 'update-deadline', 'update-abandoned-count'], '^a forced check reports a newer release'],
+    [['update-opt-out', 'update-opt-out-values', 'update-no-update-notifier', 'update-ci', 'update-loopback'], '^every switch, convention and server combination'],
+    [['update-cache-interval', 'update-forced-check', 'update-clock-skew', 'update-keep-verified'], '^cache state, registry answer'],
+    [['update-claim-first', 'update-forced-claim'], '^an unwritable state directory'],
+    [['update-notice-throttle', 'update-notice-aborted'], '^notices repeat a release'],
+    [['update-stderr', 'update-help-check', 'update-before-validation', 'update-after-validation', 'update-command-notice', 'update-auth-status-offline'], '^main prints the notice on stderr'],
+    [['update-doctor-ok', 'plain-doctor-skills', 'plain-doctor-ok', 'plain-doctor-attention', 'plain-doctor-refresh'], '^plain doctor reports update'],
+    [['auth-status-offline', 'login-update-advice', 'login-update-isolation'], '^auth status is an offline view'],
+    [['login-failure-advice', 'login-interrupt-quiet'], '^a failed login still names an available update'],
+    [['doctor-update-advice', 'doctor-update-isolation', 'setup-update-isolation'], '^doctor and setup report the latest published release'],
+  ].flatMap(([names, pattern]) => names.map(name => [name, pattern]))),
+};
 
 let killed = 0;
 const selected = process.env.EVOLINK_MUTATION_ONLY ? mutants.filter(item => item[0] === process.env.EVOLINK_MUTATION_ONLY) : mutants;
@@ -85,9 +140,12 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
       : name.startsWith('lock-') ? ['state.test.mjs']
       : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']
+      : name.startsWith('update-') || name.startsWith('plain-doctor-') ? ['update.test.mjs']
+      : ['auth-status-offline', 'login-update-advice', 'login-update-isolation', 'login-failure-advice', 'login-interrupt-quiet'].includes(name) ? ['auth.test.mjs']
+      : ['doctor-update-advice', 'doctor-update-isolation', 'setup-update-isolation'].includes(name) ? ['setup.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
-    const selection = name === 'callback-state' ? ['--test-name-pattern=callback rejects wrong state'] : [];
+    const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];
     const run = spawnSync(process.execPath, ['--test', ...selection, ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });
     const output = `${run.stdout || ''}\n${run.stderr || ''}`;
     if (run.status > 0 && !run.error && /not ok \d+|✖ /.test(output) && !output.includes('SyntaxError:')) { killed++; console.log(`DETECTED ${name}`); }

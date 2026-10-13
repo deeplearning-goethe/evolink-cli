@@ -4,6 +4,9 @@ import { once } from 'node:events';
 import { CliError } from '../src/errors.mjs';
 import { restFixture } from './fixture-rest.mjs';
 
+// Test processes and the CLIs they spawn must not contact the npm registry for update notices.
+process.env.EVOLINK_CLI_UPDATE_CHECK = '0';
+
 export class MemoryVault {
   async read() { return this.value; }
   async write(value) { this.value = structuredClone(value); }

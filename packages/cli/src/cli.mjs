@@ -10,6 +10,7 @@ import { commandHelp } from './help.mjs';
 import { installSkill, skillStatus, validateAgent } from './skills.mjs';
 import { doctor } from './doctor.mjs';
 import { setup } from './setup.mjs';
+import { checkForUpdate, updateNotice } from './update.mjs';
 import { CLI_VERSION } from './version.mjs';
 import { CliError, requireThat, errorView, localFile } from './errors.mjs';
 
@@ -52,7 +53,7 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
                                  Reuse or finish login, install skills and verify (free)
   auth login [--no-browser] [--timeout SECONDS]
                                  Sign in; keep this command running for the callback
-  auth status | auth logout      Check or revoke this CLI session
+  auth status | auth logout      Check the saved login offline, or revoke it
   balance                        Verify connection and account balance (free)
   models search [--query TEXT] [--type image|video|audio|all] [--limit N]
   models show MODEL              Read parameters and pricing (free)
@@ -79,7 +80,8 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   skills install [--agent NAME] [--replace-modified]
                                  Install or update; back up replaced files
   skills status [--agent NAME]   Check installed skill content and CLI version
-  doctor [--agent NAME]          Check prerequisites, connection, models and skills (free)
+  doctor [--agent NAME]          Check prerequisites, connection, models, skills
+                                 and CLI updates (free)
 
 Options: --json, --server RESOURCE_URL, --api-url URL, --files-url URL,
          --token-stdin, --help, --version
@@ -94,6 +96,9 @@ Run evolink tasks list --help for filter details and recovery caveats.
 Each command accepts --help --json for its machine-readable command reference.
 Model/docs/usage capabilities come from the bundled shared platform module.
 After upgrading the package, run evolink skills install to refresh its skill.
+setup, doctor and auth login report update.update_available with the latest release;
+other commands except auth status print one stderr line, at most once a day, when a
+newer release exists. EVOLINK_CLI_UPDATE_CHECK=0 turns these npm registry checks off.
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
@@ -101,6 +106,9 @@ Quotes expire in 15 minutes. --confirm is only for an already approved quote.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
+
+// setup, doctor and auth login report the update status in their own result; auth status stays offline.
+const NO_UPDATE_NOTICE = new Set(['setup', 'doctor', 'auth login', 'auth status']);
 
 const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle', 'input', 'input-file', 'prompt', 'media-seconds',
   'pricing-source', 'pricing-parameters', 'refresh-quote', 'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
@@ -195,12 +203,15 @@ async function estimateArgs(options) {
   return { model: options.model, input, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
-export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome }) {
+export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome, updates }) {
+  // login, setup and doctor always ask the registry and report the outcome, including a disabled check;
+  // loopback test resources never contact it.
+  const update = () => checkForUpdate({ state, server, force: true, signal, ...updates });
   client = mcp;
   const [command, action, id] = positionals;
   const media = new Media({ client, state, server });
   if (command === 'auth') {
-    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
+    if (action === 'login') return credentials.login({ noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress, update });
     if (action === 'status') return credentials.status();
     if (action === 'logout') return credentials.logout();
   }
@@ -274,8 +285,8 @@ export async function dispatch(positionals, options, { state, server, credential
   if (command === 'skills' && action === 'install') return installSkill({ home: skillHome, agent: options.agent, replaceModified: options['replace-modified'] });
   if (command === 'skills' && action === 'status') return skillStatus({ home: skillHome, agent: options.agent });
   if (command === 'setup') return setup({ state, server, credentials, client, agent: options.agent, skillHome,
-    noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress });
-  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome });
+    noBrowser: options['no-browser'], timeout: options.timeout === undefined ? undefined : Number(options.timeout) * 1000, signal, progress, update });
+  if (command === 'doctor') return doctor({ state, server, credentials, client, agent: options.agent, skillHome, update });
   throw new CliError('unknown_command', 'Unknown command or missing argument. Run evolink --help.');
 }
 
@@ -294,17 +305,29 @@ async function stdinToken(stream) {
   return token;
 }
 
-export async function main(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin }) {
+export async function main(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
+  { env = process.env, fetchFn, now, timeout, updateState } = {}) {
   let options = { json: argv.includes('--json') };
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   process.once('SIGINT', interrupt);
   process.once('SIGTERM', interrupt);
+  // The update notice follows the command's own output on stderr; stdout stays one envelope.
+  let update;
+  const updates = { env, fetchFn, now, timeout };
+  const checkUpdate = server => {
+    // Building the state path can throw (for example without a home directory); that never fails the command.
+    update = Promise.resolve().then(() => updateNotice({ state: updateState || new State(), server, signal: controller.signal, ...updates }))
+      .catch(() => undefined);
+  };
   try {
     let positionals;
     try { ({ values: options, positionals } = parseArgs({ args: argv, options: OPTIONS, allowPositionals: true, strict: true })); }
     catch { throw new CliError('invalid_option', 'Invalid command option. Run evolink --help.'); }
-    if (options.version) { io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: CLI_VERSION }) + '\n' : CLI_VERSION + '\n'); return; }
+    if (options.version) {
+      checkUpdate();
+      io.stdout.write(options.json ? JSON.stringify({ schema_version: 1, ok: true, version: CLI_VERSION }) + '\n' : CLI_VERSION + '\n'); return;
+    }
     if (options.help || !positionals.length) {
       const reference = commandHelp(positionals);
       const help = options.help && positionals.length === 2 && positionals[0] === 'tasks' && positionals[1] === 'list' ? TASKS_LIST_HELP : reference?.help || HELP;
@@ -316,7 +339,9 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const token = options['token-stdin'] ? await stdinToken(io.stdin) : undefined;
     const credentials = new Credentials({ server, state, token });
     const client = new Api(credentials, { signal: controller.signal, apiUrl: options['api-url'], filesUrl: options['files-url'] });
-    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n') }));
+    // Only a fully validated command checks: invalid tokens and service URLs fail without contacting npm.
+    if (!NO_UPDATE_NOTICE.has(positionals[0]) && !NO_UPDATE_NOTICE.has(positionals.slice(0, 2).join(' '))) checkUpdate(server);
+    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n'), updates }));
     const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
     if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;
@@ -324,5 +349,10 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const view = { schema_version: 1, ok: false, error: errorView(error) };
     (options.json ? io.stdout : io.stderr).write(options.json ? JSON.stringify(view) + '\n' : `${view.error.code}: ${view.error.message}\n${view.error.details ? JSON.stringify(view.error.details, null, 2) + '\n' : ''}`);
     process.exitCode = error.exitCode || (controller.signal.aborted ? 130 : 1);
-  } finally { process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt); }
+  } finally {
+    // Ctrl-C while the check finishes stops the check, not the completed command.
+    const notice = await update;
+    process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt);
+    if (notice && !controller.signal.aborted) io.stderr.write(notice + '\n');
+  }
 }

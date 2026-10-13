@@ -85,7 +85,7 @@ test('installed command reads anonymous rules with no keyring, and invalid filte
   async function run(args) {
     const child = spawn(process.execPath, [fileURLToPath(new URL('../bin/evolink.mjs', import.meta.url)),
       'models', 'pricing', ...args, '--server', resource, '--json'], { stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, EVOLINK_CLI_HOME: '/dev/null/not-a-directory', EVOLINK_API_KEY: '' } });
+      env: { ...process.env, EVOLINK_CLI_HOME: '/dev/null/not-a-directory', EVOLINK_API_KEY: '', EVOLINK_CLI_UPDATE_CHECK: '0' } });
     let output = '', stderr = ''; child.stdout.on('data', value => output += value); child.stderr.on('data', value => stderr += value);
     const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
     assert.equal(output.trim().split('\n').length, 1, stderr); return { status, view: JSON.parse(output) };
