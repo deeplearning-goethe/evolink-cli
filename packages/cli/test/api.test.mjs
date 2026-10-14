@@ -322,3 +322,18 @@ test('public_reference compatibility estimates full rules and refuses unavailabl
   await assert.rejects(media.estimate(args), error => error.details.submission_allowed === false);
   assert.equal(f.paid.size, 0);
 });
+
+test('site links the CLI shows are tagged as the CLI, not as the local MCP package', async t => {
+  const { client } = await context(t);
+  const search = await client.call('search_models', { type: 'image', limit: 10 });
+  const docs = search.models.map(model => model.docs).filter(Boolean);
+  assert.ok(docs.length > 0, 'documented models carry a docs link');
+  for (const link of docs) {
+    assert.match(link, /^https:\/\/evolink\.ai\//);
+    assert.match(link, /[?&]utm_source=mcp_other&utm_medium=mcp&utm_campaign=cli&utm_content=model_docs$/);
+    assert.doesNotMatch(link, /mcp_local/);
+  }
+  const model = await client.call('get_model', { model: search.models.find(row => row.docs).id });
+  assert.match(JSON.stringify(model), /utm_campaign=cli/);
+  assert.doesNotMatch(JSON.stringify(model), /utm_campaign=mcp_local/);
+});

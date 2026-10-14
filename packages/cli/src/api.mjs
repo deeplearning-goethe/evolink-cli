@@ -23,7 +23,8 @@ export class Api {
     };
   }
   context(access, name) {
-    return { serviceChannel: { accessToken: access.access_token }, clientName: 'EvoLink CLI',
+    // linkCampaign: site links the CLI shows are tagged utm_campaign=cli, not as the local MCP package.
+    return { serviceChannel: { accessToken: access.access_token }, clientName: 'EvoLink CLI', linkCampaign: 'cli',
       http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli', version: CLI_VERSION,
         controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin } };
   }
@@ -33,7 +34,7 @@ export class Api {
       { tool: name, required_inputs: requiredInputs, request_sent: false });
     // Public configuration rules do not require login, refresh or key access.
     if (name === 'get_pricing_rules') {
-      const result = await this.platform.call(name, args, {
+      const result = await this.platform.call(name, args, { clientName: 'EvoLink CLI', linkCampaign: 'cli',
         http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli',
           version: CLI_VERSION, controlBaseUrl: this.apiUrl.origin },
       });
