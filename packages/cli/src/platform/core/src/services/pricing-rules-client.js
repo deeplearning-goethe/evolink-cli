@@ -51,8 +51,10 @@ const rateFields = {
     billing_rule: z.string().min(1).max(60), pricing_status: z.enum(['available', 'unavailable']),
     effective_at: z.string().datetime({ offset: true }),
 };
+// Legacy text adapters express a tier as base rate × multiplier; published policies give each tier its own
+// SKU and absolute rate and omit the multiplier. Either way tier.rate is the rate to charge.
 const Tier = z.object({ ...rateFields, multiplier: decimal.refine(value => /^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)
-        && fraction(value)[0] > 0n), when: ExpressionSchema.optional() });
+        && fraction(value)[0] > 0n).optional(), when: ExpressionSchema.optional() });
 const Component = z.object({ ...rateFields, id: z.string().min(1).max(100), role: z.string().min(1).max(100),
     label_key: z.string().min(1).max(100).optional(),
     dimension: z.string().min(1).max(100), unit: z.string().min(1).max(100),
@@ -80,7 +82,8 @@ const Meta = z.object({ schema_version: z.literal('2'), catalog_version: z.strin
     exchange_rate_version: z.literal('pricing-fx/v1:USD-CNY=6.8'),
     updated_at: z.string().datetime({ offset: true }), fresh_until: z.string().datetime({ offset: true }),
 });
-const List = z.object({ meta: Meta, models: z.array(Model).max(1000) });
+// A list is checked model by model, so one unreadable model cannot void every other price.
+const Envelope = z.object({ meta: Meta, models: z.array(z.unknown()).max(1000) });
 const Single = z.object({ meta: Meta, model: Model });
 const cache = new Map();
 const pending = new Map();
@@ -104,15 +107,57 @@ function bounded(value, depth = 0, budget = { nodes: 0 }) {
         return Object.values(value).every(item => bounded(item, depth + 1, budget));
     return true;
 }
+/** A rejected model is named by its ID when that is a readable identifier, otherwise by its position. */
+function rejectedName(raw, index) {
+    const id = identifier(100).safeParse(raw && typeof raw === 'object' ? raw.model_id : undefined);
+    return id.success ? id.data : `#${index}`;
+}
+/**
+ * Bounds, metadata and freshness apply to the whole response and fail closed. In a list, a model whose rules
+ * cannot be read is left out and named in `rejected_models`; the list fails only when no model is readable.
+ * A single-model response fails when its model cannot be read.
+ */
 export function validatePricingRules(body, single) {
     if (!bounded(body))
         throw new PricingRulesError('invalid_pricing_rules');
-    const parsed = (single ? Single : List).safeParse(body);
+    const parsed = (single ? Single : Envelope).safeParse(body);
     if (!parsed.success)
         throw new PricingRulesError('invalid_pricing_rules');
     if (Date.parse(parsed.data.meta.fresh_until) <= Date.now())
         throw new PricingRulesError('expired_pricing_rules');
-    return parsed.data;
+    if ('model' in parsed.data)
+        return parsed.data;
+    const models = [], rejected = [];
+    parsed.data.models.forEach((raw, index) => {
+        const model = Model.safeParse(raw);
+        if (model.success)
+            models.push(model.data);
+        else
+            rejected.push(rejectedName(raw, index));
+    });
+    if (rejected.length > 0 && models.length === 0)
+        throw new PricingRulesError('invalid_pricing_rules');
+    return { meta: parsed.data.meta, models, ...(rejected.length > 0 ? { rejected_models: rejected } : {}) };
+}
+const completeRule = (model) => model.components.every(component => component.quantity_rule && component.rounding
+    && component.tiers.every(tier => tier.when));
+/**
+ * The full view must carry every expression an estimate evaluates. A single model without them fails; in a
+ * list, such a model is left out and named like an unreadable one, and the list fails only when none is left.
+ */
+function completeRules(body) {
+    if ('model' in body) {
+        if (!completeRule(body.model))
+            throw new PricingRulesError('incomplete_pricing_rules');
+        return body;
+    }
+    const kept = body.models.filter(completeRule);
+    if (kept.length === body.models.length)
+        return body;
+    if (kept.length === 0)
+        throw new PricingRulesError('incomplete_pricing_rules');
+    return { meta: body.meta, models: kept,
+        rejected_models: [...(body.rejected_models ?? []), ...body.models.filter(model => !completeRule(model)).map(model => model.model_id)] };
 }
 async function readBody(response) {
     if (!response.body)
@@ -189,16 +234,15 @@ export async function getPricingRules(input, options = {}) {
                 throw new PricingRulesError(status === 404 ? 'not_found' : status === 429 ? 'rate_limit_exceeded'
                     : status === 503 ? 'pricing_rules_unavailable' : 'pricing_rules_http_error', status, status === 429 ? retryAfterSeconds(response.headers.get('Retry-After')) : undefined);
             }
-            const body = validatePricingRules(await readBody(response), Boolean(query.model));
+            let body = validatePricingRules(await readBody(response), Boolean(query.model));
             const models = 'model' in body ? [body.model] : body.models;
             if (models.some(model => (query.model && model.model_id !== query.model)
                 || (query.product_id && model.product_id !== query.product_id) || (query.operation && model.operation !== query.operation)
                 || (query.modality && model.modality !== query.modality) || (query.lifecycle && model.lifecycle !== query.lifecycle))) {
                 throw new PricingRulesError('mismatched_pricing_rules');
             }
-            if (query.view === 'full' && models.some(model => model.components.some(component => !component.quantity_rule || !component.rounding
-                || component.tiers.some(tier => !tier.when))))
-                throw new PricingRulesError('incomplete_pricing_rules');
+            if (query.view === 'full')
+                body = completeRules(body);
             if (cache.size >= MAX_CACHE_ENTRIES)
                 cache.delete(cache.keys().next().value);
             cache.set(key, { body, etag: response.headers.get('ETag') ?? undefined,

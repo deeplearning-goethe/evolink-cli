@@ -41,15 +41,24 @@ export async function loadCatalog(config, pricingOptions = {}) {
     try {
         const { body } = await getPricingRules({ view: 'full' }, { fresh: pricingOptions.fresh });
         const rules = 'models' in body ? body.models : [body.model];
+        // Rules left out of the list only matter here when they belong to a model this catalog shows.
+        const rejected = new Set(('models' in body ? body.rejected_models ?? [] : []).map(id => id.toLowerCase()));
+        const unreadable = [];
         for (const entry of entries.values()) {
             const rule = rules.find(model => model.model_id.toLowerCase() === entry.id.toLowerCase());
-            if (!rule)
+            if (!rule) {
+                if (rejected.has(entry.id.toLowerCase()))
+                    unreadable.push(entry.id);
                 continue;
+            }
             entry.priced = { id: entry.id, kind: entry.kind, pricingIncomplete: rule.pricing_status !== 'available',
                 prices: rule.components.map(c => ({ sku_id: c.sku_id, name: c.id,
                     unit: c.unit.includes('token') ? c.unit : c.unit.includes('second') ? 'second' : c.unit.includes('image') ? 'image' : c.unit,
                     min_usd: Number(c.rate.usd), max_usd: Number(c.rate.usd), min_charge_usd: Number(c.minimum_charge.usd),
                     role: c.unit.includes('token') ? 'token' : c.role.includes('output') || c.role === 'request' || c.role === 'output' ? 'output' : 'add_on' })) };
+        }
+        if (unreadable.length > 0) {
+            pricingWarning = `Prices for ${unreadable.length} listed model${unreadable.length === 1 ? ' are' : 's are'} unavailable right now because their published pricing rules could not be read: ${unreadable.slice(0, 10).join(', ')}${unreadable.length > 10 ? `, and ${unreadable.length - 10} more` : ''}. Other prices are unaffected.`;
         }
     }
     catch (error) {
