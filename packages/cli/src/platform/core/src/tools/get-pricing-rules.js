@@ -23,6 +23,10 @@ export function registerPricingRules(server) {
                 'No task quote or final spending cap was established. Do not multiply unit rates into a bill; minimum charges, tiers and rounding apply.',
                 'Coverage follows the models returned for this query. Empty results mean no matching public rules were returned, not zero cost.',
             ];
+            const rejected = 'models' in body ? body.rejected_models ?? [] : [];
+            if (rejected.length > 0) {
+                warnings.push(`${rejected.length} model(s) were left out because their published rules could not be read: ${rejected.slice(0, 20).join(', ')}${rejected.length > 20 ? `, and ${rejected.length - 20} more` : ''}. Missing rules do not mean these models are free.`);
+            }
             const lines = [`Public pricing rules (${body.meta.price_scope}; ${selection}; ${source}); ${models.length} model(s).`, ...warnings];
             for (const model of models) {
                 lines.push(`${model.model_id} (${model.modality}; ${model.pricing_status}; ${model.policy_source} v${model.policy_version})`);
