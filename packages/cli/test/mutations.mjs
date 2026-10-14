@@ -64,6 +64,7 @@ const mutants = [
   ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
+  ['utm-cli-campaign', 'src/api.mjs', "clientName: 'EvoLink CLI', linkCampaign: 'cli',\n", "clientName: 'EvoLink CLI',\n"],
   ['auth-status-offline', 'src/auth.mjs', 'if (!saved?.tokens) return {', 'if (!saved?.tokens || saved.expires_at <= Date.now()) return {'],
   ['login-update-advice', 'src/auth.mjs', 'if (advice) progress(advice);', 'if (false) progress(advice);'],
   ['login-update-isolation', 'src/auth.mjs', 'const updating = update?.().catch(() => undefined);', 'const updating = update?.();'],
@@ -140,7 +141,7 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh'].includes(name) ? ['api.test.mjs']
+    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'error-refusal-evidence' ? ['media.test.mjs']
       : name.startsWith('failed-') ? ['failed-task.test.mjs']

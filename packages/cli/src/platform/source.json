@@ -2,7 +2,7 @@
   "schema_version": 1,
   "repository": "Evolink-AI/evolink-mcp",
   "baseline": "acc9fd43b945e3917b47809fc94f85ba26c7c8db",
-  "source_sha256": "6a1ecce8f5359314b795ed793b52835dce8d547b99578d50655eebaadd7a28e5",
+  "source_sha256": "a3fa0a8e09990acb46f46a5574d22b8cda8aa7f6f5fcebb5427fe28414fd227e",
   "files": {
     "packages/core/src/branding.ts": "534b944a1370f210a3858c1a85b1a23071aca8e26b7a3e70e4d859ba5b152ff7",
     "packages/core/src/config.ts": "208496230e22f43817cfb9b3805cde279fcce61a82227dfbd9f63485a33d33c7",
@@ -11,7 +11,7 @@
     "packages/core/src/data/model-params.ts": "d387d10b7d888059df9c1bd2177e336a497981b63ecbac57009f399f4e1fd858",
     "packages/core/src/platform-client.ts": "d272d1fbd7939acd69482207f1a75550e4ff8f584deee8f6d0c8ace86e453b6d",
     "packages/core/src/platform-operations.ts": "3239283b4cff2490dd42ac006d03165ef2843eb05cfaece3572d1aacde2e7e32",
-    "packages/core/src/request-context.ts": "f62856e8281207449724a672312f7ea444af10317a0ce93590e2fd2a26fef03e",
+    "packages/core/src/request-context.ts": "22ca68d74abc6d5549e20362c6081179d5888f884f74371a95280009d4a59225",
     "packages/core/src/server.ts": "1d6d7a46fcd0fd96526e02ab766f6379a750bc550cca054bd088c4a5993292e2",
     "packages/core/src/services/api-client.ts": "fb750cb37d4bce367851b1b659fd335894dda98b3ce46b14227a0150e1ef0773",
     "packages/core/src/services/catalog-client.ts": "c2bcfb0f2780112bcddf6a42537cf9f6264717d0b3685c896790339b0f9bb7df",
