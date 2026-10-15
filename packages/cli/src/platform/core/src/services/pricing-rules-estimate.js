@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { getPricingRules } from './pricing-rules-client.js';
 import { QuoteError, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
+import { prepareSeedanceInput, seedanceSearchEnabled } from './seedance-input.js';
 /**
  * How long an approval from estimate_cost may be passed to generate_*. The rules' own
  * `fresh_until` is a short refresh window (minutes); people confirming a price in a chat
@@ -160,7 +161,11 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     if (!rule || rule.model_id !== entry.id.toLowerCase() || rule.modality !== entry.kind || rule.policy_source !== 'published' || rule.pricing_status !== 'available') {
         fail('pricing_rules_unavailable', 'This model has no available published media pricing policy.');
     }
-    const params = prepareQuoteParameters(rule, entry, input, options.pricingParameters, options.mediaSeconds, true);
+    const prepared = prepareSeedanceInput(entry, input);
+    if (prepared.errors.length)
+        throw new QuoteError('invalid_quote_parameter', `${prepared.errors[0].param} ${prepared.errors[0].problem}`, prepared.errors[0].param);
+    const effectiveInput = prepared.input;
+    const params = prepareQuoteParameters(rule, entry, effectiveInput, options.pricingParameters, options.mediaSeconds, true);
     const declared = new Set((rule.parameters ?? []).map(p => p.name)), ids = new Set();
     const components = [];
     let total = 0n;
@@ -209,7 +214,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     }
     if (total > BigInt(Number.MAX_SAFE_INTEGER))
         fail('invalid_pricing_expression', 'The estimated charge exceeds its supported range.');
-    const amounts = amountsForUC(String(total)), requestHash = quoteRequestHash(entry.id, input, options.mediaSeconds, options.pricingParameters);
+    const amounts = amountsForUC(String(total)), requestHash = quoteRequestHash(entry.id, effectiveInput, options.mediaSeconds, options.pricingParameters);
     const approval = { source: 'pricing_rules', price_scope: 'public_default', model_id: entry.id,
         request_hash: requestHash, total_uc: amounts.uc, expires_at: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
         fingerprint: quoteRequestHash(entry.id, { rules: economicRules(rule), parameters: params,
@@ -220,6 +225,9 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         ...(missing.size ? { uncheckable_reason: 'usage' } : {}),
         possible_extras: [...missing].map(name => `Additional charge depends on ${name}; supply expected or measured usage in pricing_parameters.`), notes: ['Public default prices; account discounts are not included.',
             'Confirm the estimated cost before generation. Actual billed usage and final charges may differ.'] };
+    if (seedanceSearchEnabled(entry, effectiveInput) && params.search_count !== undefined) {
+        estimate.notes.push(`Web search is enabled. search_count=${params.search_count} is expected usage, not a limit; actual searches and final charges may differ, including when the expected count is zero.`);
+    }
     return { approval, estimate, amounts, components, parameters: params, rule };
 }
 export async function createRulesEstimate(entry, input, options = {}) {

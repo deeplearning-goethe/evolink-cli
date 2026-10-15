@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { requestAccountQuote } from './api-client.js';
 import { getPricingRules, PricingMoney } from './pricing-rules-client.js';
+import { isSeedanceGeneration, isSeedanceSearch, seedanceSearchEnabled } from './seedance-input.js';
 const decimal = z.string().max(64).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/);
 const identifier = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const rational = z.string().max(128).regex(/^(?:0|[1-9]\d*)(?:\.\d+|\/[1-9]\d*)?$/);
@@ -59,7 +60,9 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
     const parameters = {};
     for (const [name, p] of declared) {
         // A declared duration and duration_seconds have different meanings (smart duration).
-        const generationNames = [name, ...(aliases[name] ?? []).filter(alias => !declared.has(alias))];
+        // Video edit's duration=-1 is an operation setting, never expected output seconds.
+        const expectedEditDuration = name === 'duration_seconds' && entry.id === 'seedance-2.5-video-edit' && isSeedanceGeneration(entry);
+        const generationNames = [name, ...(aliases[name] ?? []).filter(alias => !declared.has(alias) && !(expectedEditDuration && alias === 'duration'))];
         const supplied = generationNames.filter(key => input[key] !== undefined).map(key => input[key]);
         if (supplied.some(value => String(value) !== String(supplied[0]))) {
             fail('conflicting_quote_parameter', `Conflicting generation values for ${name}.`, name);
@@ -112,7 +115,7 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         const references = Array.isArray(input.video_urls) && input.video_urls.length > 0
             || typeof input.video_url === 'string' && input.video_url.trim().length > 0
             || typeof input.source_task_id === 'string' && input.source_task_id.trim().length > 0;
-        if (value === undefined && measured.test(name) && (p.required || references || /tokens$/.test(name) || (name === 'search_count' && input.web_search === true) || p.default === undefined)) {
+        if (value === undefined && measured.test(name) && (p.required || references || /tokens$/.test(name) || (name === 'search_count' && (isSeedanceSearch(entry) ? seedanceSearchEnabled(entry, input) : input.web_search === true)) || p.default === undefined)) {
             if (allowMissingUsage)
                 continue;
             fail('quote_usage_required', `Provide measured or expected usage for ${name} in pricing_parameters.`, name);
@@ -155,6 +158,10 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         const allowed = p.values ?? p.enum;
         if (allowed && !allowed.some(candidate => String(candidate) === String(value)))
             fail('invalid_quote_parameter', `Pricing parameter ${name} is not an allowed value.`, name);
+        if (name === 'search_count' && isSeedanceSearch(entry) && !seedanceSearchEnabled(entry, input)
+            && compareDecimal(String(value), '0') !== 0) {
+            fail('conflicting_quote_parameter', 'search_count must be zero when model_params.web_search is not enabled.', name);
+        }
         parameters[name] = value;
     }
     return parameters;

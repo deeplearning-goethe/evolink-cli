@@ -24,10 +24,10 @@ test('rules estimate saves approval and expiry, refreshes before submit, and kee
   assert.equal(q.pricing_scope, 'public_default'); assert.equal(q.final_budget_enforced, false);
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(saved.backend_estimate_id, undefined); assert.equal(q.estimate_id, undefined);
-  // The core approves a rules estimate for 30 minutes; the saved local quote keeps the CLI's own 15-minute limit, never longer than the approval.
+  // The local quote shares the core's 30-minute window and never extends its approval.
   const approval = Date.parse(q.pricing_quote.expires_at);
   assert.ok(Math.abs(approval - saved.created_at - 30 * 60_000) < 5_000, `approval ${approval - saved.created_at} ms`);
-  assert.ok(Math.abs(saved.expires_at - saved.created_at - 15 * 60_000) < 5_000, `local ${saved.expires_at - saved.created_at} ms`);
+  assert.ok(Math.abs(saved.expires_at - saved.created_at - 30 * 60_000) < 5_000, `local ${saved.expires_at - saved.created_at} ms`);
   assert.ok(saved.expires_at <= approval);
   assert.equal(saved.args.max_cost_usd, 0.05); assert.equal(saved.args.pricing_quote.total_uc, '27200');
   const result = await media.generate('image', q.quote_id, { confirmed: true });
@@ -80,6 +80,21 @@ test('unknown outcomes retain the approved rules and original request ID; only f
   assert.deepEqual(saved.args, unknown.args); assert.equal(saved.backend_estimate_id, unknown.backend_estimate_id);
   assert.equal(f.ruleReads, quoteCount + 1); assert.equal(f.paid.size, 1);
   await assert.rejects(media.refresh(q.quote_id), { code: 'submission_already_started' });
+});
+
+test('an uncertain submission still recovers at minute 16 with its original request ID', async t => {
+  const { f, media, state } = await context(t);
+  const q = await media.estimate({ model: 'fixture-image', input: { prompt: 'recover within the shared approval window' } });
+  f.loseRestSubmissions = 2;
+  await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }));
+  const saved = await state.read('quotes', q.quote_id);
+  assert.equal(saved.state, 'outcome_unknown');
+  assert.equal(f.paid.size, 1);
+  media.now = () => saved.created_at + 16 * 60_000;
+  const recovered = await media.resume(q.quote_id);
+  assert.equal(recovered.task_id, f.paid.get(saved.client_request_id));
+  assert.equal((await state.read('quotes', q.quote_id)).client_request_id, saved.client_request_id);
+  assert.equal(f.paid.size, 1);
 });
 
 test('quote approval compares account pricing and inputs but ignores new estimate IDs and expiry', () => {

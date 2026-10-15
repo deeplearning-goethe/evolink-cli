@@ -7,6 +7,11 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['seedance-saved-input', 'src/media.mjs', '...(quote.effective_input ? { effective_input: quote.effective_input, defaults_applied: quote.defaults_applied } : {}),', ''],
+  ['seedance-input-fingerprint', 'src/media.mjs', '...(quote.effective_input ? { effective_input: quote.effective_input } : {}),', ''],
+  ['seedance-submit-body', 'src/platform/core/src/tools/generate.js', 'const body = { ...effectiveInput, model: entry.id };', 'const body = { ...input, model: entry.id };'],
+  ['seedance-unknown-search', 'src/platform/core/src/services/pricing-quote-client.js', 'isSeedanceSearch(entry) ? seedanceSearchEnabled(entry, input) : input.web_search === true', 'input.web_search === true'],
+  ['seedance-edit-duration', 'src/platform/core/src/services/pricing-quote-client.js', "const expectedEditDuration = name === 'duration_seconds' && entry.id === 'seedance-2.5-video-edit' && isSeedanceGeneration(entry)", 'const expectedEditDuration = false'],
   ['error-refusal-evidence', 'src/media.mjs', "&& ['not_submitted', 'rejected'].includes(e.details?.submission_state)", "&& true"],
 
   ['rest-capability', 'src/api.mjs', 'if (requireCapability)', 'if (false)'],
@@ -34,7 +39,10 @@ const mutants = [
   ['never-submitted-recovery', 'src/media.mjs', "'submission_not_started'", "'submission_already_started'"],
   ['refused-recovery', 'src/media.mjs', "quote.state !== 'refused'", 'true'],
   ['login-binding', 'src/media.mjs', 'quote.binding === (await this.client.credentials.access()).binding', 'true'],
-  ['expiry', 'src/media.mjs', 'this.now() <= quote.expires_at', 'true'],
+  ['expiry', 'src/media.mjs', 'this.now() < quote.expires_at', 'true'],
+  ['quote-ttl-15-minutes', 'src/media.mjs', 'this.now() + APPROVAL_TTL_MS', 'this.now() + 15 * 60_000'],
+  ['quote-ttl-server-expiry', 'src/media.mjs', 'Math.min(this.now() + APPROVAL_TTL_MS, serverExpiry ?? Infinity)', 'this.now() + APPROVAL_TTL_MS'],
+  ['quote-ttl-expiry-boundary', 'src/media.mjs', 'this.now() < quote.expires_at', 'this.now() <= quote.expires_at'],
   ['input-binding', 'src/media.mjs', 'quote.args_hash === hash(quote.args)', 'true'],
   ['callback-state', 'src/auth.mjs', "url.searchParams.get('state') !== state", 'false'],
   ['logout-retention', 'src/auth.mjs', "requireThat(response.ok, 'logout_failed'", "requireThat(true, 'logout_failed'"],
@@ -141,7 +149,9 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
+    const files = name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
+      : name.startsWith('quote-ttl-') ? ['quote-expiry.test.mjs']
+      : ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'error-refusal-evidence' ? ['media.test.mjs']
       : name.startsWith('failed-') ? ['failed-task.test.mjs']

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -12,6 +13,16 @@ import { resetPricingRulesCacheForTests } from '../src/platform/core/src/service
 test.beforeEach(resetPricingRulesCacheForTests);
 
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-public-20261010.json', import.meta.url), 'utf8'));
+function canonical(value) {
+  if (Array.isArray(value)) return value.map(canonical);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.keys(value).sort().map(key => [key, canonical(value[key])]));
+  return value;
+}
+// Check every JSON field while keeping mutation failure diagnostics bounded.
+function modelDigests(models) {
+  return models.map(model => ({ model_id: model.model_id,
+    sha256: createHash('sha256').update(JSON.stringify(canonical(model))).digest('hex') }));
+}
 function mediaBody(modality) {
   const data = structuredClone(snapshot);
   data.meta.fresh_until = new Date(Date.now() + 300000).toISOString();
@@ -29,7 +40,7 @@ test('CLI shared parser preserves the full 211-model response and each media mod
       return new Response(JSON.stringify(data), { headers: { 'Content-Type': 'application/json' } });
     } });
     const result = await client.call('get_pricing_rules', { ...(modality ? { modality } : {}), view: 'full' }, { requireCapability: true });
-    assert.deepEqual(result.models, data.models);
+    assert.deepEqual(modelDigests(result.models), modelDigests(data.models));
     assert.equal(result.quote_established, false); assert.equal(result.final_budget_enforced, false);
     assert.doesNotMatch(result.text, /text-only/i);
   }

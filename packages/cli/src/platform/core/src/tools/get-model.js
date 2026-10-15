@@ -9,6 +9,7 @@ import { trackedLink } from '../services/utm.js';
 import { READ_ONLY, errorResult, failure, ok } from './shared.js';
 import { modelTitle } from './search-models.js';
 import { referenceInputs } from '../services/model-capabilities.js';
+import { seedanceInputRules } from '../services/seedance-input.js';
 function value(v) {
     return JSON.stringify(v);
 }
@@ -60,6 +61,7 @@ export function registerGetModel(server, config) {
                 return failure(`Unknown model "${model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs.`, { error: { category: 'not_found', param: 'model' }, suggestions });
             }
             const { spec, priced } = entry;
+            const modelRules = seedanceInputRules(entry);
             const title = modelTitle(entry);
             const lines = [`${entry.id} (${entry.kind})${title ? ` — ${title}` : ''}`, `Generate with: generate_${entry.kind}`];
             const structured = {
@@ -90,7 +92,8 @@ export function registerGetModel(server, config) {
                     constraints: spec.constraints,
                     example_input: spec.example,
                     parameters_source: modelParamsMeta(),
-                    input_schema: spec.inputSchema?.schema,
+                    input_schema: modelRules && spec.inputSchema ? { ...spec.inputSchema.schema, 'x-evolink-model-rules': modelRules } : spec.inputSchema?.schema,
+                    ...(modelRules ? { model_input_rules: modelRules } : {}),
                     response_schema: spec.responseSchema?.schema,
                     schema_info: {
                         dialect: spec.inputSchema?.dialect,
@@ -106,6 +109,8 @@ export function registerGetModel(server, config) {
                     reference_inputs: referenceInputs(spec),
                 });
                 lines.push('Schemas are versioned official OpenAPI references. response_schema describes submission, not necessarily the final task output. Apply the additional runtime constraints above.');
+                if (modelRules)
+                    lines.push('Model-specific rules: draft=true uses quality=480p when omitted and rejects another quality. These rules apply only to this resolved model and generation endpoint.', ...(modelRules.search_usage ? [modelRules.search_usage] : []), ...(modelRules.duration_usage ? [modelRules.duration_usage] : []));
             }
             else {
                 lines.push('', 'Parameters for this model are not documented here; the gateway checks the input when you submit.');

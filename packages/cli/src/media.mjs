@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
-import { rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
+import { APPROVAL_TTL_MS, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 
 function quoteError(error, cap) {
@@ -19,6 +19,7 @@ function quoteError(error, cap) {
 
 export function priceFingerprint(quote) {
   return hash({ model: quote.model, type: quote.type, input_valid: quote.input_valid, estimate: quote.estimate,
+    ...(quote.effective_input ? { effective_input: quote.effective_input } : {}),
     warnings: quote.warnings, pricing_warning: quote.pricing_warning, pricing_scope: quote.pricing_scope,
     rules: quote.pricing_quote && { fingerprint: quote.pricing_quote.fingerprint, request_hash: quote.pricing_quote.request_hash, total_uc: quote.pricing_quote.total_uc },
     account: quote.account_quote && { request_hash: quote.account_quote.request_hash, parameters: quote.account_quote.parameters,
@@ -65,10 +66,11 @@ export class Media {
     const serverExpiry = quote.pricing_quote ? Date.parse(quote.pricing_quote.expires_at) : quote.account_quote ? Date.parse(quote.account_quote.quote.expires_at) : undefined;
     requireThat(serverExpiry === undefined || Number.isFinite(serverExpiry) && serverExpiry > this.now(),
       'quote_expired', 'The estimate expired before it could be saved. Request another estimate.');
-    const expires = Math.min(this.now() + 15 * 60_000, serverExpiry ?? Infinity);
+    const expires = Math.min(this.now() + APPROVAL_TTL_MS, serverExpiry ?? Infinity);
     const stored = { id, server: this.server, binding: quote._binding, args: argsToSubmit,
       ...(this.client.apiUrl ? { backend: 'platform', api_origin: this.client.apiUrl.origin } : {}),
       type: quote.type, args_hash: hash(argsToSubmit), fingerprint: priceFingerprint(quote), estimate: quote.estimate,
+      ...(quote.effective_input ? { effective_input: quote.effective_input, defaults_applied: quote.defaults_applied } : {}),
       created_at: this.now(), expires_at: expires, ...(quote.account_quote ? { backend_estimate_id: quote.account_quote.quote.estimate_id,
         server_expires_at: serverExpiry, account_quote: quote.account_quote } : {}), state: 'quoted', client_request_id: `cli-${randomUUID()}` };
     await this.state.write('quotes', id, stored);
@@ -106,7 +108,7 @@ export class Media {
           next_step: `After user approval, run evolink generate ${kind} --quote ${id} --confirm.` });
       requireThat(resume ? ['submitting', 'outcome_unknown'].includes(quote.state) : quote.state === 'quoted',
         'submission_already_started', 'A submission already started. Use tasks resume with this quote; do not create a new request ID.', { quote_id: id, client_request_id: quote.client_request_id });
-      requireThat(this.now() <= quote.expires_at, 'quote_expired', 'The quote expired. Check recent tasks before preparing another submission.', { quote_id: id, client_request_id: quote.client_request_id });
+      requireThat(this.now() < quote.expires_at, 'quote_expired', 'The quote expired. Check recent tasks before preparing another submission.', { quote_id: id, client_request_id: quote.client_request_id });
       const { max_cost_usd, account_quote, pricing_quote, ...checkArgs } = quote.args;
       let fresh;
       try {

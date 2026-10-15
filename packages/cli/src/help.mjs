@@ -24,7 +24,7 @@ const COMMANDS = {
   'models schema': ['MODEL', 'Read versioned input and generation-submission response schemas. The response schema may omit final task outputs; runtime constraints also apply.', {}],
   'models recommend': ['--type TYPE [options]', 'Compare documented available alternatives with selection reasons. Unit rates are not total quotes.', { type: media, query: string('Search keywords; every term must match'), references: string('Comma-separated image,video,audio'), limit: integer(1, 10, 3) }],
   'docs search': ['--query TEXT [options]', 'Search versioned official model reference excerpts, not the live full website.', { query: string('Required model reference keywords'), type: allMedia, limit: integer(1, 20, 5) }],
-  estimate: ['--model MODEL --input-file FILE [options] | --refresh-quote ID', 'Prepare an account estimate valid until the backend expiry, at most 15 minutes. Show the estimated cost and material uncertainty, then obtain user approval. No spending cap is created from the estimate.', {
+  estimate: ['--model MODEL --input-file FILE [options] | --refresh-quote ID', 'Prepare an estimate valid until the returned approval expiry, at most 30 minutes. Show the estimated cost and material uncertainty, then obtain user approval. No spending cap is created from the estimate.', {
     model: string('Required model ID'), input: string('JSON object; mutually exclusive with input-file'), 'input-file': string('Local JSON file; mutually exclusive with input'), prompt: string('Optional prompt'),
     'pricing-source': choice(['account', 'public_reference']), 'pricing-parameters': string('JSON object containing declared billing usage'),
     'refresh-quote': string('Refresh an unsubmitted saved quote with its existing input and budget'),
