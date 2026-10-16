@@ -28,10 +28,15 @@ settlement caps require gateway/Worker support.
 
 Search defaults to off for the seven reviewed media routes: Seedream 5.0 Lite,
 Gemini 3 Pro Image, Gemini 3.1 Flash Image, Nano Banana 2.1, and Seedance
-2.0/2.0 Fast/2.5 text-to-video. Leave it off unless the task needs it. If the final
-input enables search, disclose each returned `search_charges` unit rate before
-approval, even when the agent enabled it. Missing counts use a zero-search partial
-subtotal that excludes search fees. One task may perform no searches or multiple
+2.0/2.0 Fast/2.5 text-to-video. Keep model web and image search off unless the user
+explicitly requests or approves enabling it. Never enable it on your own or copy
+an enabled example without that consent. If you think search is needed, first
+explain its extra per-search rates and unknown total, end the reply, and wait for
+explicit consent before enabling it. Approval of a task without search does not
+authorize adding search; changed search settings need a fresh estimate and approval.
+If the final input enables search, disclose each returned `search_charges` unit
+rate before generation approval, even when the user requested search. Missing
+counts use a zero-search partial subtotal that excludes search fees. One task may perform no searches or multiple
 searches; actual counts and fees are unknown before execution. Do not invent
 expected search counts to make the estimate complete. An explicit expected zero
 does not disable search, and any expected count is not an execution limit.

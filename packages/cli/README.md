@@ -8,8 +8,12 @@ The pricing-rules estimation changes described below are an unreleased candidate
 
 The search-fee fix is also an unreleased candidate. Search defaults to off for
 Seedream 5.0 Lite, Gemini 3 Pro Image, Gemini 3.1 Flash Image, Nano Banana 2.1,
-and Seedance 2.0/2.0 Fast/2.5 text-to-video. When enabled, an unknown search count
-produces a partial subtotal assuming zero searches, with the current per-search
+and Seedance 2.0/2.0 Fast/2.5 text-to-video. Keep web and image search off unless
+the user explicitly requests or approves it. If the agent thinks search is needed,
+explain the extra per-search rates and unknown total, then wait for consent before
+enabling it. A task approval without search does not authorize adding search;
+changed search settings need a fresh estimate and approval. When enabled, an
+unknown search count produces a partial subtotal assuming zero searches, with the current per-search
 rate for each enabled search type. One task may perform no searches or multiple
 searches; expected counts are assumptions, not execution limits. Other unknown
 usage, including text/thinking tokens, remains excluded from a partial subtotal.
