@@ -8,6 +8,7 @@ import { formatEstimateRange } from '../services/pricing-client.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { QuoteError, QuoteParameters } from '../services/pricing-quote-client.js';
 import { createRulesEstimate } from '../services/pricing-rules-estimate.js';
+import { prepareSeedanceInput } from '../services/seedance-input.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 import { currentCredentialMode } from '../request-context.js';
@@ -25,7 +26,7 @@ export function registerEstimateCost(server, config) {
             input: z.record(z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
             pricing_source: z.enum(['pricing_rules', 'account', 'public_reference']).default('pricing_rules').describe('Use published full pricing rules for public default estimates. The old account/public_reference values are compatibility aliases; neither requests a backend account quote.'),
-            pricing_parameters: QuoteParameters.optional().describe('Measured or expected billing usage declared by the pricing policy, such as input_seconds. Do not include user_group, prices or generation prompts.'),
+            pricing_parameters: QuoteParameters.optional().describe('Measured or explicitly expected usage declared by the pricing policy, such as input_seconds or search_count. Missing enabled-search counts produce a zero-search partial subtotal and per-search rates. Do not invent counts, include user_group/prices/prompts, or treat expected counts as execution limits.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
@@ -36,8 +37,11 @@ export function registerEstimateCost(server, config) {
                 const suggestions = suggestModels(catalog, model);
                 return failure(`Unknown model "${model}".${suggestions.length ? ` Did you mean: ${suggestions.join(', ')}?` : ''} Use search_models to find model IDs.`, { error: { category: 'not_found', param: 'model' }, suggestions });
             }
-            const values = input ?? {};
+            const prepared = prepareSeedanceInput(entry, input ?? {});
+            const values = prepared.input;
             const validation = entry.spec ? validateInput(entry.spec, values) : undefined;
+            validation?.errors.push(...prepared.errors);
+            validation?.warnings.push(...prepared.warnings);
             if (validation?.errors.length)
                 return failure('The generation input is invalid; no estimate was created.', { input_valid: false, problems: validation.errors, error: { category: 'invalid_request' }, charged: 'no' });
             const rulesEstimate = await createRulesEstimate(entry, values, { mediaSeconds, pricingParameters });
@@ -54,6 +58,8 @@ export function registerEstimateCost(server, config) {
             }
             if (validation?.warnings.length)
                 lines.push('Warnings:', ...formatIssues(validation.warnings));
+            for (const applied of prepared.defaults)
+                lines.push(`Applied default: ${applied.param}=${applied.value} (${applied.reason}); this effective value is used for pricing and submission.`);
             const range = formatEstimateRange(estimate);
             if (estimate.status === 'estimated' && range)
                 lines.push(`Estimated cost: ${range}`);
@@ -91,6 +97,10 @@ export function registerEstimateCost(server, config) {
                 problems: validation?.errors ?? [],
                 warnings: validation?.warnings ?? [],
                 estimate,
+                ...(estimate.search_charges?.length ? { search_charges: estimate.search_charges,
+                    amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : estimate.status === 'estimated' ? 'expected_usage_estimate' : 'not_established' } : {}),
+                ...(prepared.applies ? { effective_input: values, defaults_applied: prepared.defaults,
+                    amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : estimate.status === 'estimated' ? 'expected_usage_estimate' : 'not_established' } : {}),
             };
             try {
                 const credits = await getCredits(config, 'estimate_cost');

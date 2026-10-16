@@ -1,0 +1,1393 @@
+{
+  "meta": {
+    "schema_version": "2",
+    "catalog_version": "cat_8a41855adc38bbd6822b849d",
+    "pricing_version": "prc_4ed32d05a313c431522141fe",
+    "price_scope": "public_default",
+    "currency": "USD",
+    "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+    "updated_at": "2026-10-14T14:41:59.549026354Z",
+    "fresh_until": "2026-10-14T14:46:00Z"
+  },
+  "models": [
+    {
+      "model_id": "seedance-2.5-image-to-video",
+      "product_id": "seedance-2-5",
+      "operation": "image_to_video",
+      "modality": "video",
+      "lifecycle": "active",
+      "pricing_status": "available",
+      "settlement_basis": "request_then_actual",
+      "policy_version": 2,
+      "policy_checksum": "f9930728752bb7e08f75a1ec91fef193dff2fdb6f05bcc4a42cbab3f6cc37783",
+      "policy_source": "published",
+      "parameters": [
+        {
+          "name": "duration",
+          "type": "integer",
+          "minimum": "-1",
+          "maximum": "30",
+          "default": "5"
+        },
+        {
+          "name": "duration_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "default": "30"
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        {
+          "name": "content_filter",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "components": [
+        {
+          "id": "video_output",
+          "role": "video_output",
+          "label_key": "output_seconds",
+          "dimension": "output_second",
+          "sku_id": "4012",
+          "unit": "output_second",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "200900",
+            "credits": "20.09",
+            "cny": "2.009",
+            "usd": "0.29544118"
+          },
+          "minimum_charge": {
+            "uc": "373674",
+            "credits": "37.3674",
+            "cny": "3.73674",
+            "usd": "0.54952059"
+          },
+          "billing_rule": "per_second",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T07:41:04.814Z",
+          "quantity_rule": {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "op": "if",
+                            "args": [
+                              {
+                                "op": "eq",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "-1"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "clamp",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration_seconds"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "4"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "30"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "clamp",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "4"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "30"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "constant",
+                            "value": "10"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "constant",
+                    "value": "10"
+                  }
+                ]
+              },
+              {
+                "op": "lookup",
+                "key": {
+                  "op": "variable",
+                  "name": "quality"
+                },
+                "values": {
+                  "1080p": "2.5",
+                  "480p": "0.465",
+                  "720p": "1"
+                }
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "variable",
+                    "name": "content_filter"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        }
+      ]
+    },
+    {
+      "model_id": "seedance-2.5-reference-to-video",
+      "product_id": "seedance-2-5",
+      "operation": "reference_to_video",
+      "modality": "video",
+      "lifecycle": "active",
+      "pricing_status": "available",
+      "settlement_basis": "request_then_actual",
+      "policy_version": 2,
+      "policy_checksum": "1ecec2d0b7f5c883622179ffd28dc3b01547e4b73085545f8f8e28149628dbb5",
+      "policy_source": "published",
+      "parameters": [
+        {
+          "name": "duration",
+          "type": "integer",
+          "minimum": "-1",
+          "maximum": "30",
+          "default": "5"
+        },
+        {
+          "name": "duration_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "default": "30"
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        {
+          "name": "input_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "maximum": "30",
+          "default": "0"
+        },
+        {
+          "name": "content_filter",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "components": [
+        {
+          "id": "video_output",
+          "role": "video_output",
+          "label_key": "output_plus_billable_input_seconds",
+          "dimension": "input_plus_output_second",
+          "sku_id": "4013",
+          "unit": "input_plus_output_second",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "200900",
+            "credits": "20.09",
+            "cny": "2.009",
+            "usd": "0.29544118"
+          },
+          "minimum_charge": {
+            "uc": "373674",
+            "credits": "37.3674",
+            "cny": "3.73674",
+            "usd": "0.54952059"
+          },
+          "billing_rule": "per_second",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T07:41:04.814Z",
+          "quantity_rule": {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "op": "add",
+                            "args": [
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "eq",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "-1"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "clamp",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "clamp",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "gt",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "0"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "if",
+                                        "args": [
+                                          {
+                                            "op": "eq",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "-1"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "clamp",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration_seconds"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "4"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "clamp",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "4"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "0"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "constant",
+                            "value": "10"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "constant",
+                    "value": "10"
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "gt",
+                    "args": [
+                      {
+                        "op": "variable",
+                        "name": "input_seconds"
+                      },
+                      {
+                        "op": "constant",
+                        "value": "0"
+                      }
+                    ]
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "1.52",
+                      "480p": "0.284",
+                      "720p": "0.609"
+                    }
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "2.5",
+                      "480p": "0.465",
+                      "720p": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "variable",
+                    "name": "content_filter"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        }
+      ]
+    },
+    {
+      "model_id": "seedance-2.5-text-to-video",
+      "product_id": "seedance-2-5",
+      "operation": "text_to_video",
+      "modality": "video",
+      "lifecycle": "active",
+      "pricing_status": "available",
+      "settlement_basis": "request_then_actual",
+      "policy_version": 2,
+      "policy_checksum": "5e4d275766b8444f81ddcc07c75d9a1a5ce3ab3aa910a7c7fe73034350c23e97",
+      "policy_source": "published",
+      "parameters": [
+        {
+          "name": "duration",
+          "type": "integer",
+          "minimum": "-1",
+          "maximum": "30",
+          "default": "5"
+        },
+        {
+          "name": "duration_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "default": "30"
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        {
+          "name": "search_count",
+          "type": "integer",
+          "minimum": "0",
+          "default": "0"
+        },
+        {
+          "name": "content_filter",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "components": [
+        {
+          "id": "video_output",
+          "role": "video_output",
+          "label_key": "output_seconds",
+          "dimension": "output_second",
+          "sku_id": "4011",
+          "unit": "output_second",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "200900",
+            "credits": "20.09",
+            "cny": "2.009",
+            "usd": "0.29544118"
+          },
+          "minimum_charge": {
+            "uc": "373674",
+            "credits": "37.3674",
+            "cny": "3.73674",
+            "usd": "0.54952059"
+          },
+          "billing_rule": "per_second",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T07:41:04.814Z",
+          "quantity_rule": {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "op": "if",
+                            "args": [
+                              {
+                                "op": "eq",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "-1"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "clamp",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration_seconds"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "4"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "30"
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "clamp",
+                                "args": [
+                                  {
+                                    "op": "variable",
+                                    "name": "duration"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "4"
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "30"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "constant",
+                            "value": "10"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "constant",
+                    "value": "10"
+                  }
+                ]
+              },
+              {
+                "op": "lookup",
+                "key": {
+                  "op": "variable",
+                  "name": "quality"
+                },
+                "values": {
+                  "1080p": "2.5",
+                  "480p": "0.465",
+                  "720p": "1"
+                }
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "variable",
+                    "name": "content_filter"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        },
+        {
+          "id": "web_search",
+          "role": "web_search",
+          "label_key": "web_search_per_search",
+          "dimension": "search",
+          "sku_id": "4006",
+          "unit": "search",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "400",
+            "credits": "0.04",
+            "cny": "0.004",
+            "usd": "0.00058824"
+          },
+          "minimum_charge": {
+            "uc": "0",
+            "credits": "0",
+            "cny": "0",
+            "usd": "0"
+          },
+          "billing_rule": "per_call",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T17:49:03.571Z",
+          "condition": {
+            "op": "gt",
+            "args": [
+              {
+                "op": "variable",
+                "name": "search_count"
+              },
+              {
+                "op": "constant",
+                "value": "0"
+              }
+            ]
+          },
+          "quantity_rule": {
+            "op": "variable",
+            "name": "search_count"
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        }
+      ]
+    },
+    {
+      "model_id": "seedance-2.5-video-edit",
+      "product_id": "seedance-2-5",
+      "operation": "video_edit",
+      "modality": "video",
+      "lifecycle": "active",
+      "pricing_status": "available",
+      "settlement_basis": "request_then_actual",
+      "policy_version": 2,
+      "policy_checksum": "6dbab462d0914b22174e57d7a95b8575e46505f506651d0aa55b6911f5aa50f9",
+      "policy_source": "published",
+      "parameters": [
+        {
+          "name": "duration_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "default": "0"
+        },
+        {
+          "name": "first_input_video_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "maximum": "30",
+          "default": "0"
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        {
+          "name": "input_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "maximum": "30",
+          "default": "30"
+        },
+        {
+          "name": "content_filter",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "components": [
+        {
+          "id": "video_output",
+          "role": "video_output",
+          "label_key": "output_plus_billable_input_seconds",
+          "dimension": "input_plus_output_second",
+          "sku_id": "4014",
+          "unit": "input_plus_output_second",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "200900",
+            "credits": "20.09",
+            "cny": "2.009",
+            "usd": "0.29544118"
+          },
+          "minimum_charge": {
+            "uc": "373674",
+            "credits": "37.3674",
+            "cny": "3.73674",
+            "usd": "0.54952059"
+          },
+          "billing_rule": "per_second",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T07:41:04.814Z",
+          "quantity_rule": {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "op": "add",
+                            "args": [
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "gt",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "0"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "clamp",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "if",
+                                    "args": [
+                                      {
+                                        "op": "gt",
+                                        "args": [
+                                          {
+                                            "op": "variable",
+                                            "name": "first_input_video_seconds"
+                                          },
+                                          {
+                                            "op": "constant",
+                                            "value": "0"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "min",
+                                        "args": [
+                                          {
+                                            "op": "variable",
+                                            "name": "first_input_video_seconds"
+                                          },
+                                          {
+                                            "op": "constant",
+                                            "value": "30"
+                                          }
+                                        ]
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "gt",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "0"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "if",
+                                        "args": [
+                                          {
+                                            "op": "gt",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration_seconds"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "0"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "clamp",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration_seconds"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "4"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "if",
+                                            "args": [
+                                              {
+                                                "op": "gt",
+                                                "args": [
+                                                  {
+                                                    "op": "variable",
+                                                    "name": "first_input_video_seconds"
+                                                  },
+                                                  {
+                                                    "op": "constant",
+                                                    "value": "0"
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "min",
+                                                "args": [
+                                                  {
+                                                    "op": "variable",
+                                                    "name": "first_input_video_seconds"
+                                                  },
+                                                  {
+                                                    "op": "constant",
+                                                    "value": "30"
+                                                  }
+                                                ]
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "0"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "constant",
+                            "value": "10"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "constant",
+                    "value": "10"
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "gt",
+                    "args": [
+                      {
+                        "op": "variable",
+                        "name": "input_seconds"
+                      },
+                      {
+                        "op": "constant",
+                        "value": "0"
+                      }
+                    ]
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "1.52",
+                      "480p": "0.284",
+                      "720p": "0.609"
+                    }
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "2.5",
+                      "480p": "0.465",
+                      "720p": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "variable",
+                    "name": "content_filter"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        }
+      ]
+    },
+    {
+      "model_id": "seedance-2.5-video-extend",
+      "product_id": "seedance-2-5",
+      "operation": "video_extend",
+      "modality": "video",
+      "lifecycle": "active",
+      "pricing_status": "available",
+      "settlement_basis": "request_then_actual",
+      "policy_version": 2,
+      "policy_checksum": "fce75ed45ea2b091fb47dff1cdbc4d3cf92fc5f2c28e2347d576422cc31e31fa",
+      "policy_source": "published",
+      "parameters": [
+        {
+          "name": "duration",
+          "type": "integer",
+          "minimum": "-1",
+          "maximum": "30",
+          "default": "5"
+        },
+        {
+          "name": "duration_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "default": "30"
+        },
+        {
+          "name": "quality",
+          "type": "enum",
+          "values": [
+            "480p",
+            "720p",
+            "1080p"
+          ],
+          "default": "720p"
+        },
+        {
+          "name": "input_seconds",
+          "type": "decimal",
+          "minimum": "0",
+          "maximum": "30",
+          "default": "30"
+        },
+        {
+          "name": "content_filter",
+          "type": "boolean",
+          "default": true
+        }
+      ],
+      "components": [
+        {
+          "id": "video_output",
+          "role": "video_output",
+          "label_key": "output_plus_billable_input_seconds",
+          "dimension": "input_plus_output_second",
+          "sku_id": "4015",
+          "unit": "input_plus_output_second",
+          "billing_unit_size": 1,
+          "display_unit_size": 1,
+          "rate": {
+            "uc": "200900",
+            "credits": "20.09",
+            "cny": "2.009",
+            "usd": "0.29544118"
+          },
+          "minimum_charge": {
+            "uc": "373674",
+            "credits": "37.3674",
+            "cny": "3.73674",
+            "usd": "0.54952059"
+          },
+          "billing_rule": "per_second",
+          "pricing_status": "available",
+          "effective_at": "2026-09-16T07:41:04.814Z",
+          "quantity_rule": {
+            "op": "multiply",
+            "args": [
+              {
+                "op": "divide",
+                "args": [
+                  {
+                    "op": "ceil",
+                    "args": [
+                      {
+                        "op": "multiply",
+                        "args": [
+                          {
+                            "op": "add",
+                            "args": [
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "eq",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "-1"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "clamp",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "clamp",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "duration"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "4"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "30"
+                                      }
+                                    ]
+                                  }
+                                ]
+                              },
+                              {
+                                "op": "if",
+                                "args": [
+                                  {
+                                    "op": "gt",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "constant",
+                                        "value": "0"
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "max",
+                                    "args": [
+                                      {
+                                        "op": "variable",
+                                        "name": "input_seconds"
+                                      },
+                                      {
+                                        "op": "if",
+                                        "args": [
+                                          {
+                                            "op": "eq",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "-1"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "clamp",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration_seconds"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "4"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          },
+                                          {
+                                            "op": "clamp",
+                                            "args": [
+                                              {
+                                                "op": "variable",
+                                                "name": "duration"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "4"
+                                              },
+                                              {
+                                                "op": "constant",
+                                                "value": "30"
+                                              }
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    ]
+                                  },
+                                  {
+                                    "op": "constant",
+                                    "value": "0"
+                                  }
+                                ]
+                              }
+                            ]
+                          },
+                          {
+                            "op": "constant",
+                            "value": "10"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "op": "constant",
+                    "value": "10"
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "gt",
+                    "args": [
+                      {
+                        "op": "variable",
+                        "name": "input_seconds"
+                      },
+                      {
+                        "op": "constant",
+                        "value": "0"
+                      }
+                    ]
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "1.52",
+                      "480p": "0.284",
+                      "720p": "0.609"
+                    }
+                  },
+                  {
+                    "op": "lookup",
+                    "key": {
+                      "op": "variable",
+                      "name": "quality"
+                    },
+                    "values": {
+                      "1080p": "2.5",
+                      "480p": "0.465",
+                      "720p": "1"
+                    }
+                  }
+                ]
+              },
+              {
+                "op": "if",
+                "args": [
+                  {
+                    "op": "variable",
+                    "name": "content_filter"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1"
+                  },
+                  {
+                    "op": "constant",
+                    "value": "1.1"
+                  }
+                ]
+              }
+            ]
+          },
+          "rounding": {
+            "point": "per_component_subtotal",
+            "mode": "half_up"
+          },
+          "tiers": []
+        }
+      ]
+    }
+  ]
+}

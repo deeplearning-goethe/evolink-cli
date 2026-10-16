@@ -6,6 +6,18 @@ The package calls the EvoLink platform API directly using the assistant's termin
 
 The pricing-rules estimation changes described below are an unreleased candidate.
 
+The search-fee fix is also an unreleased candidate. Search defaults to off for
+Seedream 5.0 Lite, Gemini 3 Pro Image, Gemini 3.1 Flash Image, Nano Banana 2.1,
+and Seedance 2.0/2.0 Fast/2.5 text-to-video. Keep web and image search off unless
+the user explicitly requests or approves it. If the agent thinks search is needed,
+explain the extra per-search rates and unknown total, then wait for consent before
+enabling it. A task approval without search does not authorize adding search;
+changed search settings need a fresh estimate and approval. When enabled, an
+unknown search count produces a partial subtotal assuming zero searches, with the current per-search
+rate for each enabled search type. One task may perform no searches or multiple
+searches; expected counts are assumptions, not execution limits. Other unknown
+usage, including text/thinking tokens, remains excluded from a partial subtotal.
+
 Estimates use the two published full pricing-rules endpoints and exact UC arithmetic, including resolution, tiers, minimum charges and rounding. Public default prices exclude personal discounts. A failed refresh cannot authorize a new submission. Final settlement caps still require GroAPI/Worker enforcement; responses report `final_budget_enforced: false`.
 
 ## Status and installation
@@ -102,11 +114,17 @@ evolink tasks wait TASK_ID --json
 evolink download TASK_ID --output /absolute/result.png --json
 ```
 
-For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes expire at the earlier of the backend expiry and 15 minutes, bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
+For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last at most 30 minutes and never outlive the returned pricing approval. They bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
 Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused.
 
 A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
+
+For the five Seedance 2.5 generation models, `draft: true` with omitted `quality` uses `480p` for both pricing and submission. Estimates expose `effective_input` and `defaults_applied`; show these applied defaults before approval. Draft-to-video conversion and other model IDs retain their own inputs. The new checks match the resolved model and endpoint, including when catalog documentation is borrowed through an alias.
+
+For `seedance-2.5-video-edit`, keep `input.duration: -1`; this selects editing rather than supplying a negative output length. Expected output seconds belong in `pricing_parameters.duration_seconds`, alongside any required input-video usage. They do not change the generation setting or guarantee final usage.
+
+Seedance 2.5 text-to-video enables search with `model_params.web_search: true`. Missing `pricing_parameters.search_count` produces a partial video subtotal and an unknown search charge; it is not zero searches or a complete total. Explicit counts, including zero, are expected usage rather than a limit. Keep the search assumption visible and retain any user budget; partial estimates cannot check that budget. A corrected old quote needs a fresh estimate and approval. Recover submitted or uncertain requests with their original IDs rather than generating again.
 
 ## Tasks and files
 
@@ -248,8 +266,8 @@ A failed task is not charged: the credits reserved at submission are returned au
 
 `evolink estimate` reads the published full pricing policy for the canonical model.
 The local `quote_id` stores input binding, pricing fingerprint, integer UC subtotal
-and expiry; there is no backend `estimate_id`. Approval expires at the earlier of
-catalog freshness and 15 minutes. Before first submission, the CLI reads the rules
+and expiry; there is no backend `estimate_id`. The local quote shares the core's
+30-minute approval window and never outlives the returned approval. Before first submission, the CLI reads the rules
 again and refuses changed prices, policy or usage until a new estimate is approved.
 Neither backend Quote nor new OAuth quote access is required. Existing login,
 shared MCP key, quota and permissions remain.

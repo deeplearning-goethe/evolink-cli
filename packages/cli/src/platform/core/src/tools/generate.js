@@ -14,6 +14,7 @@ import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failur
 import { RESULT_DELIVERY_GUIDANCE, TERMINAL_STATUSES, describeTask, waitForTask } from './task-format.js';
 import { PAID_GENERATION_GUIDANCE } from '../tool-guidance.js';
 import { currentRequestCredentials } from '../request-context.js';
+import { prepareSeedanceInput } from '../services/seedance-input.js';
 const PATHS = {
     image: '/v1/images/generations',
     video: '/v1/videos/generations',
@@ -141,9 +142,13 @@ function registerGenerate(server, config, kind) {
                     charged: 'no',
                 });
             }
+            const prepared = prepareSeedanceInput(entry, input);
+            const effectiveInput = prepared.input;
             const warnings = [];
             if (entry.spec) {
-                const validation = validateInput(entry.spec, input);
+                const validation = validateInput(entry.spec, effectiveInput);
+                validation.errors.push(...prepared.errors);
+                validation.warnings.push(...prepared.warnings);
                 if (validation.errors.length > 0) {
                     return failure([
                         `The input for ${entry.id} has problems; nothing was submitted or charged:`,
@@ -159,7 +164,7 @@ function registerGenerate(server, config, kind) {
             // media_seconds only prices the request; the body below is built from input alone.
             if (args.account_quote)
                 throw new QuoteError('quote_refresh_required', 'Refresh the legacy account estimate with estimate_cost and obtain user approval.');
-            const rulesEstimate = await createRulesEstimate(entry, input, { mediaSeconds: args.media_seconds, pricingParameters: args.pricing_parameters });
+            const rulesEstimate = await createRulesEstimate(entry, effectiveInput, { mediaSeconds: args.media_seconds, pricingParameters: args.pricing_parameters });
             if (args.pricing_quote)
                 checkRulesApproval(args.pricing_quote, rulesEstimate);
             const estimate = rulesEstimate.estimate;
@@ -183,7 +188,7 @@ function registerGenerate(server, config, kind) {
             if (estimate.status === 'needs_input')
                 throw new QuoteError('quote_usage_required', 'No charge can be estimated yet; supply the missing pricing usage before submission.');
             clientRequestId = args.client_request_id ?? newRunId();
-            const body = { ...input, model: entry.id };
+            const body = { ...effectiveInput, model: entry.id };
             const submitted = await submitTask(config, {
                 path: entry.spec?.path ?? PATHS[kind],
                 body,
@@ -220,6 +225,12 @@ function registerGenerate(server, config, kind) {
             }
             if (estimate.status === 'estimated')
                 lines.push(`Estimate before submitting: ${rangeText(estimate)}`);
+            if (estimate.search_charges?.length && estimate.status === 'estimated') {
+                for (const note of estimate.notes.filter(note => /^(Web|Image) search is enabled\./.test(note)))
+                    lines.push(`Note: ${note}`);
+            }
+            for (const applied of prepared.defaults)
+                lines.push(`Applied default: ${applied.param}=${applied.value} (${applied.reason}).`);
             if (estimate.status === 'partial') {
                 lines.push(`Partial estimate at published rates: ${rangeText(estimate)} (not a total or an upper bound).`);
                 for (const extra of estimate.possible_extras)
@@ -232,15 +243,19 @@ function registerGenerate(server, config, kind) {
             lines.push(`client_request_id: ${clientRequestId}`);
             return ok(lines.join('\n'), {
                 ...view.structured,
-                submitted: { model: entry.id, input },
+                submitted: { model: entry.id, input: effectiveInput },
+                ...(prepared.applies ? { effective_input: effectiveInput, defaults_applied: prepared.defaults,
+                    usage_assumptions: estimate.notes.filter(note => note.startsWith('Web search is enabled.')) } : {}),
                 pricing_scope: 'public_default',
                 pricing_source: 'pricing_rules',
                 amounts: rulesEstimate.amounts,
                 final_budget_enforced: false,
+                ...(estimate.search_charges?.length ? { search_charges: estimate.search_charges, estimate,
+                    amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : 'expected_usage_estimate' } : {}),
                 client_request_id: clientRequestId,
                 replayed: submitted.idempotency_replayed === true,
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),
-                ...(estimate.status === 'estimated' ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),
+                ...(estimate.status === 'estimated' && !estimate.search_charges?.length ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),
                 ...(estimate.status === 'partial' ? { estimate } : {}),
                 ...(warnings.length ? { warnings } : {}),
             }, view.resources);

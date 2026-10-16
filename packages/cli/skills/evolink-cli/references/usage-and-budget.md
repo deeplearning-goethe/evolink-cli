@@ -18,10 +18,25 @@ A final task/workflow cap requires server-side reservation and settlement enforc
 
 
 Estimates use published full pricing rules and show public default prices, excluding
-personal discounts. The local approval expires no later than the rules' freshness.
+personal discounts. Local approvals last up to 30 minutes; submission verifies fresh rules.
 Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
 the input and explicit user budget and obtain approval again. Supply missing billing
 usage with `--pricing-parameters JSON`; never invent unknown token counts or media
 lengths. Partial subtotals cannot check a budget. If rules are unavailable or change,
 pause and preserve the budget. Actual usage can change the final charge; final
 settlement caps require gateway/Worker support.
+
+Search defaults to off for the seven reviewed media routes: Seedream 5.0 Lite,
+Gemini 3 Pro Image, Gemini 3.1 Flash Image, Nano Banana 2.1, and Seedance
+2.0/2.0 Fast/2.5 text-to-video. Keep model web and image search off unless the user
+explicitly requests or approves enabling it. Never enable it on your own or copy
+an enabled example without that consent. If you think search is needed, first
+explain its extra per-search rates and unknown total, end the reply, and wait for
+explicit consent before enabling it. Approval of a task without search does not
+authorize adding search; changed search settings need a fresh estimate and approval.
+If the final input enables search, disclose each returned `search_charges` unit
+rate before generation approval, even when the user requested search. Missing
+counts use a zero-search partial subtotal that excludes search fees. One task may perform no searches or multiple
+searches; actual counts and fees are unknown before execution. Do not invent
+expected search counts to make the estimate complete. An explicit expected zero
+does not disable search, and any expected count is not an execution limit.

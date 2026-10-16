@@ -1,11 +1,38 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
+import { searchUsage } from '../services/search-usage.js';
 /** Reviewed structured supplements for constraints still described only in OpenAPI prose.
  * Sources: GroAPI unified_videos_validation.go / common/gpt_image2_token.go,
  * and mintlify-docs en/api-manual/audio-series/doubao-seed-audio/*.json.
  * Kept outside generated data so rebuilding the docs index cannot erase them.
  */
 export function withModelConstraints(model) {
+    const searches = searchUsage({ id: model.model, kind: model.kind, spec: model }, {});
+    if (searches.length) {
+        const nested = model.params.model_params?.properties;
+        for (const search of searches) {
+            const key = search.role;
+            if (nested?.[key])
+                nested[key] = { ...nested[key], default: false,
+                    description: `${nested[key].description ?? ''} Defaults to false. When enabled, actual searches are billed separately; one task may perform multiple searches.`.trim() };
+        }
+        // Default examples must not opt the caller into search. Keep explicit search examples in the docs.
+        if (model.example?.model_params && typeof model.example.model_params === 'object') {
+            const params = { ...model.example.model_params };
+            delete params.web_search;
+            delete params.image_search;
+            if (Array.isArray(params.tools)) {
+                params.tools = params.tools.filter(tool => !(tool && typeof tool === 'object' && tool.type === 'web_search'));
+                if (!params.tools.length)
+                    delete params.tools;
+            }
+            model.example = { ...model.example };
+            if (Object.keys(params).length)
+                model.example.model_params = params;
+            else
+                delete model.example.model_params;
+        }
+    }
     if (/^wan3\.0-(?:prime-)?(?:text-to-video|image-to-video|reference-video)$/.test(model.model)) {
         model.params.duration = { ...model.params.duration, anyOf: [
                 { type: 'integer', minimum: 2, maximum: 30 }, { type: 'integer', enum: [-1] },
