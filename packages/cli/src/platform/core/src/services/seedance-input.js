@@ -70,6 +70,6 @@ export function seedanceInputRules(entry) {
             'draft must be top-level', 'model_params.web_search must be boolean when provided'],
         warnings_only: ['Other unverified duration boundaries and search/content_filter combinations do not add blocking checks.'],
         ...(entry.id === 'seedance-2.5-video-edit' ? { duration_usage: 'duration=-1 selects video editing; supply expected output seconds separately as pricing_parameters.duration_seconds, not as input.duration.' } : {}),
-        ...(isSeedanceSearch(entry) ? { search_usage: 'model_params.web_search=true requires expected search_count for a complete estimate; missing usage is not zero.' } : {}),
+        ...(isSeedanceSearch(entry) ? { search_usage: 'Search defaults to off. When model_params.web_search=true, missing search_count produces a partial subtotal assuming zero searches, with separate per-search rates. Expected counts are not execution limits; one task may search multiple times.' } : {}),
     };
 }

@@ -26,7 +26,7 @@ export function registerEstimateCost(server, config) {
             input: z.record(z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
             pricing_source: z.enum(['pricing_rules', 'account', 'public_reference']).default('pricing_rules').describe('Use published full pricing rules for public default estimates. The old account/public_reference values are compatibility aliases; neither requests a backend account quote.'),
-            pricing_parameters: QuoteParameters.optional().describe('Measured or expected billing usage declared by the pricing policy, such as input_seconds. Do not include user_group, prices or generation prompts.'),
+            pricing_parameters: QuoteParameters.optional().describe('Measured or explicitly expected usage declared by the pricing policy, such as input_seconds or search_count. Missing enabled-search counts produce a zero-search partial subtotal and per-search rates. Do not invent counts, include user_group/prices/prompts, or treat expected counts as execution limits.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
@@ -97,6 +97,8 @@ export function registerEstimateCost(server, config) {
                 problems: validation?.errors ?? [],
                 warnings: validation?.warnings ?? [],
                 estimate,
+                ...(estimate.search_charges?.length ? { search_charges: estimate.search_charges,
+                    amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : estimate.status === 'estimated' ? 'expected_usage_estimate' : 'not_established' } : {}),
                 ...(prepared.applies ? { effective_input: values, defaults_applied: prepared.defaults,
                     amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : estimate.status === 'estimated' ? 'expected_usage_estimate' : 'not_established' } : {}),
             };

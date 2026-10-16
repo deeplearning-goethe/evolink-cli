@@ -225,8 +225,8 @@ function registerGenerate(server, config, kind) {
             }
             if (estimate.status === 'estimated')
                 lines.push(`Estimate before submitting: ${rangeText(estimate)}`);
-            if (prepared.applies && estimate.status === 'estimated') {
-                for (const note of estimate.notes.filter(note => note.startsWith('Web search is enabled.')))
+            if (estimate.search_charges?.length && estimate.status === 'estimated') {
+                for (const note of estimate.notes.filter(note => /^(Web|Image) search is enabled\./.test(note)))
                     lines.push(`Note: ${note}`);
             }
             for (const applied of prepared.defaults)
@@ -250,10 +250,12 @@ function registerGenerate(server, config, kind) {
                 pricing_source: 'pricing_rules',
                 amounts: rulesEstimate.amounts,
                 final_budget_enforced: false,
+                ...(estimate.search_charges?.length ? { search_charges: estimate.search_charges, estimate,
+                    amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : 'expected_usage_estimate' } : {}),
                 client_request_id: clientRequestId,
                 replayed: submitted.idempotency_replayed === true,
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),
-                ...(estimate.status === 'estimated' ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),
+                ...(estimate.status === 'estimated' && !estimate.search_charges?.length ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),
                 ...(estimate.status === 'partial' ? { estimate } : {}),
                 ...(warnings.length ? { warnings } : {}),
             }, view.resources);

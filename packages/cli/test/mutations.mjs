@@ -7,10 +7,13 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['search-notice', 'src/platform/core/src/services/pricing-rules-estimate.js', 'estimate.notes.push(`${label} is enabled.', 'estimate.notes.slice(`${label} is enabled.'],
+  ['search-dynamic-rate', 'src/platform/core/src/services/pricing-rules-estimate.js', 'amountsForUC(component.rate.uc)', "amountsForUC('0')"],
+  ['search-submission-counts', 'src/platform/core/src/tools/generate.js', 'const body = { ...effectiveInput, model: entry.id };', 'const body = { ...effectiveInput, search_count: 0, model: entry.id };'],
   ['seedance-saved-input', 'src/media.mjs', '...(quote.effective_input ? { effective_input: quote.effective_input, defaults_applied: quote.defaults_applied } : {}),', ''],
   ['seedance-input-fingerprint', 'src/media.mjs', '...(quote.effective_input ? { effective_input: quote.effective_input } : {}),', ''],
   ['seedance-submit-body', 'src/platform/core/src/tools/generate.js', 'const body = { ...effectiveInput, model: entry.id };', 'const body = { ...input, model: entry.id };'],
-  ['seedance-unknown-search', 'src/platform/core/src/services/pricing-quote-client.js', 'isSeedanceSearch(entry) ? seedanceSearchEnabled(entry, input) : input.web_search === true', 'input.web_search === true'],
+  ['seedance-unknown-search', 'src/platform/core/src/services/pricing-rules-estimate.js', 'missing.add(search.parameter)', 'missing.delete(search.parameter)'],
   ['seedance-edit-duration', 'src/platform/core/src/services/pricing-quote-client.js', "const expectedEditDuration = name === 'duration_seconds' && entry.id === 'seedance-2.5-video-edit' && isSeedanceGeneration(entry)", 'const expectedEditDuration = false'],
   ['error-refusal-evidence', 'src/media.mjs', "&& ['not_submitted', 'rejected'].includes(e.details?.submission_state)", "&& true"],
 
@@ -149,7 +152,8 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
+    const files = name.startsWith('search-') ? ['search-pricing.test.mjs']
+      : name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
       : name.startsWith('quote-ttl-') ? ['quote-expiry.test.mjs']
       : ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']

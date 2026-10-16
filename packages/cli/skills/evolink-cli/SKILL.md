@@ -12,7 +12,7 @@ After loading this skill, continue the requested workflow by executing its requi
 ## Quote failure and budget rules
 
 - For Seedance 2.5 generation, show `effective_input` and `defaults_applied` from the estimate: `draft: true` with omitted quality uses 480p for pricing and submission. Other model IDs and draft-to-video conversion retain their own rules; never copy restrictions across models.
-- Seedance 2.5 text-to-video search uses `input.model_params.web_search`. Missing expected `search_count` means a partial video subtotal plus unknown search charges. Never substitute zero. Explicit expected counts, including zero, are assumptions, not limits on actual searches. Explain the uncertainty and preserve any user budget.
+- Search defaults to off for the seven reviewed routes: Seedream 5.0 Lite, Gemini 3 Pro Image, Gemini 3.1 Flash Image, Nano Banana 2.1, and Seedance 2.0/2.0 Fast/2.5 text-to-video. When the final input enables search, disclose each returned `search_charges` rate before approval, including when the agent enabled it. Missing counts produce a partial subtotal assuming zero searches, excluding search fees. One task may search multiple times or not at all; actual counts and search fees are unknown before execution. Do not invent expected counts or treat the zero assumption as measured usage. Explicit expected counts, including zero, are not execution limits. Preserve any user budget; no extra search-fee reminder is needed when search is off.
 
 - By default, show the estimated cost and ask for approval. Do not invent or display an additional spending cap, and never derive `max_cost_usd` from the quote.
 - If the user explicitly specifies a budget, compare the estimate with it and preserve that budget on every attempt. The compatibility option `--max-cost-usd` carries this estimate comparison; it does not limit the final charge. Pause if the estimate exceeds the budget or is incomplete. If the user requires a guaranteed final maximum, explain that this client cannot enforce it before obtaining approval for any changed requirement.
@@ -88,7 +88,7 @@ For setup problems, run `evolink doctor --agent NAME --json` if the installed ve
 
 
 Estimates use published full pricing rules and show public default prices, excluding
-personal discounts. The local approval expires no later than the rules' freshness.
+personal discounts. Local approvals last up to 30 minutes; submission verifies fresh rules.
 Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
 the input and explicit user budget and obtain approval again. Supply missing billing
 usage with `--pricing-parameters JSON`; never invent unknown token counts or media
