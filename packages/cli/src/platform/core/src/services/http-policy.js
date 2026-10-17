@@ -10,6 +10,7 @@ export const DEFAULT_SUBMIT_TIMEOUT_MS = 30_000;
 export const MAX_RETRY_DELAY_MS = 30_000;
 /** Public site for console links in errors and results. */
 export const EVOLINK_SITE = 'https://evolink.ai';
+export const DASHBOARD_URL = `${EVOLINK_SITE}/dashboard`;
 export const TOP_UP_URL = `${EVOLINK_SITE}/dashboard/credits`;
 export const API_KEYS_URL = `${EVOLINK_SITE}/dashboard/keys`;
 /**
@@ -72,7 +73,7 @@ export function siteUrl(pathOrUrl, fallback) {
             return fallback;
         const url = new URL(value, EVOLINK_SITE);
         if (url.origin !== EVOLINK_SITE || url.username || url.password || url.hash
-            || !['/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname))
+            || !['/dashboard', '/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname))
             return fallback;
         // Only the documented console tab is accepted. Tracking is added locally.
         if ([...url.searchParams].some(([key, v]) => key !== 'tab' || v !== 'mcp'))

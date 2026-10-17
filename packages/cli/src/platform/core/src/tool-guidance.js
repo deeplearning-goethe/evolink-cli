@@ -13,7 +13,7 @@ export const PAID_GENERATION_GUIDANCE = [
 ].join(' ');
 /** Shared confirmation wording; approval and spending rules above still apply. */
 export const GENERATION_CONFIRMATION_GUIDANCE = [
-    'When spending approval is needed, use the following layout in the user\'s language. Fill it from the exact model and input checked by `estimate_cost`; summarize the content in one sentence. Render normal text and bullets; the code blocks below only illustrate the layout.',
+    'When spending approval is needed, use the following layout in English by default unless the user explicitly requests another language. Fill it from the exact model and input checked by `estimate_cost`; summarize the content in one sentence. Render normal text and bullets; the code blocks below only illustrate the layout.',
     '',
     'Chinese:',
     '',

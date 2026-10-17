@@ -15,6 +15,7 @@ export function registerGetTask(server, config) {
             'Check one generation task and, while it is still running, wait up to wait_seconds (max 45) for it to finish. Free.',
             'Returns the status, progress, result links (they expire after 24 hours, so give them to the user right away), the final charge, or the error with a next step.',
             'If the task is still running when this returns, call get_task again.',
+            'Invalid bodies, mismatched IDs and unknown states return a query error with the original task ID and status_check unverified. Retry the free query; do not infer generation failure, zero charge or a refund. Missing optional fields are not zero. Completed resource tasks may return voice/persona IDs without links.',
             'Never call generate_image, generate_video or generate_audio again to check progress: that creates and charges a new task.',
             RESULT_DELIVERY_GUIDANCE,
         ].join(' '),
@@ -39,7 +40,7 @@ export function registerGetTask(server, config) {
                     if (elapsed - lastReport < PROGRESS_EVERY_SECONDS)
                         return;
                     lastReport = elapsed;
-                    await report(elapsed, `${current.status}, ${current.progress ?? 0}%`);
+                    await report(elapsed, `${current.status}${current.progress !== undefined ? `, ${current.progress}%` : ''}`);
                 },
             });
             const view = describeTask(task);
@@ -51,7 +52,7 @@ export function registerGetTask(server, config) {
             return ok(view.lines.join('\n'), view.structured, view.resources);
         }
         catch (error) {
-            return errorResult(error);
+            return errorResult(error, { phase: 'query', taskId: task_id });
         }
     });
 }
