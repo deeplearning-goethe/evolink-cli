@@ -197,24 +197,27 @@ function registerGenerate(server, config, kind) {
             });
             acceptedTaskId = submitted.id;
             let task = submitted;
+            let statusCheck = 'not_requested';
             const waitUntil = started + WAIT_MS[kind];
-            if (!TERMINAL_STATUSES.has(task.status) && WAIT_MS[kind] > 0 && Date.now() + 3_000 < waitUntil) {
+            if ((!task.status || !TERMINAL_STATUSES.has(task.status)) && WAIT_MS[kind] > 0 && Date.now() + 3_000 < waitUntil) {
                 const report = progressReporter(extra, WAIT_MS[kind] / 1000);
                 try {
                     task = await waitForTask(config, submitted.id, {
                         deadline: waitUntil,
                         tool: name,
                         signal: extra.signal,
-                        onPoll: current => report((Date.now() - started) / 1000, `${current.status}, ${current.progress ?? 0}%`),
+                        onPoll: current => report((Date.now() - started) / 1000, `${current.status}${current.progress !== undefined ? `, ${current.progress}%` : ''}`),
                     });
+                    statusCheck = 'verified';
                 }
                 catch {
                     // The task exists; a failed status read must not turn a successful submit into an error.
                     task = submitted;
+                    statusCheck = 'unverified';
                 }
                 task.usage = { ...submitted.usage, ...task.usage };
             }
-            const view = describeTask({ ...task, request_id: task.request_id ?? submitted.request_id });
+            const view = describeTask({ ...task, request_id: task.request_id ?? submitted.request_id }, statusCheck);
             const header = submitted.idempotency_replayed
                 ? `This client_request_id was used before: returning the original task (no new charge).`
                 : `Submitted ${entry.id}.`;
@@ -253,6 +256,7 @@ function registerGenerate(server, config, kind) {
                 ...(estimate.search_charges?.length ? { search_charges: estimate.search_charges, estimate,
                     amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : 'expected_usage_estimate' } : {}),
                 client_request_id: clientRequestId,
+                submission_state: 'accepted',
                 replayed: submitted.idempotency_replayed === true,
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),
                 ...(estimate.status === 'estimated' && !estimate.search_charges?.length ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),

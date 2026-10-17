@@ -7,6 +7,9 @@ import { spawnSync } from 'node:child_process';
 const { fileURLToPath } = await import('node:url');
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
 const mutants = [
+  ['task-response-accepted-id', 'src/media.mjs', 'if (acceptedId) {', 'if (false) {'],
+  ['task-response-known-id-recovery', 'src/media.mjs', 'if (quote.task_id) return', 'if (false) return'],
+  ['task-response-error-code', 'src/api.mjs', 'taskReadCode || data?.error?.category', 'data?.error?.category'],
   ['search-notice', 'src/platform/core/src/services/pricing-rules-estimate.js', 'estimate.notes.push(`${label} is enabled.', 'estimate.notes.slice(`${label} is enabled.'],
   ['search-dynamic-rate', 'src/platform/core/src/services/pricing-rules-estimate.js', 'amountsForUC(component.rate.uc)', "amountsForUC('0')"],
   ['search-submission-counts', 'src/platform/core/src/tools/generate.js', 'const body = { ...effectiveInput, model: entry.id };', 'const body = { ...effectiveInput, search_count: 0, model: entry.id };'],
@@ -152,7 +155,8 @@ for (const [name, file, before, after] of selected) {
     const target = path.join(home, file); const source = await fs.readFile(target, 'utf8');
     if (!source.includes(before)) throw new Error(`Missing mutation target: ${name}`);
     await fs.writeFile(target, source.replace(before, after));
-    const files = name.startsWith('search-') ? ['search-pricing.test.mjs']
+    const files = name.startsWith('task-response-') ? ['task-response.test.mjs']
+      : name.startsWith('search-') ? ['search-pricing.test.mjs']
       : name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
       : name.startsWith('quote-ttl-') ? ['quote-expiry.test.mjs']
       : ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']

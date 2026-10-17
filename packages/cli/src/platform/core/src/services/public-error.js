@@ -25,7 +25,7 @@ export function publicText(value) {
         try {
             const url = new URL(candidate);
             if (url.origin === 'https://evolink.ai' && !url.username && !url.password && !url.hash
-                && ['/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname)
+                && ['/dashboard', '/dashboard/credits', '/dashboard/keys', '/dashboard/mcp'].includes(url.pathname)
                 && [...url.searchParams].every(([key, v]) => key.startsWith('utm_') && /^[a-z0-9_-]{1,80}$/i.test(v) || key === 'tab' && v === 'mcp'))
                 return value;
             // Official documentation pages, which gateway task errors link to (for example the upload guide).

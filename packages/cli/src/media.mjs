@@ -3,6 +3,7 @@ import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
 import { APPROVAL_TTL_MS, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
+import { DASHBOARD_URL } from './platform/core/src/services/http-policy.js';
 
 function quoteError(error, cap) {
   const cause = fileError(error);
@@ -141,6 +142,18 @@ export class Media {
         result = await this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: quote.client_request_id });
         requireThat(typeof result.task_id === 'string' && result.task_id.length > 0, 'outcome_unknown', 'The submission returned no task ID. Recover with the original quote.');
       } catch (e) {
+        // Acceptance survives later read/format failures; recovery must query this ID, never POST again.
+        const acceptedId = e.details?.submission_state === 'accepted' && typeof e.details?.task_id === 'string'
+          && /^[A-Za-z0-9._:-]{1,128}$/.test(e.details.task_id) ? e.details.task_id : undefined;
+        if (acceptedId) {
+          quote.state = 'submitted';
+          quote.task_id = acceptedId;
+          await this.state.write('quotes', id, quote);
+          throw new CliError(e.code || 'task_response_invalid', e.message, { ...e.details,
+            quote_id: id, client_request_id: quote.client_request_id, status_check: 'unverified',
+            dashboard_url: DASHBOARD_URL,
+            recovery: `evolink tasks get ${acceptedId}` }, e.exitCode);
+        }
         quote.state = !resume && e.details?.charged === 'no' && ['not_submitted', 'rejected'].includes(e.details?.submission_state) ? 'refused' : 'outcome_unknown';
         await this.state.write('quotes', id, quote);
         throw new CliError(resume ? 'outcome_unknown' : e.code || 'outcome_unknown', resume ? 'The original submission remains unverified. The replay could not proceed; check recent tasks with the original request ID before preparing any new generation.' : e.message, { ...(e.details || {}), ...(quote.state === 'outcome_unknown' ? { charged: 'unknown', submission_state: 'outcome_unknown' } : {}), quote_id: id, client_request_id: quote.client_request_id,

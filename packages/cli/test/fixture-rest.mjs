@@ -88,7 +88,7 @@ export async function restFixture(state, req, res, url, body, send) {
     }
     if (state.loseRestSubmissions > 0) { state.loseRestSubmissions--; req.socket.destroy(); return true; }
     if (replayed) res.setHeader('idempotency-replayed', 'true');
-    send(200, raw(state.tasks.get(state.paid.get(idempotency)))); return true;
+    send(200, state.receiptOnly ? { id: state.paid.get(idempotency) } : raw(state.tasks.get(state.paid.get(idempotency)))); return true;
   }
   if (url.pathname === '/v1/tasks') {
     const page = Number(url.searchParams.get('page') || 1), page_size = Number(url.searchParams.get('page_size') || 20);
@@ -98,9 +98,10 @@ export async function restFixture(state, req, res, url, body, send) {
       .filter(task => Object.entries(filters).every(([key, value]) => key === 'status' && value === 'processing' ? ['pending', 'processing'].includes(task.status) : task[key] === value));
     send(200, { data: rows.slice((page - 1) * page_size, page * page_size), total: rows.length, page, page_size }); return true;
   }
-  if (url.pathname === '/v1/tasks/batch') { send(200, { data: JSON.parse(body).task_ids.flatMap(id => state.tasks.has(id) ? [raw(state.tasks.get(id))] : []) }); return true; }
+  if (url.pathname === '/v1/tasks/batch') { send(200, state.batchResponse ?? { data: JSON.parse(body).task_ids.flatMap(id => state.tasks.has(id) ? [raw(state.tasks.get(id))] : []) }); return true; }
   if (url.pathname.startsWith('/v1/tasks/')) {
     const id = decodeURIComponent(url.pathname.slice('/v1/tasks/'.length));
+    if (state.taskResponse !== undefined) { send(200, state.taskResponse); return true; }
     if (!state.tasks.has(id)) send(404, { error: { code: 'task_not_found', message: 'Task not found.' } });
     else send(200, raw(state.tasks.get(id))); return true;
   }

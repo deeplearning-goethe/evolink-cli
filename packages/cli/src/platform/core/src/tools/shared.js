@@ -5,14 +5,19 @@ import { publicIdentifier, publicErrorDetails, publicText } from '../services/pu
 import { processCredentialsAllowed } from '../request-context.js';
 import { ApiHttpError } from '../services/api-client.js';
 import { CREDITS_PER_USD, formatCredits, formatUsd } from '../services/error-handler.js';
-import { API_KEYS_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError } from '../services/http-policy.js';
+import { API_KEYS_URL, DASHBOARD_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
+import { TaskResponseError } from '../services/task-response.js';
 /** Free lookups: clients can run them without asking. */
 export const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 /** Spends the user's balance and cannot be undone: clients ask before running it. */
 export const PAID = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false };
 /** Changes stored state without spending money (uploads). */
 export const WRITES = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+export const DASHBOARD_CHECK_GUIDANCE = `Check your task and account records in the EvoLink Dashboard: ${DASHBOARD_URL}. Sign in with the same EvoLink account and keep the original task ID. This link does not confirm completion, charges or refunds.`;
+export function dashboardCheck() {
+    return { dashboard_url: DASHBOARD_URL, dashboard_guidance: DASHBOARD_CHECK_GUIDANCE };
+}
 /** The media_seconds argument of estimate_cost and the generate tools. */
 export const MEDIA_SECONDS_MAX = 3_600;
 export const MEDIA_SECONDS_DESCRIPTION = 'Only for models billed per second that have no duration parameter (get_model explains which length is billed): usually the input video or audio length; for generated audio with unknown duration, only an expected output length for an illustrative estimate. It is not sent to the model, and EvoLink charges by the measured duration. It cannot establish max_cost_usd for unknown output duration or for per-second video requests with video_urls, video_url or source_task_id, whose billing is not fully covered by published prices.';
@@ -44,6 +49,12 @@ export function usdOf(credits) {
     return Number((credits / CREDITS_PER_USD).toFixed(6));
 }
 function infoFor(error) {
+    if (error instanceof TaskResponseError)
+        return {
+            status: 0, category: 'server_error', code: error.code, message: error.message,
+            next_step: 'Retry the free query with the original task ID. Its status, charge and refund are unverified; do not generate again.',
+            retryable: true, request_id: error.requestId,
+        };
     if (error instanceof SubmissionNotStartedError)
         return infoFor(error.cause);
     if (error instanceof ApiHttpError && error.info)
@@ -86,7 +97,10 @@ export function errorResult(error, context = {}) {
     const info = infoFor(error);
     const requestId = publicIdentifier(info.request_id);
     const clientRequestId = publicIdentifier(context.clientRequestId);
-    const taskId = publicIdentifier(context.taskId);
+    const taskId = publicIdentifier(context.taskId ?? (error instanceof TaskResponseError ? error.taskId : undefined));
+    const queryUnverified = context.phase === 'query' || error instanceof TaskResponseError;
+    if (queryUnverified && taskId)
+        info.next_step = `Query the original task ${taskId} again. This read could not verify its latest status, charge or refund. Do not generate again to recover it.`;
     const label = `${info.category}${info.code ? `, ${info.code}` : ''}${info.status ? `, HTTP ${info.status}` : ''}`;
     const lines = info.headline ? [info.headline] : [`Error (${label}): ${info.message}`];
     let charged;
@@ -110,6 +124,9 @@ export function errorResult(error, context = {}) {
             lines.push(beforeSubmit ? 'Nothing was submitted or charged.' : 'Nothing was submitted or charged. Gateway admission rejected the generation before dispatch.');
     }
     lines.push(`Next step: ${info.next_step}`);
+    const websiteCheck = queryUnverified || charged === 'unknown';
+    if (websiteCheck)
+        lines.push(DASHBOARD_CHECK_GUIDANCE);
     // No HTTP status: the request timed out or the connection dropped, so the upload's outcome is unknown.
     if (context.upload && info.category === 'server_error' && !info.status) {
         lines.push('The upload may not have finished. Calling upload_file again is safe.');
@@ -124,6 +141,9 @@ export function errorResult(error, context = {}) {
         ...(submissionState ? { submission_state: submissionState } : {}),
         ...(clientRequestId && context.paid ? { client_request_id: clientRequestId } : {}),
         ...(taskId ? { task_id: taskId } : {}),
+        ...(websiteCheck ? dashboardCheck() : {}),
+        ...(queryUnverified ? { phase: 'query', status_check: 'unverified',
+            ...(error instanceof TaskResponseError && error.rawStatus ? { raw_status: error.rawStatus } : {}) } : {}),
     });
 }
 /** Sends a progress notification when the client asked for them; failures are ignored. */
