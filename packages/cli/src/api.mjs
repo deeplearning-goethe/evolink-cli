@@ -52,7 +52,8 @@ export class Api {
       const text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
       if (result.isError || data?.ok === false) {
         if (attempt === 0 && data?.error?.status === 401 && data?.charged !== 'unknown') continue;
-        throw new CliError(this.signal?.aborted ? 'interrupted' : data?.error?.category || 'api_failed',
+        const taskReadCode = ['task_response_invalid', 'task_identity_mismatch', 'task_status_unknown'].includes(data?.error?.code) ? data.error.code : undefined;
+        throw new CliError(this.signal?.aborted ? 'interrupted' : taskReadCode || data?.error?.category || 'api_failed',
           safeMessage(data?.error?.message || text || 'The EvoLink request was refused.'), { ...data, text: safeMessage(text) }, this.signal?.aborted ? 130 : 1);
       }
       requireThat(data?.ok === true, 'unsupported_response', 'EvoLink returned no structured result. Update the CLI or reconnect.');

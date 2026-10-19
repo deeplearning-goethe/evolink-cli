@@ -4,7 +4,7 @@ import { queryTask } from '../services/api-client.js';
 import { publicIdentifier } from '../services/public-error.js';
 import { publicTaskError } from '../services/error-handler.js';
 import { taskBilling } from './task-billing.js';
-import { money, sleep, usdOf } from './shared.js';
+import { DASHBOARD_CHECK_GUIDANCE, dashboardCheck, money, sleep, usdOf } from './shared.js';
 /** Result links from the gateway stay downloadable for this long. */
 export const RESULT_LINK_HOURS = 24;
 /** Generation permission does not also authorize the assistant to alter the output. */
@@ -141,22 +141,38 @@ export function resultDeliveryMarkdown(taskId, links) {
     ].join('\n\n');
 }
 /** One task as text lines and the same facts as structured content. */
-export function describeTask(task) {
-    const status = task.status ?? 'pending';
+export function describeTask(task, statusCheck = 'verified') {
+    const status = statusCheck === 'unverified' ? undefined : task.status;
     const links = resultLinks(task);
     const lines = [
-        `Task ${task.id}: ${status}${status === 'completed' || status === 'failed' ? '' : ` (${task.progress ?? 0}%)`}`,
-        `Model: ${task.model}`,
+        `Task ${task.id}: ${status ?? 'accepted; latest status unverified'}${status && status !== 'completed' && status !== 'failed' && task.progress !== undefined ? ` (${task.progress}%)` : ''}`,
     ];
+    if (task.model)
+        lines.push(`Model: ${task.model}`);
     const structured = {
         task_id: task.id,
-        status,
-        progress: task.progress ?? 0,
+        ...(status ? { status } : {}),
+        status_check: status ? statusCheck : 'unverified',
+        ...(task.progress !== undefined && status ? { progress: task.progress } : {}),
         model: task.model,
         type: task.type,
         billing: taskBilling(task),
     };
+    if (!status && task.status)
+        structured.last_known_status = task.status;
+    if (task.response_warnings?.length) {
+        structured.response_warnings = task.response_warnings;
+        lines.push(`Some optional response fields were unavailable or invalid and were omitted: ${task.response_warnings.join(', ')}. Missing values do not mean zero.`);
+    }
+    if (!status)
+        lines.push('The task was accepted, but its latest status could not be verified. This does not mean the generation failed, was free, or was refunded. Query the original task ID; do not submit another generation.');
     const outputs = taskOutputs(task);
+    const reusableResource = outputs.some(output => ['voice', 'voice_id', 'persona_id', 'result_id', 'id'].some(key => typeof output[key] === 'string'));
+    if (!status || status === 'failed' || status === 'cancelled' || task.response_warnings?.length
+        || status === 'completed' && links.length === 0 && !reusableResource) {
+        Object.assign(structured, dashboardCheck());
+        lines.push(DASHBOARD_CHECK_GUIDANCE);
+    }
     if (outputs.length) {
         structured.outputs = outputs;
         lines.push(`Public output metadata: ${JSON.stringify(outputs)}`);
@@ -180,7 +196,7 @@ export function describeTask(task) {
         structured.reserved_credits = reserved;
         structured.reserved_usd = usdOf(reserved);
     }
-    if (typeof task.duration === 'number' && task.duration > 0 && TERMINAL_STATUSES.has(status)) {
+    if (typeof task.duration === 'number' && task.duration > 0 && status && TERMINAL_STATUSES.has(status)) {
         lines.push(`Took: ${task.duration} s`);
         structured.took_seconds = task.duration;
     }
@@ -223,7 +239,9 @@ export function describeTask(task) {
         }
         lines.push(links.length > 0
             ? `Next step: ${RESULT_DELIVERY_INSTRUCTIONS}`
-            : 'Next step: the task completed but returned no result links. Tell the user; use get_task or list_tasks to recover them. Do not generate again automatically.');
+            : reusableResource
+                ? 'Next step: the task completed with reusable resource identifiers in outputs. Deliver these identifiers to the user; no download links were returned. Do not generate again automatically.'
+                : 'Next step: the task completed but returned no result links. Tell the user; use get_task or list_tasks to recover them. Do not generate again automatically.');
     }
     else {
         const eta = task.task_info?.estimated_time;

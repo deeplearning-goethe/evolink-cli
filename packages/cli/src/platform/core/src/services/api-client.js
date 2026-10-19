@@ -3,6 +3,7 @@
 import { gatewayAuthHeaders } from '../config.js';
 import { currentRequestCredentials } from '../request-context.js';
 import { classifyGatewayError, formatGatewayError } from './error-handler.js';
+import { parseBatchTasks, parseTaskReceipt, parseTaskResponse } from './task-response.js';
 import { DEFAULT_READ_TIMEOUT_MS, DEFAULT_SUBMIT_TIMEOUT_MS, MAX_RETRY_DELAY_MS, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError, evoHeaders, fetchWithTimeout, newRunId, parseRetryAfter, readJsonBody, responseRequestId, timeoutFromEnv, } from './http-policy.js';
 // --- Error class for HTTP-level failures ---
 export class ApiHttpError extends Error {
@@ -139,11 +140,10 @@ export async function submitTask(config, options) {
         tool: options.tool,
         idempotencyKey,
     }), 1, 500);
-    if (!data.request_id && requestId)
-        data.request_id = requestId;
+    const receipt = parseTaskReceipt(data, requestId);
     if (headers.get('idempotency-replayed') === 'true')
-        data.idempotency_replayed = true;
-    return data;
+        receipt.idempotency_replayed = true;
+    return receipt;
 }
 /** Read-only, credential-specific availability; never cached across accounts. */
 export async function getAvailableModelIds(config) {
@@ -170,19 +170,17 @@ export async function apiRequest(config, options) {
 /** One task (GET /v1/tasks/{id}). Unfinished tasks sync with the provider on every read, so callers pace themselves. */
 export async function queryTask(config, taskId, tool = 'get_task') {
     const { data, requestId } = await withRetry(() => rawRequest(config, { method: 'GET', path: `/v1/tasks/${encodeURIComponent(taskId)}`, tool }), 2, 1500);
-    if (!data.request_id && requestId)
-        data.request_id = requestId;
-    return data;
+    return parseTaskResponse(data, taskId, requestId);
 }
 /** Up to 50 tasks in one call (POST /v1/tasks/batch); unknown or foreign IDs are simply absent. */
 export async function queryTasks(config, taskIds, tool = 'list_tasks') {
-    const { data } = await withRetry(() => rawRequest(config, {
+    const { data, requestId } = await withRetry(() => rawRequest(config, {
         method: 'POST',
         path: '/v1/tasks/batch',
         body: { task_ids: taskIds },
         tool,
     }), 2, 1500);
-    return Array.isArray(data.data) ? data.data : [];
+    return parseBatchTasks(data, taskIds, requestId);
 }
 /** The account's recent tasks, newest first (GET /v1/tasks). Items carry no result links. */
 export async function listTasks(config, query, tool = 'list_tasks', options = {}) {
@@ -196,7 +194,7 @@ export async function listTasks(config, query, tool = 'list_tasks', options = {}
     params.set('page', String(query.page ?? 1));
     params.set('page_size', String(query.pageSize ?? 20));
     const { data } = await withRetry(() => rawRequest(config, { method: 'GET', path: `/v1/tasks?${params}`, tool, timeoutMs: options.timeoutMs }), options.retries ?? 2, 1500);
-    if (!Array.isArray(data.data) || !Number.isSafeInteger(data.total) || data.total < 0) {
+    if (!data || !Array.isArray(data.data) || !Number.isSafeInteger(data.total) || data.total < 0) {
         throw new ApiHttpError(502, 'The task list could not be verified. Retry this read; do not infer zero usage or submit another task.');
     }
     if ((data.page !== undefined && data.page !== (query.page ?? 1))
