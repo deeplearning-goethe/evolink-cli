@@ -4,6 +4,41 @@ import { CliError, requireThat, fileError } from './errors.mjs';
 import { APPROVAL_TTL_MS, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 import { DASHBOARD_URL } from './platform/core/src/services/http-policy.js';
+import { dashboardCheck } from './platform/core/src/tools/shared.js';
+import { NEXT_READ_MIN_MS, pollIntervalMs } from './platform/core/src/tools/task-format.js';
+
+/** Longest single get_task round inside a local wait; each round shares the wait's one deadline. */
+const WAIT_ROUND_SECONDS = 30;
+const ROUND_PAUSE_MS = 500;
+/** The first round starts with at least this much of the wait left; a later round needs the shared core's NEXT_READ_MIN_MS. */
+const MIN_ROUND_MS = 300;
+/** Drift ignored when the time left becomes whole seconds; the shared core still ends each round at the deadline. */
+const ROUND_DRIFT_MS = 50;
+const WAIT_STOPS_LOCAL = 'Stopping does not cancel the task.';
+
+function interrupted(taskId) {
+  return new CliError('interrupted', 'Stopped waiting locally. The EvoLink task continues.', { task_id: taskId }, 130);
+}
+
+/** At the local limit, report what was last verified instead of claiming the task is still running. */
+function waitTimeout(taskId, last) {
+  const verified = last?.status_check === 'verified' && last.status;
+  return new CliError('wait_timeout', verified
+    ? `Stopped waiting at the timeout. ${WAIT_STOPS_LOCAL} Last verified status: ${last.status}${last.read_at ? ` (read at ${last.read_at})` : ''}. Continue with evolink tasks wait ${taskId}.`
+    : `Stopped waiting at the timeout. ${WAIT_STOPS_LOCAL} Its latest status could not be verified${last?.status ? ` (last verified: ${last.status})` : ''}. Query it with evolink tasks get ${taskId}.`,
+  { task_id: taskId, status_check: verified ? 'verified' : 'unverified',
+    ...(last?.status ? { last_status: last.status } : {}), ...(last?.read_at ? { read_at: last.read_at } : {}),
+    ...(verified ? {} : dashboardCheck()), recovery: `evolink tasks wait ${taskId}` });
+}
+
+function pause(ms, signal) {
+  return new Promise(resolve => {
+    const timer = setTimeout(done, Math.max(0, ms));
+    function done() { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); }
+    signal?.addEventListener('abort', done, { once: true });
+    if (signal?.aborted) done();
+  });
+}
 
 function quoteError(error, cap) {
   const cause = fileError(error);
@@ -169,21 +204,51 @@ export class Media {
     const quote = await this.load(id);
     return this.generate(quote.type, id, { resume: true });
   }
-  async wait(taskId, { timeout = 1800, signal, progress = () => {} } = {}) {
-    const deadline = Date.now() + timeout * 1000;
+  /**
+   * Waits locally for one task. A single monotonic deadline bounds every round, read, retry and pause; a round asks
+   * only for the whole seconds left. budget.deadline lets the command keep optional work (the update notice) inside it.
+   */
+  async wait(taskId, { timeout = 1800, signal, progress = () => {}, budget } = {}) {
+    const deadline = performance.now() + timeout * 1000;
+    if (budget) budget.deadline = deadline;
+    let last, rounds = 0;
     for (;;) {
-      if (signal?.aborted) throw new CliError('interrupted', 'Stopped waiting locally. The EvoLink task continues.', { task_id: taskId }, 130);
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
-      const task = await this.client.call('get_task', { task_id: taskId, wait_seconds: Math.min(30, remaining) });
+      if (signal?.aborted) throw interrupted(taskId);
+      const left = deadline - performance.now();
+      // Too little time for another round: report the last verified state as it is. Like a later read in the shared
+      // core, a later round needs time to finish; started with less, it would only turn a verified status unverified.
+      if (left < (rounds === 0 ? MIN_ROUND_MS : NEXT_READ_MIN_MS)) throw waitTimeout(taskId, last);
+      rounds += 1;
+      let task;
+      try {
+        task = await this.client.call('get_task', { task_id: taskId, wait_seconds: Math.min(WAIT_ROUND_SECONDS, Math.floor((left + ROUND_DRIFT_MS) / 1000)) }, { deadline });
+      } catch (error) {
+        if (signal?.aborted) throw interrupted(taskId);
+        // A round that ran out of time is not a task outcome; continue while the wait itself has time left.
+        if (!['task_query_timeout', 'wait_deadline_reached'].includes(error.code)) throw error;
+        last = { ...last, status_check: 'unverified' };
+        const rest = deadline - performance.now();
+        if (rest < NEXT_READ_MIN_MS) throw waitTimeout(taskId, last);
+        progress(`${taskId}: latest status unverified${last.status ? ` (last verified: ${last.status})` : ''}`);
+        await pause(Math.min(ROUND_PAUSE_MS, rest), signal);
+        continue;
+      }
       if (task.status === 'completed') return task;
       // task.error.code is the shared core's user-facing code, the one the API reports.
       if (['failed', 'cancelled'].includes(task.status)) {
         throw new CliError('task_failed', `The generation task ${task.status === 'failed' ? 'failed' : 'was cancelled'}${
           task.error?.code ? ` with error code ${task.error.code}` : ''}.`, { task });
       }
-      progress(`${task.task_id}: ${task.status}${task.progress !== undefined ? ` (${task.progress}%)` : ''}`);
-      if (Date.now() >= deadline) throw new CliError('wait_timeout', 'The task is still running. Continue with tasks wait.', { task_id: taskId });
-      await new Promise(resolve => { const timer = setTimeout(done, 500); function done() { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); } signal?.addEventListener('abort', done, { once: true }); });
+      last = task.status ? { status: task.status, read_at: task.read_at, status_check: 'verified' }
+        : { status: task.last_known_status ?? last?.status, read_at: task.read_at ?? last?.read_at, status_check: 'unverified' };
+      progress(task.status ? `${task.task_id}: ${task.status}${task.progress !== undefined ? ` (${task.progress}%)` : ''}`
+        : `${taskId}: latest status unverified${last.status ? ` (last verified: ${last.status})` : ''}`);
+      const rest = deadline - performance.now();
+      if (rest <= 0) throw waitTimeout(taskId, last);
+      // Rounds keep the shared polling rhythm for the task type: a short round does not mean reading more often.
+      const readMs = Date.parse(task.read_at);
+      const sinceRead = Number.isFinite(readMs) ? Math.max(0, Date.now() - readMs) : 0;
+      await pause(Math.min(Math.max(ROUND_PAUSE_MS, pollIntervalMs(task.type) - sinceRead), rest), signal);
     }
   }
 }

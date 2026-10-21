@@ -8,7 +8,7 @@ import { formatEstimateRange } from '../services/pricing-client.js';
 import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/pricing-quote-client.js';
 import { ApprovedRulesEstimate, createRulesEstimate, checkRulesApproval, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
-import { CLIENT_REQUEST_ID_PATTERN, newRunId } from '../services/http-policy.js';
+import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failure, money, ok, progressReporter, usdOf } from './shared.js';
 import { RESULT_DELIVERY_GUIDANCE, TERMINAL_STATUSES, describeTask, waitForTask } from './task-format.js';
@@ -105,6 +105,7 @@ function registerGenerate(server, config, kind) {
         annotations: { title, ...PAID },
     }, async (args, extra) => {
         const started = Date.now();
+        const startedMono = monotonicNow();
         const credentials = currentRequestCredentials();
         const unavailable = !credentials?.serviceChannel && !credentials?.apiKey ? credentials?.unavailableReason : undefined;
         if (unavailable)
@@ -198,17 +199,19 @@ function registerGenerate(server, config, kind) {
             acceptedTaskId = submitted.id;
             let task = submitted;
             let statusCheck = 'not_requested';
-            const waitUntil = started + WAIT_MS[kind];
-            if ((!task.status || !TERMINAL_STATUSES.has(task.status)) && WAIT_MS[kind] > 0 && Date.now() + 3_000 < waitUntil) {
+            // The post-submit wait has its own deadline; it never bounds or interrupts the paid submission above.
+            const waitUntil = startedMono + WAIT_MS[kind];
+            if ((!task.status || !TERMINAL_STATUSES.has(task.status)) && WAIT_MS[kind] > 0 && remainingMs(waitUntil) > 3_000) {
                 const report = progressReporter(extra, WAIT_MS[kind] / 1000);
                 try {
-                    task = await waitForTask(config, submitted.id, {
+                    const waited = await waitForTask(config, submitted.id, {
                         deadline: waitUntil,
                         tool: name,
                         signal: extra.signal,
                         onPoll: current => report((Date.now() - started) / 1000, `${current.status}${current.progress !== undefined ? `, ${current.progress}%` : ''}`),
                     });
-                    statusCheck = 'verified';
+                    task = waited.task;
+                    statusCheck = waited.statusCheck;
                 }
                 catch {
                     // The task exists; a failed status read must not turn a successful submit into an error.

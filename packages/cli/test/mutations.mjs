@@ -124,9 +124,26 @@ const mutants = [
   ['failed-shared-list', 'src/platform/core/src/tools/list-tasks.js', "|| item.status === 'failed'", ''],
   ['failed-shared-message', 'src/platform/core/src/services/error-handler.js', 'publicTaskMessage(error.message)', 'undefined'],
   ['failed-shared-docs-link', 'src/platform/core/src/services/public-error.js', "&& !url.pathname.includes('//')", '&& false'],
+  // Local waits: one deadline bounds every round, read, renewal check, pause and the optional update notice.
+  ['wait-deadline-round-seconds', 'src/media.mjs', 'Math.floor((left + ROUND_DRIFT_MS) / 1000)', 'Math.ceil(left / 1000)'],
+  ['wait-deadline-round-deadline', 'src/media.mjs', '/ 1000)) }, { deadline });', '/ 1000)) });'],
+  ['wait-deadline-later-round-needs-time', 'src/media.mjs', '(rounds === 0 ? MIN_ROUND_MS : NEXT_READ_MIN_MS)', 'MIN_ROUND_MS'],
+  ['wait-deadline-first-round-always', 'src/media.mjs', 'rounds === 0 ? MIN_ROUND_MS :', 'rounds === 0 ? NEXT_READ_MIN_MS :'],
+  ['wait-deadline-polling-rhythm', 'src/media.mjs', 'pollIntervalMs(task.type) - sinceRead', '0'],
+  ['wait-deadline-pause-bounded', 'src/media.mjs', 'pollIntervalMs(task.type) - sinceRead), rest)', 'pollIntervalMs(task.type) - sinceRead), Infinity)'],
+  ['wait-deadline-round-timeout-continues', 'src/media.mjs', "if (!['task_query_timeout', 'wait_deadline_reached'].includes(error.code)) throw error;", 'throw error;'],
+  ['wait-deadline-timeout-unverifies', 'src/media.mjs', "last = { ...last, status_check: 'unverified' };", 'last = { ...last };'],
+  ['wait-deadline-unverified-snapshot', 'src/media.mjs', "read_at: task.read_at ?? last?.read_at, status_check: 'unverified' }", "read_at: task.read_at ?? last?.read_at, status_check: 'verified' }"],
+  ['wait-deadline-renewal-covers-wait', 'src/auth.mjs', 'const coversWait = !force && Number.isFinite(left)', 'const coversWait = false && Number.isFinite(left)'],
+  ['wait-deadline-renewal-needs-time', 'src/auth.mjs', 'if (left < REFRESH_MIN_MS) throw', 'if (false) throw'],
+  ['wait-deadline-renewal-forced', 'src/auth.mjs', 'const coversWait = !force && Number.isFinite(left)', 'const coversWait = Number.isFinite(left)'],
+  ['wait-deadline-credentials-deadline', 'src/api.mjs', 'this.credentials.access(attempt > 0, { deadline })', 'this.credentials.access(attempt > 0)'],
+  ['wait-deadline-context-deadline', 'src/api.mjs', '...(deadline !== undefined ? { deadline } : {}) } };', '} };'],
+  ['wait-deadline-query-timeout-code', 'src/api.mjs', "'task_status_unknown', 'task_query_timeout']", "'task_status_unknown']"],
+  ['wait-deadline-notice-deadline', 'src/cli.mjs', 'timer = setTimeout(resolve, left);', 'timer = setTimeout(resolve, left + 2_000);'],
 ];
 
-// Mutants of the update and login changes run only the test that covers them, which keeps the CI matrix fast.
+// Mutants of the update, login and local-wait changes run only the test that covers them, which keeps the CI matrix fast.
 const PATTERNS = {
   'callback-state': 'callback rejects wrong state',
   ...Object.fromEntries([
@@ -140,6 +157,12 @@ const PATTERNS = {
     [['auth-status-offline', 'login-update-advice', 'login-update-isolation'], '^auth status is an offline view'],
     [['login-failure-advice', 'login-interrupt-quiet'], '^a failed login still names an available update'],
     [['doctor-update-advice', 'doctor-update-isolation', 'setup-update-isolation'], '^doctor and setup report the latest published release'],
+    [['wait-deadline-round-seconds', 'wait-deadline-round-deadline', 'wait-deadline-later-round-needs-time', 'wait-deadline-first-round-always', 'wait-deadline-polling-rhythm', 'wait-deadline-pause-bounded'], '^rounds share one deadline'],
+    [['wait-deadline-round-timeout-continues'], '^a round that ran out of time'],
+    [['wait-deadline-timeout-unverifies', 'wait-deadline-unverified-snapshot'], '^after a verified status'],
+    [['wait-deadline-renewal-covers-wait', 'wait-deadline-renewal-needs-time', 'wait-deadline-renewal-forced', 'wait-deadline-credentials-deadline'], '^near a deadline'],
+    [['wait-deadline-context-deadline', 'wait-deadline-query-timeout-code'], '^one get_task round carries'],
+    [['wait-deadline-notice-deadline'], '^the update notice is awaited'],
   ].flatMap(([names, pattern]) => names.map(name => [name, pattern]))),
 };
 
@@ -170,6 +193,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('update-') || name.startsWith('plain-doctor-') ? ['update.test.mjs']
       : ['auth-status-offline', 'login-update-advice', 'login-update-isolation', 'login-failure-advice', 'login-interrupt-quiet'].includes(name) ? ['auth.test.mjs']
       : ['doctor-update-advice', 'doctor-update-isolation', 'setup-update-isolation'].includes(name) ? ['setup.test.mjs']
+      : name.startsWith('wait-deadline-') ? ['wait-deadline.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];

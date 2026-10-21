@@ -204,7 +204,7 @@ async function estimateArgs(options) {
   return { model: options.model, input, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
-export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome, updates }) {
+export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome, updates, budget }) {
   // login, setup and doctor always ask the registry and report the outcome, including a disabled check;
   // loopback test resources never contact it.
   const update = () => checkForUpdate({ state, server, force: true, signal, ...updates });
@@ -254,14 +254,14 @@ export async function dispatch(positionals, options, { state, server, credential
     requireThat(!['model', 'input', 'input-file', 'prompt', 'max-cost-usd', 'media-seconds'].some(k => options[k] !== undefined), 'quote_changed', 'Generation uses the saved quote. Change inputs by preparing a new estimate.');
     const result = await media.generate(action, options.quote, { confirmed: options.confirm });
     if (options.wait && result.task_id && result.status !== 'completed') {
-      const task = await media.wait(result.task_id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress });
+      const task = await media.wait(result.task_id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress, budget });
       return { ...task, quote_id: options.quote, client_request_id: result.client_request_id };
     }
     return result;
   }
   if (command === 'tasks') {
     if (action === 'get' && id) return client.call('get_task', { task_id: id, wait_seconds: 0 });
-    if (action === 'wait' && id) return media.wait(id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress });
+    if (action === 'wait' && id) return media.wait(id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress, budget });
     if (action === 'resume' && options.quote) return media.resume(options.quote);
     if (action === 'batch') return client.call('list_tasks', { task_ids: taskIds(options.ids) });
     if (action === 'list') {
@@ -306,6 +306,15 @@ async function stdinToken(stream) {
   return token;
 }
 
+/** Resolves with the promise's value, or undefined once the deadline (performance.now() ms) passes. */
+export async function beforeDeadline(promise, deadline) {
+  const left = deadline - performance.now();
+  if (left <= 0) return undefined;
+  let timer;
+  try { return await Promise.race([promise, new Promise(resolve => { timer = setTimeout(resolve, left); })]); }
+  finally { clearTimeout(timer); }
+}
+
 export async function main(argv = process.argv.slice(2), io = { stdout: process.stdout, stderr: process.stderr, stdin: process.stdin },
   { env = process.env, fetchFn, now, timeout, updateState } = {}) {
   let options = { json: argv.includes('--json') };
@@ -315,10 +324,14 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
   process.once('SIGTERM', interrupt);
   // The update notice follows the command's own output on stderr; stdout stays one envelope.
   let update;
+  const budget = {};
+  // Ctrl-C stops the update check; so does a local wait that reached its limit, so the process can exit at once.
+  const updateCheck = new AbortController();
+  controller.signal.addEventListener('abort', () => updateCheck.abort(), { once: true });
   const updates = { env, fetchFn, now, timeout };
   const checkUpdate = server => {
     // Building the state path can throw (for example without a home directory); that never fails the command.
-    update = Promise.resolve().then(() => updateNotice({ state: updateState || new State(), server, signal: controller.signal, ...updates }))
+    update = Promise.resolve().then(() => updateNotice({ state: updateState || new State(), server, signal: updateCheck.signal, ...updates }))
       .catch(() => undefined);
   };
   try {
@@ -342,7 +355,7 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     const client = new Api(credentials, { signal: controller.signal, apiUrl: options['api-url'], filesUrl: options['files-url'] });
     // Only a fully validated command checks: invalid tokens and service URLs fail without contacting npm.
     if (!NO_UPDATE_NOTICE.has(positionals[0]) && !NO_UPDATE_NOTICE.has(positionals.slice(0, 2).join(' '))) checkUpdate(server);
-    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n'), updates }));
+    const result = publicView(await dispatch(positionals, options, { state, server, credentials, client, signal: controller.signal, progress: message => io.stderr.write(message + '\n'), updates, budget }));
     const view = { schema_version: 1, ...result, ok: result.ok !== false };
     io.stdout.write(options.json ? JSON.stringify(view) + '\n' : `${result.text || JSON.stringify(view, null, 2)}\n${result.quote_id ? `Quote: ${result.quote_id}\n` : ''}`);
     if (!view.ok) process.exitCode = view.error?.code === 'interrupted' ? 130 : 1;
@@ -352,7 +365,9 @@ export async function main(argv = process.argv.slice(2), io = { stdout: process.
     process.exitCode = error.exitCode || (controller.signal.aborted ? 130 : 1);
   } finally {
     // Ctrl-C while the check finishes stops the check, not the completed command.
-    const notice = await update;
+    // A local wait that reached its limit does not wait longer for the optional update notice.
+    const notice = budget.deadline === undefined ? await update : await beforeDeadline(update, budget.deadline);
+    if (budget.deadline !== undefined && notice === undefined) updateCheck.abort();
     process.removeListener('SIGINT', interrupt); process.removeListener('SIGTERM', interrupt);
     if (notice && !controller.signal.aborted) io.stderr.write(notice + '\n');
   }
