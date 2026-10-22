@@ -208,13 +208,16 @@ export async function queryTask(config, taskId, tool = 'get_task', budget = {}) 
     return parseTaskResponse(data, taskId, requestId);
 }
 /** Up to 50 tasks in one call (POST /v1/tasks/batch); unknown or foreign IDs are simply absent. */
-export async function queryTasks(config, taskIds, tool = 'list_tasks') {
+/** Several tasks in one free read (POST /v1/tasks/batch). A budget bounds it, its retries and pauses like a task wait. */
+export async function queryTasks(config, taskIds, tool = 'list_tasks', budget = {}) {
     const { data, requestId } = await withRetry(() => rawRequest(config, {
         method: 'POST',
         path: '/v1/tasks/batch',
         body: { task_ids: taskIds },
         tool,
-    }), 2, 1500);
+        deadline: budget.deadline,
+        signal: budget.signal,
+    }), 2, 1500, budget);
     return parseBatchTasks(data, taskIds, requestId);
 }
 /** The account's recent tasks, newest first (GET /v1/tasks). Items carry no result links. */

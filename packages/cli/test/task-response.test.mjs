@@ -98,6 +98,8 @@ test('real CLI retains base page and marks missing details; explicit batches pre
   let result = await cli(f, home, ['tasks', 'list']);
   assert.equal(result.code, 0); assert.equal(result.view.partial, true); assert.equal(result.view.tasks[0].task_id, id);
   assert.equal(result.view.tasks[0].details_available, false); assert.deepEqual(result.view.details_missing, [id]);
+  assert.equal(result.view.tasks[0].details_reason, 'read_failed'); assert.equal(result.view.details_status, 'unavailable');
+  assert.deepEqual(result.view.details_retry_task_ids, [id]); assert.equal(result.view.last_page, 1);
   assert.equal(result.view.dashboard_url, 'https://evolink.ai/dashboard');
   f.batchResponse = { data: [{ id, status: 'completed' }, { id: 'task-bad', status: 'future' }, { id: 'task-foreign', status: 'completed', results: ['https://foreign.test/private'] }] };
   result = await cli(f, home, ['tasks', 'batch', '--ids', `${id},task-bad`]);
