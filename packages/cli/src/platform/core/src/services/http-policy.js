@@ -1,6 +1,7 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { randomUUID } from 'node:crypto';
+import { performance } from 'node:perf_hooks';
 import { currentRequestCredentials, currentClientName } from '../request-context.js';
 import { MCP_VERSION } from '../version.js';
 export const DEFAULT_READ_TIMEOUT_MS = 15_000;
@@ -30,6 +31,26 @@ export class RequestTimeoutError extends Error {
         super(`request timed out after ${timeoutMs}ms`);
         this.timeoutMs = timeoutMs;
         this.name = 'RequestTimeoutError';
+    }
+}
+/** Monotonic milliseconds for wait deadlines; unlike Date.now(), system clock changes do not move them. */
+export function monotonicNow() {
+    return performance.now();
+}
+/** Milliseconds left before a monotonic deadline: 0 once it has passed, Infinity without one. */
+export function remainingMs(deadline) {
+    return deadline === undefined ? Infinity : Math.max(0, deadline - monotonicNow());
+}
+/** A task read is not started with less than this left in its wait. */
+export const MIN_READ_MS = 100;
+/** The wait ran out before a task read could be verified. The task itself is not affected. */
+export class TaskQueryTimeoutError extends Error {
+    cause;
+    code = 'task_query_timeout';
+    constructor(cause) {
+        super('The wait limit was reached before the latest task status could be verified. Stopping this wait does not cancel the task.');
+        this.cause = cause;
+        this.name = 'TaskQueryTimeoutError';
     }
 }
 export class SubmissionNotStartedError extends Error {
@@ -94,17 +115,21 @@ export function timeoutFromEnv(name, fallback) {
     }
     return parsed;
 }
-export function parseRetryAfter(value, nowMs = Date.now()) {
+/** The pause the server asked for, uncapped: a task wait ends instead of retrying before it. */
+export function requestedRetryAfterMs(value, nowMs = Date.now()) {
     if (!value)
         return undefined;
     const seconds = Number(value.trim());
-    if (Number.isFinite(seconds) && seconds >= 0) {
-        return Math.min(Math.ceil(seconds * 1000), MAX_RETRY_DELAY_MS);
-    }
+    if (Number.isFinite(seconds) && seconds >= 0)
+        return Math.ceil(seconds * 1000);
     const dateMs = Date.parse(value);
     if (!Number.isFinite(dateMs))
         return undefined;
-    return Math.min(Math.max(0, dateMs - nowMs), MAX_RETRY_DELAY_MS);
+    return Math.max(0, dateMs - nowMs);
+}
+export function parseRetryAfter(value, nowMs = Date.now()) {
+    const requested = requestedRetryAfterMs(value, nowMs);
+    return requested === undefined ? undefined : Math.min(requested, MAX_RETRY_DELAY_MS);
 }
 export function responseRequestId(headers) {
     return headers.get('x-request-id')?.trim()
@@ -143,8 +168,8 @@ export async function fetchWithTimeout(url, init, timeoutMs, fetchImpl) {
     }
 }
 /** Bound body consumption as well as response headers. Cancelling a reader also closes stalled streams. */
-export async function readJsonBody(response, timeoutMs = DEFAULT_READ_TIMEOUT_MS) {
-    const signal = currentRequestCredentials()?.http?.signal;
+export async function readJsonBody(response, timeoutMs = DEFAULT_READ_TIMEOUT_MS, operationSignal) {
+    const signals = [currentRequestCredentials()?.http?.signal, operationSignal].filter((signal) => !!signal);
     const reader = response.body?.getReader();
     let timer;
     let abort;
@@ -165,9 +190,11 @@ export async function readJsonBody(response, timeoutMs = DEFAULT_READ_TIMEOUT_MS
                 const stop = (error) => { reject(error); void reader?.cancel().catch(() => undefined); };
                 timer = setTimeout(() => stop(new RequestTimeoutError(timeoutMs)), timeoutMs);
                 abort = () => stop(new Error('Request interrupted during response read'));
-                signal?.addEventListener('abort', abort, { once: true });
-                if (signal?.aborted)
-                    abort();
+                for (const signal of signals) {
+                    signal.addEventListener('abort', abort, { once: true });
+                    if (signal.aborted)
+                        abort();
+                }
             })]);
         if (!body)
             return {};
@@ -181,7 +208,8 @@ export async function readJsonBody(response, timeoutMs = DEFAULT_READ_TIMEOUT_MS
     finally {
         clearTimeout(timer);
         if (abort)
-            signal?.removeEventListener('abort', abort);
+            for (const signal of signals)
+                signal.removeEventListener('abort', abort);
         reader?.releaseLock();
     }
 }

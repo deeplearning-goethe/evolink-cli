@@ -1,6 +1,7 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { queryTask } from '../services/api-client.js';
+import { MIN_READ_MS, TaskQueryTimeoutError, remainingMs } from '../services/http-policy.js';
 import { publicIdentifier } from '../services/public-error.js';
 import { publicTaskError } from '../services/error-handler.js';
 import { taskBilling } from './task-billing.js';
@@ -273,18 +274,66 @@ export function pollIntervalMs(type) {
         return 6_000;
     return 3_000;
 }
-/** Reads a task until it finishes or the deadline passes, pacing reads by task type. */
+/** A progress notification may not hold the wait; it continues on its own if slow. */
+const PROGRESS_SEND_LIMIT_MS = 1_000;
+const callDeadlines = new WeakMap();
+/** Records the wait deadline of one tool call, so optional work after it (previews) stays inside the call's window. */
+export function setCallDeadline(extra, deadline) {
+    if (extra && typeof extra === 'object')
+        callDeadlines.set(extra, deadline);
+}
+export function callDeadline(extra) {
+    return extra && typeof extra === 'object' ? callDeadlines.get(extra) : undefined;
+}
+/** A late timer still leaves a planned read twice the hard minimum, so the read's own check never sees a shorter window. */
+const READ_START_MS = 2 * MIN_READ_MS;
+/**
+ * A later read is planned only when at least this much of the wait is left after its pause. A read of an unfinished
+ * task syncs with the provider and can take a second or more; started with less time, it would likely be cut at the
+ * deadline and only turn the verified snapshot into an unverified one. The first read of a wait is not limited by it.
+ */
+export const NEXT_READ_MIN_MS = 2_000;
+async function boundedPoll(pending, limitMs) {
+    if (!pending)
+        return;
+    let timer;
+    await Promise.race([pending.catch(() => undefined),
+        new Promise(resolve => { timer = setTimeout(resolve, Math.max(0, Math.min(PROGRESS_SEND_LIMIT_MS, limitMs))); })]);
+    clearTimeout(timer);
+}
+/**
+ * Reads a task until it finishes or its wait ends, pacing reads by task type.
+ * One deadline covers every read, retry, pause and poll: nothing starts that cannot finish before it, and a later read
+ * needs NEXT_READ_MIN_MS. The first read's failure is thrown; a later failure returns the last valid snapshot as unverified.
+ */
 export async function waitForTask(config, taskId, options) {
-    let task = options.initial ?? await queryTask(config, taskId, options.tool);
-    while (!TERMINAL_STATUSES.has(task.status) && !options.signal?.aborted) {
+    const read = () => queryTask(config, taskId, options.tool, { deadline: options.deadline, signal: options.signal, ...(options.singleRead ? { retries: 0 } : {}) });
+    let task = options.initial ?? await read();
+    let readAt = new Date().toISOString();
+    for (;;) {
+        if (TERMINAL_STATUSES.has(task.status))
+            return { task, statusCheck: 'verified', readAt, ended: 'terminal' };
+        if (options.signal?.aborted)
+            return { task, statusCheck: 'verified', readAt, ended: 'cancelled' };
         const interval = pollIntervalMs(task.type);
-        if (Date.now() + interval > options.deadline)
-            break;
-        await options.onPoll?.(task);
+        if (options.singleRead || remainingMs(options.deadline) < interval + NEXT_READ_MIN_MS) {
+            return { task, statusCheck: 'verified', readAt, ended: 'deadline' };
+        }
+        await boundedPoll(options.onPoll?.(task), remainingMs(options.deadline) - interval - NEXT_READ_MIN_MS);
         await sleep(interval, options.signal);
         if (options.signal?.aborted)
-            break;
-        task = await queryTask(config, taskId, options.tool);
+            return { task, statusCheck: 'verified', readAt, ended: 'cancelled' };
+        // Only a late timer gets here with little time left. No read was attempted, so the snapshot is still verified.
+        if (remainingMs(options.deadline) < READ_START_MS)
+            return { task, statusCheck: 'verified', readAt, ended: 'deadline' };
+        try {
+            task = await read();
+            readAt = new Date().toISOString();
+        }
+        catch (error) {
+            // Never present the earlier snapshot as freshly read.
+            const ended = options.signal?.aborted ? 'cancelled' : error instanceof TaskQueryTimeoutError ? 'deadline' : 'read_failed';
+            return { task, statusCheck: 'unverified', readAt, ended, readError: error };
+        }
     }
-    return task;
 }

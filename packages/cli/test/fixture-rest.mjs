@@ -101,6 +101,9 @@ export async function restFixture(state, req, res, url, body, send) {
   if (url.pathname === '/v1/tasks/batch') { send(200, state.batchResponse ?? { data: JSON.parse(body).task_ids.flatMap(id => state.tasks.has(id) ? [raw(state.tasks.get(id))] : []) }); return true; }
   if (url.pathname.startsWith('/v1/tasks/')) {
     const id = decodeURIComponent(url.pathname.slice('/v1/tasks/'.length));
+    state.taskReads ??= []; state.taskReads.push({ id, at: performance.now() });
+    // Tests may answer slowly or never; such a handler sends nothing once the client has gone.
+    if (state.taskRead) { await state.taskRead({ id, req, res, send, raw: () => state.tasks.has(id) ? raw(state.tasks.get(id)) : undefined }); return true; }
     if (state.taskResponse !== undefined) { send(200, state.taskResponse); return true; }
     if (!state.tasks.has(id)) send(404, { error: { code: 'task_not_found', message: 'Task not found.' } });
     else send(200, raw(state.tasks.get(id))); return true;

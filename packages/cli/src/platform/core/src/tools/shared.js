@@ -5,7 +5,7 @@ import { publicIdentifier, publicErrorDetails, publicText } from '../services/pu
 import { processCredentialsAllowed } from '../request-context.js';
 import { ApiHttpError } from '../services/api-client.js';
 import { CREDITS_PER_USD, formatCredits, formatUsd } from '../services/error-handler.js';
-import { API_KEYS_URL, DASHBOARD_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError } from '../services/http-policy.js';
+import { API_KEYS_URL, DASHBOARD_URL, PaidRequestOutcomeUnknownError, RequestTimeoutError, SubmissionNotStartedError, TaskQueryTimeoutError } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 import { TaskResponseError } from '../services/task-response.js';
 /** Free lookups: clients can run them without asking. */
@@ -71,6 +71,11 @@ function infoFor(error) {
             retryable: true,
         };
     }
+    if (error instanceof TaskQueryTimeoutError)
+        return {
+            status: 0, category: 'server_error', code: error.code, message: error.message,
+            next_step: 'Query the original task again later. Its status, charge and refund are unverified; do not generate again.', retryable: true,
+        };
     if (error instanceof RequestTimeoutError || error instanceof TypeError) {
         return { status: 0, category: 'server_error', message: 'EvoLink did not respond in time.', next_step: 'Retry in a minute.', retryable: true };
     }
@@ -91,6 +96,11 @@ function infoFor(error) {
             : 'Ask the user to reconnect EvoLink in this client. If it keeps failing, retry in a few minutes.',
         retryable: false,
     };
+}
+/** Category, code and HTTP status of an error, without its message: enough to say why a later read failed. */
+export function errorSummary(error) {
+    const info = infoFor(error);
+    return { category: info.category, ...(info.code ? { code: info.code } : {}), ...(info.status ? { status: info.status } : {}) };
 }
 /** Converts a thrown error into a tool error with a category and a concrete next step. */
 export function errorResult(error, context = {}) {

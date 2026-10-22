@@ -22,13 +22,14 @@ export class Api {
       return fetchFn(input, { ...options, redirect: 'error', credentials: 'omit' });
     };
   }
-  context(access, name) {
+  context(access, name, deadline) {
     // linkCampaign: site links the CLI shows are tagged utm_campaign=cli, not as the local MCP package.
+    // deadline (performance.now() ms): the local wait's own limit, which shared task reads never run past.
     return { serviceChannel: { accessToken: access.access_token }, clientName: 'EvoLink CLI', linkCampaign: 'cli',
       http: { fetch: this.fetchFn, signal: this.signal, userAgent: USER_AGENT, client: 'cli', version: CLI_VERSION,
-        controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin } };
+        controlBaseUrl: this.apiUrl.origin, filesBaseUrl: this.filesUrl.origin, ...(deadline !== undefined ? { deadline } : {}) } };
   }
-  async call(name, args = {}, { requireCapability = false, requiredInputs = [] } = {}) {
+  async call(name, args = {}, { requireCapability = false, requiredInputs = [], deadline } = {}) {
     if (requireCapability) requireThat(this.platform.supports(name, requiredInputs),
       'capability_unavailable', 'This CLI does not contain the requested platform capability. Update the CLI; no request was sent.',
       { tool: name, required_inputs: requiredInputs, request_sent: false });
@@ -46,13 +47,13 @@ export class Api {
       return { ...data, text };
     }
     for (let attempt = 0; attempt < 2; attempt++) {
-      const access = await this.credentials.access(attempt > 0);
-      const result = await this.platform.call(name, args, this.context(access, name));
+      const access = await this.credentials.access(attempt > 0, { deadline });
+      const result = await this.platform.call(name, args, this.context(access, name, deadline));
       const data = result.structuredContent;
       const text = (result.content ?? []).filter(item => item.type === 'text').map(item => item.text).join('\n');
       if (result.isError || data?.ok === false) {
         if (attempt === 0 && data?.error?.status === 401 && data?.charged !== 'unknown') continue;
-        const taskReadCode = ['task_response_invalid', 'task_identity_mismatch', 'task_status_unknown'].includes(data?.error?.code) ? data.error.code : undefined;
+        const taskReadCode = ['task_response_invalid', 'task_identity_mismatch', 'task_status_unknown', 'task_query_timeout'].includes(data?.error?.code) ? data.error.code : undefined;
         throw new CliError(this.signal?.aborted ? 'interrupted' : taskReadCode || data?.error?.category || 'api_failed',
           safeMessage(data?.error?.message || text || 'The EvoLink request was refused.'), { ...data, text: safeMessage(text) }, this.signal?.aborted ? 130 : 1);
       }

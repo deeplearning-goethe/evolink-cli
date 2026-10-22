@@ -7,6 +7,9 @@ import { hash } from './state.mjs';
 import { authFetch, ISSUER, SERVER, SITE } from './network.mjs';
 import { CliError, requireThat } from './errors.mjs';
 
+/** A local wait with less time left than this does not start a token renewal. */
+export const REFRESH_MIN_MS = 3_000;
+
 export class Vault {
   constructor(server, state) { this.account = hash({ server: server.href, home: state.home }); }
   async entry() {
@@ -143,7 +146,7 @@ export class Credentials {
   }
   lock(fn) { return this.state.lock(`auth-${hash(this.server.href)}`, fn); }
   provider() { return new OAuthProvider({ server: this.server, state: this.state, vault: this.vault, redirectUrl: 'http://127.0.0.1:1/oauth/callback' }); }
-  async access(force = false) {
+  async access(force = false, { deadline } = {}) {
     if (this.token) {
       // The hash binds quotes to this temporary credential without writing it to disk.
       return { access_token: this.token, binding: hash(this.token) };
@@ -152,8 +155,16 @@ export class Credentials {
       let saved = await this.vault.read();
       requireThat(saved?.tokens, 'login_required', 'Run evolink auth login.');
       if (force || saved.expires_at <= Date.now() + 60_000) {
-        await refresh(this.provider(), this.fetchFn);
-        saved = await this.vault.read();
+        // Near a wait's deadline, a token still valid past it is used as is, and a renewal that could not
+        // finish in time is not started. A renewal that has started is never cut short: its new token must be saved.
+        const left = deadline === undefined ? Infinity : Math.max(0, deadline - performance.now());
+        const coversWait = !force && Number.isFinite(left) && saved.expires_at > Date.now() + left + 1_000;
+        if (!coversWait) {
+          if (left < REFRESH_MIN_MS) throw new CliError('wait_deadline_reached',
+            'The wait limit was reached before the login could be renewed. Stopping this wait does not cancel the task.');
+          await refresh(this.provider(), this.fetchFn);
+          saved = await this.vault.read();
+        }
       }
       const issuer = this.server.href === SERVER ? ISSUER : this.server.origin;
       requireThat(saved?.tokens?.issuer === issuer && saved.tokens.access_token, 'login_required', 'This login belongs to a different service. Run auth login.');
