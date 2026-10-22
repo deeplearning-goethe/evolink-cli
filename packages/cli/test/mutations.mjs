@@ -141,9 +141,21 @@ const mutants = [
   ['wait-deadline-context-deadline', 'src/api.mjs', '...(deadline !== undefined ? { deadline } : {}) } };', '} };'],
   ['wait-deadline-query-timeout-code', 'src/api.mjs', "'task_status_unknown', 'task_query_timeout']", "'task_status_unknown']"],
   ['wait-deadline-notice-deadline', 'src/cli.mjs', 'timer = setTimeout(resolve, left);', 'timer = setTimeout(resolve, left + 2_000);'],
+  // One generation per estimate: a refresh replaces its quote and keeps its request ID; only the current quote is submittable.
+  ['quote-intent-current-only', 'src/media.mjs', 'await this.requireActive(quote, kind);', ''],
+  ['quote-intent-recheck', 'src/media.mjs', 'const current = await this.refreshable(intentId);', 'const current = before;'],
+  ['quote-intent-version', 'src/media.mjs', "requireThat(current.id === before.id, 'quote_refresh_conflict',", "requireThat(true, 'quote_refresh_conflict',"],
+  ['quote-intent-request-id', 'src/media.mjs', 'client_request_id: current.client_request_id, refreshed_from: current.id', 'refreshed_from: current.id'],
+  ['quote-intent-shared-lock', 'src/media.mjs', 'return this.state.lock(`quote-${intentId}`, async () => {', 'return this.state.lock(`quote-${id}`, async () => {'],
+  ['quote-intent-first-check', 'src/media.mjs', 'const before = await this.state.lock(lock, () => this.refreshable(intentId));', 'const before = await this.load(id);'],
+  ['quote-intent-incomplete', 'src/media.mjs', "if (!intent) throw new CliError('quote_refresh_incomplete',", "if (false) throw new CliError('quote_refresh_incomplete',"],
+  ['quote-intent-supersede-mark', 'src/media.mjs', "await this.state.write('quotes', current.id, { ...current, state: 'superseded', superseded_by: next.id });", ''],
+  ['quote-intent-active-task', 'src/media.mjs', "if (active?.task_id) throw new CliError('quote_superseded',", "if (false) throw new CliError('quote_superseded',"],
+  ['quote-intent-active-recovery', 'src/media.mjs', "if (['submitting', 'outcome_unknown'].includes(active?.state)) throw new CliError('quote_superseded',", "if (false) throw new CliError('quote_superseded',"],
+  ['quote-intent-refresh-recovery', 'src/media.mjs', ": ['submitting', 'outcome_unknown'].includes(active.state) ? { recovery:", ': false ? { recovery:'],
 ];
 
-// Mutants of the update, login and local-wait changes run only the test that covers them, which keeps the CI matrix fast.
+// Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.
 const PATTERNS = {
   'callback-state': 'callback rejects wrong state',
   ...Object.fromEntries([
@@ -163,6 +175,12 @@ const PATTERNS = {
     [['wait-deadline-renewal-covers-wait', 'wait-deadline-renewal-needs-time', 'wait-deadline-renewal-forced', 'wait-deadline-credentials-deadline'], '^near a deadline'],
     [['wait-deadline-context-deadline', 'wait-deadline-query-timeout-code'], '^one get_task round carries'],
     [['wait-deadline-notice-deadline'], '^the update notice is awaited'],
+    [['quote-intent-current-only', 'quote-intent-request-id', 'quote-intent-first-check', 'quote-intent-supersede-mark', 'quote-intent-active-task'], '^a refresh replaces the quote'],
+    [['quote-intent-recheck'], '^a submission that finishes while a refresh waits'],
+    [['quote-intent-shared-lock'], '^a refresh during the current quote'],
+    [['quote-intent-version'], '^two refreshes at once'],
+    [['quote-intent-incomplete'], '^crash orderings'],
+    [['quote-intent-active-recovery', 'quote-intent-refresh-recovery'], '^an unverified submission of the current quote'],
   ].flatMap(([names, pattern]) => names.map(name => [name, pattern]))),
 };
 
@@ -194,6 +212,7 @@ for (const [name, file, before, after] of selected) {
       : ['auth-status-offline', 'login-update-advice', 'login-update-isolation', 'login-failure-advice', 'login-interrupt-quiet'].includes(name) ? ['auth.test.mjs']
       : ['doctor-update-advice', 'doctor-update-isolation', 'setup-update-isolation'].includes(name) ? ['setup.test.mjs']
       : name.startsWith('wait-deadline-') ? ['wait-deadline.test.mjs']
+      : name.startsWith('quote-intent-') ? ['quote-intent.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];

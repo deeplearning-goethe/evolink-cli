@@ -280,7 +280,10 @@ shared MCP key, quota and permissions remain.
 
 Use `evolink estimate --refresh-quote ID` for an unsubmitted approval. It preserves
 input and an explicit user budget, creates a new local approval and requires user
-confirmation again. Unknown recovery keeps the original input and request ID;
+confirmation again. The new quote replaces the old one, which can no longer be
+submitted (`quote_superseded` names the current quote), and keeps its request ID;
+if a submission or another refresh finishes first, no new quote is saved.
+Unknown recovery keeps the original input and request ID;
 a failed replay cannot prove the first submission was free. Known tasks remain
 readable after expiry; check the original task before preparing another request.
 

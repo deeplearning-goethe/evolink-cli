@@ -88,6 +88,12 @@ export function checkEstimate(quote, cap) {
 export class Media {
   constructor({ client, mcp = client, state, server, now = Date.now }) { this.client = mcp; this.state = state; this.server = server.href; this.now = now; }
   async estimate(args) {
+    const { stored, view } = await this.prepareQuote(args);
+    await this.state.write('quotes', stored.id, stored);
+    return view;
+  }
+  /** Obtains and checks an estimate and builds its quote record; nothing is saved. */
+  async prepareQuote(args) {
     const { max_cost_usd, ...input } = args;
     let quote;
     try {
@@ -109,16 +115,69 @@ export class Media {
       ...(quote.effective_input ? { effective_input: quote.effective_input, defaults_applied: quote.defaults_applied } : {}),
       created_at: this.now(), expires_at: expires, ...(quote.account_quote ? { backend_estimate_id: quote.account_quote.quote.estimate_id,
         server_expires_at: serverExpiry, account_quote: quote.account_quote } : {}), state: 'quoted', client_request_id: `cli-${randomUUID()}` };
-    await this.state.write('quotes', id, stored);
-    return { ...quote, quote_id: id, input: input.input || {}, ...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {}), expires_at: new Date(stored.expires_at).toISOString(),
+    const view = { ...quote, quote_id: id, input: input.input || {}, ...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {}), expires_at: new Date(stored.expires_at).toISOString(),
       requires_confirmation: true, next_step: `After the user approves, run evolink generate ${quote.type} --quote ${id} --confirm.` };
+    return { stored, view };
   }
+  /**
+   * One generation per estimate. A refresh gives it a new quote but keeps its request ID, and moves a single pointer
+   * (intents/<first quote ID>) to the new quote, which is saved first; only the quote that pointer names can be submitted.
+   * A quote never refreshed is its own generation and has no pointer, as in earlier releases.
+   */
+  intentOf(quote) { return quote.intent_id ?? quote.id; }
   async refresh(id) {
-    const quote = await this.load(id);
-    requireThat(quote.state === 'quoted' && !quote.task_id, 'submission_already_started',
-      'This submission has started. Recover its original task instead of refreshing its quote.');
-    const { account_quote, pricing_quote, ...args } = quote.args;
-    return { ...await this.estimate(args), refreshed_from: id };
+    const intentId = this.intentOf(await this.load(id));
+    const lock = `quote-${intentId}`;
+    // Checked before and again after the estimate, under the lock that submission and recovery share: a submission
+    // or another refresh while the estimate ran means no new submittable quote is saved.
+    const before = await this.state.lock(lock, () => this.refreshable(intentId));
+    const { account_quote, pricing_quote, ...args } = before.args;
+    const { stored, view } = await this.prepareQuote(args);
+    return this.state.lock(lock, async () => {
+      const current = await this.refreshable(intentId);
+      requireThat(current.id === before.id, 'quote_refresh_conflict',
+        `Another refresh already replaced this quote with quote ${current.id}. Show the user that quote and obtain approval for it.`,
+        { quote_id: id, active_quote_id: current.id, client_request_id: current.client_request_id, submission_allowed: false });
+      // Nothing was ever submitted with this request ID, so the refreshed quote keeps it.
+      const next = { ...stored, intent_id: intentId, client_request_id: current.client_request_id, refreshed_from: current.id };
+      await this.state.write('quotes', next.id, next);
+      const intent = await this.state.read('intents', intentId);
+      await this.state.write('intents', intentId, { id: intentId, client_request_id: next.client_request_id, active_quote_id: next.id,
+        quotes: [...(intent?.quotes ?? [intentId]), next.id], updated_at: this.now() });
+      // The pointer above decides; marking the replaced quote only explains it.
+      await this.state.write('quotes', current.id, { ...current, state: 'superseded', superseded_by: next.id });
+      return { ...view, refreshed_from: id, superseded_quote_id: current.id, client_request_id: next.client_request_id };
+    });
+  }
+  /** The generation's current quote, which must not have started a submission. */
+  async refreshable(intentId) {
+    const intent = await this.state.read('intents', intentId);
+    const active = await this.load(intent?.active_quote_id ?? intentId);
+    requireThat(active.state === 'quoted' && !active.task_id, 'submission_already_started',
+      'This submission has started. Recover its original task instead of refreshing its quote.', {
+        quote_id: active.id, client_request_id: active.client_request_id, submission_allowed: false,
+        ...(active.task_id ? { task_id: active.task_id, recovery: `evolink tasks get ${active.task_id}` }
+          : ['submitting', 'outcome_unknown'].includes(active.state) ? { recovery: `evolink tasks resume --quote ${active.id}` } : {}) });
+    return active;
+  }
+  /** Only the generation's current quote may be submitted or recovered; any other names the current one or its task. */
+  async requireActive(quote, kind) {
+    const intentId = this.intentOf(quote);
+    const intent = await this.state.read('intents', intentId);
+    const activeId = intent?.active_quote_id ?? intentId;
+    if (activeId === quote.id) return;
+    const details = { quote_id: quote.id, active_quote_id: activeId, client_request_id: quote.client_request_id, submission_allowed: false };
+    if (!intent) throw new CliError('quote_refresh_incomplete',
+      `This refreshed quote was not saved completely and cannot be submitted. Use quote ${activeId} or refresh it again.`, details);
+    const active = await this.state.read('quotes', activeId);
+    if (active?.task_id) throw new CliError('quote_superseded',
+      `This quote was replaced by quote ${activeId}, which was already submitted as task ${active.task_id}. Do not generate again.`,
+      { ...details, task_id: active.task_id, recovery: `evolink tasks get ${active.task_id}` });
+    if (['submitting', 'outcome_unknown'].includes(active?.state)) throw new CliError('quote_superseded',
+      `This quote was replaced by quote ${activeId}, whose submission is unverified. Recover that quote; do not create a new request.`,
+      { ...details, recovery: `evolink tasks resume --quote ${activeId}` });
+    throw new CliError('quote_superseded', `This quote was replaced by quote ${activeId}. Show the user that quote and obtain approval for it.`,
+      { ...details, next_step: `After the user approves, run evolink generate ${kind} --quote ${activeId} --confirm.` });
   }
   async load(id) {
     const quote = await this.state.read('quotes', id);
@@ -131,10 +190,13 @@ export class Media {
   async generate(kind, id, { confirmed = false, resume = false } = {}) {
     requireThat(['image', 'video', 'audio'].includes(kind), 'invalid_type', 'Choose image, video or audio.');
     requireThat(confirmed || resume, 'confirmation_required', 'Show the quote to the user and obtain approval before adding --confirm.');
-    return this.state.lock(`quote-${id}`, async () => {
+    // Submission, recovery and refresh of one generation share its lock; the quote is validated inside it.
+    const intentId = this.intentOf((await this.state.read('quotes', id)) ?? { id });
+    return this.state.lock(`quote-${intentId}`, async () => {
       const quote = await this.load(id);
       requireThat(quote.type === kind, 'quote_type_mismatch', 'Use the media type shown in the saved quote.');
       if (quote.task_id) return { ...await this.client.call('get_task', { task_id: quote.task_id, wait_seconds: 0 }), quote_id: id, recovered: true };
+      await this.requireActive(quote, kind);
       requireThat(quote.state !== 'refused', 'submission_refused',
         'EvoLink refused this submission and reported no charge. Resolve the original error, estimate again with the same budget, and obtain approval for the new quote.',
         { quote_id: id, client_request_id: quote.client_request_id, charged: 'no', submission_allowed: false });
