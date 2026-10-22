@@ -4,10 +4,17 @@ import { z } from 'zod';
 import { listTasks, queryTasks } from '../services/api-client.js';
 import { publicTaskErrorCode } from '../services/error-handler.js';
 import { parseBatchTasks } from '../services/task-response.js';
-import { DASHBOARD_CHECK_GUIDANCE, READ_ONLY, dashboardCheck, errorResult, failure, money, ok, usdOf } from './shared.js';
+import { monotonicNow } from '../services/http-policy.js';
+import { DASHBOARD_CHECK_GUIDANCE, READ_ONLY, dashboardCheck, errorResult, errorSummary, failure, money, ok, usdOf } from './shared.js';
 import { TASK_ID } from './get-task.js';
 import { RESULT_DELIVERY_GUIDANCE, RESULT_DELIVERY_INSTRUCTIONS, RESULT_LINK_HOURS, resultDeliveryMarkdown, resultLinks, resultResources, taskOutputs } from './task-format.js';
 const MAX_IDS = 50;
+/** The verified base page answers a list; the optional detail read (result links, error codes) gets at most this long. */
+const DETAILS_BUDGET_MS = 15_000;
+let detailsBudgetMs = DETAILS_BUDGET_MS;
+export function setDetailsBudgetForTests(ms) {
+    detailsBudgetMs = ms ?? DETAILS_BUDGET_MS;
+}
 /** ISO 8601, unix seconds, or relative such as 30m, 2h, 1d. */
 export function parseSince(value, now = Date.now()) {
     const trimmed = value.trim();
@@ -72,6 +79,7 @@ export function registerListTasks(server, config) {
             'Use it to recover tasks after a lost connection or a timed-out submit before submitting anything again.',
             'Recent tasks cover the whole EvoLink account, newest first.',
             'partial means some rows or details could not be verified. Retain verified tasks and the base page, disclose incomplete coverage and query the original missing or details_missing IDs. Missing costs are not zero; do not regenerate to repair a read.',
+            'details_status says whether result links and error codes were read for finished rows: retry details_retry_task_ids with task_ids (free); check rows whose details_reason is not_returned with get_task.',
             RESULT_DELIVERY_GUIDANCE,
         ].join(' '),
         inputSchema: {
@@ -90,7 +98,7 @@ export function registerListTasks(server, config) {
                 .describe('Without task_ids: how many recent tasks to return (1–50, default 20).'),
         },
         annotations: { title: 'List generation tasks', ...READ_ONLY },
-    }, async ({ task_ids, status, type, model, page: pageNumber, since, until, limit }) => {
+    }, async ({ task_ids, status, type, model, page: pageNumber, since, until, limit }, extra) => {
         try {
             if (task_ids && [status, type, model, pageNumber, since, until].some(value => value !== undefined)) {
                 return failure('Choose task_ids or list filters, not both.', { error: { category: 'invalid_request' } });
@@ -148,24 +156,35 @@ export function registerListTasks(server, config) {
                     return (sinceMs === undefined || item.created * 1000 >= sinceMs) && (untilMs === undefined || item.created * 1000 <= untilMs);
                 });
             }
-            // The list endpoint omits result links and error codes; read those tasks in one batch to include them.
+            // The list endpoint omits result links and error codes; read those tasks in one batch to include them. That read is
+            // optional: it has a short budget, and when it fails the verified base page stays, with the reason for each missing detail.
             const finished = items.filter(item => item.status === 'completed' && page.data.some(raw => raw?.id === item.id && raw.has_results === true) || item.status === 'failed')
                 .map(item => item.id).slice(0, MAX_IDS);
             const details = new Map();
-            let detailsMissing = [];
+            const reasons = new Map();
+            let detailsError;
             if (finished.length > 0) {
                 try {
-                    const batch = await queryTasks(config, finished);
+                    const batch = await queryTasks(config, finished, 'list_tasks', { deadline: monotonicNow() + detailsBudgetMs, signal: extra?.signal });
                     for (const task of batch.tasks)
                         details.set(task.id, task);
-                    detailsMissing = batch.missing;
                     issues.push(...batch.issues);
+                    const invalid = new Set(batch.issues.flatMap(issue => issue.task_id ? [issue.task_id] : []));
+                    for (const id of batch.missing)
+                        reasons.set(id, invalid.has(id) ? 'invalid' : 'not_returned');
                 }
-                catch {
-                    detailsMissing = finished;
+                catch (error) {
                     issues.push({ code: 'task_details_unavailable' });
+                    detailsError = errorSummary(error);
+                    for (const id of finished)
+                        reasons.set(id, 'read_failed');
                 }
             }
+            const detailsMissing = [...reasons.keys()];
+            const detailsStatus = finished.length === 0 ? 'not_needed' : detailsError ? 'unavailable' : detailsMissing.length ? 'partial' : 'complete';
+            // A failed or invalid read may succeed when retried (free); a task the read did not return is checked on its own.
+            const detailsRetry = detailsMissing.filter(id => reasons.get(id) !== 'not_returned');
+            const notReturned = detailsMissing.filter(id => reasons.get(id) === 'not_returned');
             const rows = items.map(item => {
                 const detailed = details.get(item.id);
                 if (detailed)
@@ -173,8 +192,11 @@ export function registerListTasks(server, config) {
                 const row = rowFromTask(item);
                 // Compact pages do not establish a detailed execution error code.
                 delete row.error_code;
-                if (detailsMissing.includes(item.id))
+                const reason = reasons.get(item.id);
+                if (reason) {
                     row.details_available = false;
+                    row.details_reason = reason;
+                }
                 return row;
             });
             const filters = [status && `status ${status}`, type && `type ${type}`, model && `model ${model}`, since && `since ${since}`, until && `until ${until}`].filter(Boolean).join(', ');
@@ -182,20 +204,35 @@ export function registerListTasks(server, config) {
             lines.push(...(rows.length > 0 ? rows.map(rowLine) : ['(none)']));
             if (issues.length || detailsMissing.length)
                 lines.push(`Partial response: verified base rows were retained; some rows or details could not be verified. Missing details: ${detailsMissing.join(', ') || 'none'}. Query the original IDs again; do not infer zero usage or generate again.`);
+            if (detailsMissing.length) {
+                lines.push(`Details (result links, error codes, charges) were read for ${details.size} of ${finished.length} finished task${finished.length === 1 ? '' : 's'}.`);
+                if (detailsError)
+                    lines.push(`The detail read failed (${[detailsError.code ?? detailsError.category, detailsError.status && `HTTP ${detailsError.status}`].filter(Boolean).join(', ')}).`);
+                if (detailsRetry.length)
+                    lines.push(`Retrying is free: call list_tasks with task_ids ${JSON.stringify(detailsRetry)}.`);
+                if (notReturned.length)
+                    lines.push(`Not returned by the detail read: ${notReturned.join(', ')}. Check each with get_task; this does not prove a task was never submitted.`);
+            }
             if (rows.some(row => row.response_warnings))
                 lines.push('Some optional fields were omitted; missing values do not mean zero. See response_warnings.');
             const websiteCheck = issues.length > 0 || detailsMissing.length > 0 || rows.some(row => row.response_warnings || ['failed', 'cancelled'].includes(row.status));
             if (websiteCheck)
                 lines.push(DASHBOARD_CHECK_GUIDANCE);
             const nextPage = page.page * page.page_size < page.total ? page.page + 1 : null;
+            const lastPage = Math.max(1, Math.ceil(page.total / page.page_size));
+            // An empty page past the end is not an empty account.
+            if (rows.length === 0 && page.page > lastPage)
+                lines.push(`Page ${page.page} is past the last page (${lastPage}) of ${page.total} tasks; use pages 1–${lastPage}.`);
             lines.push(`Page ${page.page}; ${page.total} tasks before page-local time filtering.${nextPage ? ` Continue with page ${nextPage}.` : ''}`);
             if (rows.some(row => row.results))
                 lines.push(`Result links expire after ${RESULT_LINK_HOURS} hours.`);
             if (rows.some(row => row.results))
                 lines.push(`Next step: ${RESULT_DELIVERY_INSTRUCTIONS}`);
             return ok(lines.join('\n'), { tasks: rows, total: page.total, page: page.page, page_size: page.page_size,
-                next_page: nextPage, time_filter_scope: 'selected_page', total_scope: 'server_filters_before_time_filter',
+                next_page: nextPage, last_page: lastPage, time_filter_scope: 'selected_page', total_scope: 'server_filters_before_time_filter',
                 partial: issues.length > 0 || detailsMissing.length > 0, issues, details_missing: detailsMissing,
+                details_status: detailsStatus, details_coverage: { needed: finished.length, returned: details.size },
+                ...(detailsRetry.length ? { details_retry_task_ids: detailsRetry } : {}), ...(detailsError ? { details_error: detailsError } : {}),
                 ...(websiteCheck ? dashboardCheck() : {}),
             }, rows.flatMap(row => resultResources(row.task_id, row.results ?? [])));
         }
