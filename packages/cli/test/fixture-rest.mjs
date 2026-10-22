@@ -18,6 +18,8 @@ export async function restFixture(state, req, res, url, body, send) {
   if (url.pathname === '/v1/catalog/health') { send(200, { models: models.map(model_id => ({ model_id, status: 'available' })) }); return true; }
   if (url.pathname.endsWith('/pricing-rules')) {
     state.ruleReads = (state.ruleReads || 0) + 1;
+    // Tests may hold an estimate here to open a race window.
+    await state.beforeRules?.();
     if (state.estimateFailure || state.quoteFailure) { send(state.quoteFailure || 503, {}); return true; }
     const makeRule = id => {
       const type = kind(id), uc = 13600 * state.multiplier;

@@ -20,7 +20,9 @@ A final task/workflow cap requires server-side reservation and settlement enforc
 Estimates use published full pricing rules and show public default prices, excluding
 personal discounts. Local approvals last up to 30 minutes; submission verifies fresh rules.
 Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
-the input and explicit user budget and obtain approval again. Supply missing billing
+the input and explicit user budget and obtain approval again. The refreshed quote
+replaces the old one and keeps its request ID: submit only the newest quote, which
+`quote_superseded` names. Supply missing billing
 usage with `--pricing-parameters JSON`; never invent unknown token counts or media
 lengths. Partial subtotals cannot check a budget. If rules are unavailable or change,
 pause and preserve the budget. Actual usage can change the final charge; final
