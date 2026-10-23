@@ -1,8 +1,8 @@
 // Copyright 2024 EvoLink AI. SPDX-License-Identifier: Apache-2.0
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { z } from 'zod';
-import { getPricingRules } from './pricing-rules-client.js';
-import { QuoteError, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
+import { PricingRulesError, getPricingRules, recentModelRules } from './pricing-rules-client.js';
+import { QuoteError, isUsageParameter, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
 import { prepareSeedanceInput } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
 import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
@@ -108,6 +108,47 @@ function variables(node, found) {
         variables(node.key, found);
     for (const child of node.args ?? [])
         variables(child, found);
+}
+function componentReads(c) {
+    const read = new Set();
+    for (const expr of [c.condition, c.quantity_rule, ...c.tiers.map(t => t.when)])
+        variables(expr, read);
+    return read;
+}
+/** How to give a usage value an estimate lacks, or why only the finished task knows it. */
+function usageHint(name, entry, declared) {
+    if (name === 'input_seconds' || name === 'first_input_video_seconds')
+        return 'pass the length of the input video or audio, in seconds, as media_seconds.';
+    if (name === 'source_output_seconds')
+        return `pass the length of the source task's output, in seconds, in pricing_parameters.${name}.`;
+    if (name === 'output_seconds' || name === 'duration_seconds') {
+        // As prepareQuoteParameters reads it: media_seconds stands for the billed length only where the model takes no duration.
+        return entry.spec && !entry.spec.params.duration && !declared.has('duration') && entry.spec.constraints?.outputDuration !== 'unknown'
+            ? 'pass the billed length, usually that of the input video or audio, in seconds, as media_seconds.'
+            : `the generated length is known only after the task runs; pass an expected length in pricing_parameters.${name} only when the user gives one.`;
+    }
+    if (name === 'output_fps')
+        return `pass the source video's frame rate in pricing_parameters.${name}, or, if a 30 fps output is acceptable, set model_params.max_fps to "30".`;
+    if (/search_count$/.test(name))
+        return `the number of searches is known only after the task runs; pass an expected count in pricing_parameters.${name} only when the user gives one.`;
+    return `pass measured or expected usage in pricing_parameters.${name}.`;
+}
+/** Token usage is known only once the task has run; name the published rates instead. */
+function tokenHelp(names, rule) {
+    const unit = (text) => text === '1k_tokens' ? '1K tokens' : text.replace(/_/g, ' ');
+    const rates = rule.components.filter(c => names.some(name => componentReads(c).has(name)))
+        .map(c => `${c.id} ${c.tiers.length ? 'from ' : ''}$${c.rate.usd} per ${unit(c.unit)}`);
+    return `${names.join(', ')}: billed by the tokens the task actually uses, known only after it runs${rates.length ? ` (public default rates: ${rates.join('; ')})` : ''}.`;
+}
+function helpLines(names, entry, rule, declared) {
+    const tokens = names.filter(name => /tokens$/.test(name));
+    return [...names.filter(name => !tokens.includes(name)).map(name => `${name}: ${usageHint(name, entry, declared)}`),
+        ...(tokens.length ? [tokenHelp(tokens, rule)] : [])];
+}
+/** Every usage value a rule can bill by, with how to give it; get_model lists them before any estimate. */
+export function billingUsageHelp(rule, entry) {
+    const declared = new Set((rule.parameters ?? []).map(p => p.name));
+    return helpLines([...declared].filter(name => isUsageParameter(entry.id, name)).sort(), entry, rule, declared);
 }
 function evaluate(node, params) {
     const nodes = node.args ?? [], at = (i) => evaluate(nodes[i], params), number = (i) => numeric(at(i));
@@ -235,10 +276,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
             if (error instanceof QuoteError && error.code === 'quote_usage_required' && error.param) {
                 missing.add(error.param);
                 // The evaluator stops at the first absent usage; name every one this component reads.
-                const read = new Set();
-                for (const expr of [c.condition, c.quantity_rule, ...c.tiers.map(t => t.when)])
-                    variables(expr, read);
-                for (const name of read)
+                for (const name of componentReads(c))
                     if (!Object.hasOwn(params, name))
                         missing.add(name);
             }
@@ -253,12 +291,19 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         request_hash: requestHash, total_uc: amounts.uc, expires_at: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
         fingerprint: quoteRequestHash(entry.id, { rules: economicRules(rule), parameters: params,
             exchange_rate_version: body.meta.exchange_rate_version, components, missing: [...missing].sort(), total_uc: amounts.uc }) };
-    const estimate = { status: missing.size ? components.length ? 'partial' : 'needs_input' : 'estimated', min_usd: Number(amounts.usd), max_usd: Number(amounts.usd),
-        min_credits: Number(amounts.credits), max_credits: Number(amounts.credits),
+    const status = missing.size ? components.length ? 'partial' : 'needs_input' : 'estimated';
+    const missingUsage = [...missing].sort(), usageHelp = helpLines(missingUsage, entry, rule, declared);
+    const estimate = { status,
+        // Nothing could be priced: a zero amount would read as free.
+        ...(status === 'needs_input' ? {} : { min_usd: Number(amounts.usd), max_usd: Number(amounts.usd),
+            min_credits: Number(amounts.credits), max_credits: Number(amounts.credits) }),
+        total_known: status === 'estimated',
         basis: ['Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
-        ...(missing.size ? { uncheckable_reason: 'usage' } : {}),
-        possible_extras: [...missing].map(name => `Additional charge depends on ${name}; supply expected or measured usage in pricing_parameters.`), notes: ['Public default prices; account discounts are not included.',
-            'Confirm the estimated cost before generation. Actual billed usage and final charges may differ.'] };
+        ...(missing.size ? { uncheckable_reason: 'usage', missing_usage: missingUsage, usage_help: usageHelp } : {}),
+        possible_extras: status === 'partial' ? usageHelp.map(line => `Additional charge depends on ${line}`) : [],
+        notes: ['Public default prices; account discounts are not included.', status === 'needs_input'
+                ? 'No total is quoted until the missing usage is known, and generate_* will not submit before then.'
+                : 'Confirm the estimated cost before generation. Actual billed usage and final charges may differ.'] };
     for (const p of rule.parameters ?? []) {
         const assumed = CONSERVATIVE_QUOTE_PARAMETERS[`${entry.id.toLowerCase()} ${p.name}`];
         if (assumed && options.pricingParameters?.[p.name] === undefined)
@@ -276,9 +321,57 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     }
     return { approval, estimate, amounts, components, parameters: params, rule };
 }
+/** While the platform limits pricing requests, an estimate may use rules read this recently; generation never does. */
+export const RECENT_RULES_MAX_AGE_MS = 10 * 60_000;
+/** The longest Retry-After a generation waits, once, before its fresh rules read gives up. */
+export const GENERATION_RULES_RETRY_MAX_SECONDS = 5;
+const limited = (error) => error instanceof PricingRulesError && error.code === 'rate_limit_exceeded';
+function pause(ms, signal) {
+    return new Promise(resolve => {
+        const timer = setTimeout(done, ms);
+        function done() { clearTimeout(timer); signal?.removeEventListener('abort', done); resolve(); }
+        signal?.addEventListener('abort', done, { once: true });
+        if (signal?.aborted)
+            done();
+    });
+}
+async function generationRules(model, signal) {
+    try {
+        return (await getPricingRules({ model, view: 'full' }, { fresh: true })).body;
+    }
+    catch (error) {
+        const wait = limited(error) ? error.retryAfter ?? 1 : undefined;
+        if (wait === undefined || wait > GENERATION_RULES_RETRY_MAX_SECONDS || signal?.aborted)
+            throw error;
+        await pause(wait * 1000, signal);
+        if (signal?.aborted)
+            throw error;
+        return (await getPricingRules({ model, view: 'full' }, { fresh: true })).body;
+    }
+}
+/**
+ * Generation reads the rules fresh. A hosted estimate (`reuseRules`) reuses them until their fresh_until and, while
+ * the platform limits requests, may use rules read in the last 10 minutes; any other estimate reads them fresh. An
+ * approval from cached or recent rules can never submit at a changed price: checkRulesApproval refuses it.
+ */
 export async function createRulesEstimate(entry, input, options = {}) {
-    const { body } = await getPricingRules({ model: entry.id.toLowerCase(), view: 'full' }, { fresh: true });
-    return calculateRulesEstimate(body, entry, input, options);
+    const model = entry.id.toLowerCase();
+    if (options.purpose === 'generation')
+        return calculateRulesEstimate(await generationRules(model, options.signal), entry, input, options);
+    if (!options.reuseRules)
+        return calculateRulesEstimate((await getPricingRules({ model, view: 'full' }, { fresh: true })).body, entry, input, options);
+    try {
+        const { body } = await getPricingRules({ model, view: 'full' }, { reuseUntilFresh: true });
+        return calculateRulesEstimate(body, entry, input, options);
+    }
+    catch (error) {
+        const recent = limited(error) ? recentModelRules(model, RECENT_RULES_MAX_AGE_MS) : undefined;
+        if (!recent)
+            throw error;
+        const result = calculateRulesEstimate(recent.body, entry, input, options), readAt = new Date(recent.fetchedAt).toISOString();
+        result.estimate.notes.push(`The platform is limiting pricing requests right now, so this estimate uses the published rules read at ${readAt}. generate_* reads the current rules again before submitting and asks for a new approval if the price changed.`);
+        return { ...result, rules_read_at: readAt };
+    }
 }
 export function checkRulesApproval(approval, fresh) {
     if (Date.parse(approval.expires_at) <= Date.now())

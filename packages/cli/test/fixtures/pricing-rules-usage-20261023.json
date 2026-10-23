@@ -1,0 +1,2162 @@
+{
+ "source": "GET /v1/catalog/pricing-rules?view=full, 2026-10-23T12:47Z (public default rules)",
+ "meta": {
+  "schema_version": "2",
+  "catalog_version": "cat_0b98466f2a60d6e6d92e910a",
+  "pricing_version": "prc_489b27f5e3133e6960d91da7",
+  "price_scope": "public_default",
+  "currency": "USD",
+  "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+  "updated_at": "2026-10-23T12:47:46.001282232Z",
+  "fresh_until": "2026-10-23T12:52:00Z"
+ },
+ "models": [
+  {
+   "model_id": "doubao-seedream-4.5",
+   "product_id": "seedream-4-5",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 1,
+   "policy_checksum": "4f1da74932d76ea5de66516e6107a78ee9b26ccf533ce16aa40c7a1466b5aa3d",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "image_count",
+     "type": "integer",
+     "minimum": "1",
+     "maximum": "15",
+     "default": "1"
+    }
+   ],
+   "components": [
+    {
+     "id": "output_image",
+     "role": "output_image",
+     "dimension": "image_output",
+     "sku_id": "1314",
+     "unit": "image",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "20400",
+      "credits": "2.04",
+      "cny": "0.204",
+      "usd": "0.03"
+     },
+     "minimum_charge": {
+      "uc": "20400",
+      "credits": "2.04",
+      "cny": "0.204",
+      "usd": "0.03"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-07-25T14:24:58.212Z",
+     "quantity_rule": {
+      "op": "variable",
+      "name": "image_count"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-3-pro-image-preview",
+   "product_id": "gemini-3-pro-image",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 1,
+   "policy_checksum": "e35125d960c90c67d98c081670ef5a2dcf7772c3346ba29fb3aa3b998aefc38a",
+   "policy_source": "published",
+   "aliases": [
+    "gemini-3-pro-image"
+   ],
+   "parameters": [
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "standard",
+      "hd",
+      "1K",
+      "2K",
+      "4K"
+     ],
+     "default": "2K"
+    },
+    {
+     "name": "input_images",
+     "type": "integer",
+     "minimum": "0",
+     "maximum": "14",
+     "default": "0"
+    },
+    {
+     "name": "search_count",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input_image",
+     "role": "input_image",
+     "dimension": "image_input",
+     "sku_id": "1501",
+     "unit": "image",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "710",
+      "credits": "0.071",
+      "cny": "0.0071",
+      "usd": "0.00104412"
+     },
+     "minimum_charge": {
+      "uc": "710",
+      "credits": "0.071",
+      "cny": "0.0071",
+      "usd": "0.00104412"
+     },
+     "billing_rule": "per_image",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_images"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "variable",
+      "name": "input_images"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    },
+    {
+     "id": "output_image_2k",
+     "role": "output_image",
+     "label_key": "output_2k",
+     "dimension": "image_output",
+     "sku_id": "1500",
+     "unit": "image",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "85156",
+      "credits": "8.5156",
+      "cny": "0.85156",
+      "usd": "0.12522941"
+     },
+     "minimum_charge": {
+      "uc": "85156",
+      "credits": "8.5156",
+      "cny": "0.85156",
+      "usd": "0.12522941"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "or",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "quality"
+         },
+         {
+          "op": "constant",
+          "value": "standard"
+         }
+        ]
+       },
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "quality"
+         },
+         {
+          "op": "constant",
+          "value": "1K"
+         }
+        ]
+       },
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "quality"
+         },
+         {
+          "op": "constant",
+          "value": "2K"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    },
+    {
+     "id": "output_image_4k",
+     "role": "output_image",
+     "label_key": "output_4k",
+     "dimension": "image_output",
+     "sku_id": "1502",
+     "unit": "image",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "152064",
+      "credits": "15.2064",
+      "cny": "1.52064",
+      "usd": "0.22362353"
+     },
+     "minimum_charge": {
+      "uc": "152064",
+      "credits": "15.2064",
+      "cny": "1.52064",
+      "usd": "0.22362353"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "or",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "quality"
+         },
+         {
+          "op": "constant",
+          "value": "hd"
+         }
+        ]
+       },
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "quality"
+         },
+         {
+          "op": "constant",
+          "value": "4K"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    },
+    {
+     "id": "web_search",
+     "role": "web_search",
+     "label_key": "web_search",
+     "dimension": "search",
+     "sku_id": "1506",
+     "unit": "search",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "8871",
+      "credits": "0.8871",
+      "cny": "0.08871",
+      "usd": "0.01304559"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "search_count"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "variable",
+      "name": "search_count"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    },
+    {
+     "id": "input_text",
+     "role": "input_text",
+     "label_key": "input_text",
+     "dimension": "input_token",
+     "sku_id": "1496",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1268",
+      "credits": "0.1268",
+      "cny": "0.01268",
+      "usd": "0.00186471"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "output_text",
+     "role": "output_text",
+     "label_key": "output_text",
+     "dimension": "output_token",
+     "sku_id": "1497",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7604",
+      "credits": "0.7604",
+      "cny": "0.07604",
+      "usd": "0.01118235"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.192Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gpt-image-2",
+   "product_id": "gpt-image-2",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "4bd2b967255966a6a585c997cdc97ef1fb4af3ef82fda9856117c6e4aaf9cbcd",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "image_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "image_input",
+     "role": "image_input",
+     "label_key": "image_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4110",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "4896",
+      "credits": "0.4896",
+      "cny": "0.04896",
+      "usd": "0.0072"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-08-25T22:31:41.05Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_cached_input",
+     "role": "image_cached_input",
+     "label_key": "image_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4111",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1224",
+      "credits": "0.1224",
+      "cny": "0.01224",
+      "usd": "0.0018"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-08-25T22:31:41.05Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_output",
+     "role": "image_output",
+     "label_key": "image_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4112",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "18360",
+      "credits": "1.836",
+      "cny": "0.1836",
+      "usd": "0.027"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-08-25T22:31:41.05Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_input",
+     "role": "text_input",
+     "label_key": "text_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4113",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "3060",
+      "credits": "0.306",
+      "cny": "0.0306",
+      "usd": "0.0045"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-08-25T22:31:41.05Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_cached_input",
+     "role": "text_cached_input",
+     "label_key": "text_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4114",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "765",
+      "credits": "0.0765",
+      "cny": "0.00765",
+      "usd": "0.001125"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-08-25T22:31:41.05Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "seedance-2.0-mini-reference-to-video",
+   "product_id": "seedance-2-0-mini",
+   "operation": "reference_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 2,
+   "policy_checksum": "bf90651080a2bce1c64f2e8457a78e23368b83bc53552ae6ef057a50d1aa6084",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "duration_seconds",
+     "type": "integer",
+     "minimum": "4",
+     "maximum": "15",
+     "default": "5"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "480p",
+      "720p"
+     ],
+     "default": "720p"
+    },
+    {
+     "name": "input_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "content_filter",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "label_key": "output_plus_billable_input_seconds",
+     "dimension": "input_plus_output_second",
+     "sku_id": "4009",
+     "unit": "input_plus_output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "27000",
+      "credits": "2.7",
+      "cny": "0.27",
+      "usd": "0.03970588"
+     },
+     "minimum_charge": {
+      "uc": "50004",
+      "credits": "5.0004",
+      "cny": "0.50004",
+      "usd": "0.07353529"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-08-07T15:52:22Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "divide",
+        "args": [
+         {
+          "op": "ceil",
+          "args": [
+           {
+            "op": "multiply",
+            "args": [
+             {
+              "op": "add",
+              "args": [
+               {
+                "op": "variable",
+                "name": "duration_seconds"
+               },
+               {
+                "op": "if",
+                "args": [
+                 {
+                  "op": "gt",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "0"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "max",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "variable",
+                    "name": "duration_seconds"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "constant",
+                  "value": "0"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "constant",
+              "value": "10"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "10"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "gt",
+          "args": [
+           {
+            "op": "variable",
+            "name": "input_seconds"
+           },
+           {
+            "op": "constant",
+            "value": "0"
+           }
+          ]
+         },
+         {
+          "op": "lookup",
+          "key": {
+           "op": "variable",
+           "name": "quality"
+          },
+          "values": {
+           "480p": "0.284",
+           "720p": "0.609"
+          }
+         },
+         {
+          "op": "lookup",
+          "key": {
+           "op": "variable",
+           "name": "quality"
+          },
+          "values": {
+           "480p": "0.465",
+           "720p": "1"
+          }
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "variable",
+          "name": "content_filter"
+         },
+         {
+          "op": "constant",
+          "value": "1"
+         },
+         {
+          "op": "constant",
+          "value": "1.1"
+         }
+        ]
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "seedance-2.5-draft-to-video",
+   "product_id": "seedance-2-5",
+   "operation": "draft_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 2,
+   "policy_checksum": "416d4b23ce609cbb5444e46c15c50c31188e4e6ddb7cc621d27ee70b9dc5cbf5",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "source_output_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "default": "5"
+    },
+    {
+     "name": "input_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "30",
+     "default": "0"
+    },
+    {
+     "name": "content_filter",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "label_key": "output_plus_billable_input_seconds",
+     "dimension": "input_plus_output_second",
+     "sku_id": "4016",
+     "unit": "input_plus_output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "200900",
+      "credits": "20.09",
+      "cny": "2.009",
+      "usd": "0.29544118"
+     },
+     "minimum_charge": {
+      "uc": "2009000",
+      "credits": "200.9",
+      "cny": "20.09",
+      "usd": "2.95441176"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-09-22T20:15:25.477Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "divide",
+        "args": [
+         {
+          "op": "ceil",
+          "args": [
+           {
+            "op": "multiply",
+            "args": [
+             {
+              "op": "add",
+              "args": [
+               {
+                "op": "clamp",
+                "args": [
+                 {
+                  "op": "variable",
+                  "name": "source_output_seconds"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "4"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "30"
+                 }
+                ]
+               },
+               {
+                "op": "if",
+                "args": [
+                 {
+                  "op": "gt",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "0"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "max",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "clamp",
+                    "args": [
+                     {
+                      "op": "variable",
+                      "name": "source_output_seconds"
+                     },
+                     {
+                      "op": "constant",
+                      "value": "4"
+                     },
+                     {
+                      "op": "constant",
+                      "value": "30"
+                     }
+                    ]
+                   }
+                  ]
+                 },
+                 {
+                  "op": "constant",
+                  "value": "0"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "constant",
+              "value": "10"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "10"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "gt",
+          "args": [
+           {
+            "op": "variable",
+            "name": "input_seconds"
+           },
+           {
+            "op": "constant",
+            "value": "0"
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "1.52"
+         },
+         {
+          "op": "constant",
+          "value": "2.5"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "variable",
+          "name": "content_filter"
+         },
+         {
+          "op": "constant",
+          "value": "1"
+         },
+         {
+          "op": "constant",
+          "value": "1.1"
+         }
+        ]
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "seedance-2.5-text-to-video",
+   "product_id": "seedance-2-5",
+   "operation": "text_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 2,
+   "policy_checksum": "5e4d275766b8444f81ddcc07c75d9a1a5ce3ab3aa910a7c7fe73034350c23e97",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "duration",
+     "type": "integer",
+     "minimum": "-1",
+     "maximum": "30",
+     "default": "5"
+    },
+    {
+     "name": "duration_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "default": "30"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "480p",
+      "720p",
+      "1080p"
+     ],
+     "default": "720p"
+    },
+    {
+     "name": "search_count",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "content_filter",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "label_key": "output_seconds",
+     "dimension": "output_second",
+     "sku_id": "4011",
+     "unit": "output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "200900",
+      "credits": "20.09",
+      "cny": "2.009",
+      "usd": "0.29544118"
+     },
+     "minimum_charge": {
+      "uc": "373674",
+      "credits": "37.3674",
+      "cny": "3.73674",
+      "usd": "0.54952059"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-09-16T07:41:04.814Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "divide",
+        "args": [
+         {
+          "op": "ceil",
+          "args": [
+           {
+            "op": "multiply",
+            "args": [
+             {
+              "op": "if",
+              "args": [
+               {
+                "op": "eq",
+                "args": [
+                 {
+                  "op": "variable",
+                  "name": "duration"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "-1"
+                 }
+                ]
+               },
+               {
+                "op": "clamp",
+                "args": [
+                 {
+                  "op": "variable",
+                  "name": "duration_seconds"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "4"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "30"
+                 }
+                ]
+               },
+               {
+                "op": "clamp",
+                "args": [
+                 {
+                  "op": "variable",
+                  "name": "duration"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "4"
+                 },
+                 {
+                  "op": "constant",
+                  "value": "30"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "constant",
+              "value": "10"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "10"
+         }
+        ]
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "quality"
+        },
+        "values": {
+         "1080p": "2.5",
+         "480p": "0.465",
+         "720p": "1"
+        }
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "variable",
+          "name": "content_filter"
+         },
+         {
+          "op": "constant",
+          "value": "1"
+         },
+         {
+          "op": "constant",
+          "value": "1.1"
+         }
+        ]
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    },
+    {
+     "id": "web_search",
+     "role": "web_search",
+     "label_key": "web_search_per_search",
+     "dimension": "search",
+     "sku_id": "4006",
+     "unit": "search",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "400",
+      "credits": "0.04",
+      "cny": "0.004",
+      "usd": "0.00058824"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-16T17:49:03.571Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "search_count"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "variable",
+      "name": "search_count"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "seedance-2.5-video-edit",
+   "product_id": "seedance-2-5",
+   "operation": "video_edit",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 2,
+   "policy_checksum": "6dbab462d0914b22174e57d7a95b8575e46505f506651d0aa55b6911f5aa50f9",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "duration_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "first_input_video_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "30",
+     "default": "0"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "480p",
+      "720p",
+      "1080p"
+     ],
+     "default": "720p"
+    },
+    {
+     "name": "input_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "30",
+     "default": "30"
+    },
+    {
+     "name": "content_filter",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "label_key": "output_plus_billable_input_seconds",
+     "dimension": "input_plus_output_second",
+     "sku_id": "4014",
+     "unit": "input_plus_output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "200900",
+      "credits": "20.09",
+      "cny": "2.009",
+      "usd": "0.29544118"
+     },
+     "minimum_charge": {
+      "uc": "373674",
+      "credits": "37.3674",
+      "cny": "3.73674",
+      "usd": "0.54952059"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-09-16T07:41:04.814Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "divide",
+        "args": [
+         {
+          "op": "ceil",
+          "args": [
+           {
+            "op": "multiply",
+            "args": [
+             {
+              "op": "add",
+              "args": [
+               {
+                "op": "if",
+                "args": [
+                 {
+                  "op": "gt",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "duration_seconds"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "0"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "clamp",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "duration_seconds"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "4"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "30"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "if",
+                  "args": [
+                   {
+                    "op": "gt",
+                    "args": [
+                     {
+                      "op": "variable",
+                      "name": "first_input_video_seconds"
+                     },
+                     {
+                      "op": "constant",
+                      "value": "0"
+                     }
+                    ]
+                   },
+                   {
+                    "op": "min",
+                    "args": [
+                     {
+                      "op": "variable",
+                      "name": "first_input_video_seconds"
+                     },
+                     {
+                      "op": "constant",
+                      "value": "30"
+                     }
+                    ]
+                   },
+                   {
+                    "op": "constant",
+                    "value": "30"
+                   }
+                  ]
+                 }
+                ]
+               },
+               {
+                "op": "if",
+                "args": [
+                 {
+                  "op": "gt",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "constant",
+                    "value": "0"
+                   }
+                  ]
+                 },
+                 {
+                  "op": "max",
+                  "args": [
+                   {
+                    "op": "variable",
+                    "name": "input_seconds"
+                   },
+                   {
+                    "op": "if",
+                    "args": [
+                     {
+                      "op": "gt",
+                      "args": [
+                       {
+                        "op": "variable",
+                        "name": "duration_seconds"
+                       },
+                       {
+                        "op": "constant",
+                        "value": "0"
+                       }
+                      ]
+                     },
+                     {
+                      "op": "clamp",
+                      "args": [
+                       {
+                        "op": "variable",
+                        "name": "duration_seconds"
+                       },
+                       {
+                        "op": "constant",
+                        "value": "4"
+                       },
+                       {
+                        "op": "constant",
+                        "value": "30"
+                       }
+                      ]
+                     },
+                     {
+                      "op": "if",
+                      "args": [
+                       {
+                        "op": "gt",
+                        "args": [
+                         {
+                          "op": "variable",
+                          "name": "first_input_video_seconds"
+                         },
+                         {
+                          "op": "constant",
+                          "value": "0"
+                         }
+                        ]
+                       },
+                       {
+                        "op": "min",
+                        "args": [
+                         {
+                          "op": "variable",
+                          "name": "first_input_video_seconds"
+                         },
+                         {
+                          "op": "constant",
+                          "value": "30"
+                         }
+                        ]
+                       },
+                       {
+                        "op": "constant",
+                        "value": "30"
+                       }
+                      ]
+                     }
+                    ]
+                   }
+                  ]
+                 },
+                 {
+                  "op": "constant",
+                  "value": "0"
+                 }
+                ]
+               }
+              ]
+             },
+             {
+              "op": "constant",
+              "value": "10"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "10"
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "gt",
+          "args": [
+           {
+            "op": "variable",
+            "name": "input_seconds"
+           },
+           {
+            "op": "constant",
+            "value": "0"
+           }
+          ]
+         },
+         {
+          "op": "lookup",
+          "key": {
+           "op": "variable",
+           "name": "quality"
+          },
+          "values": {
+           "1080p": "1.52",
+           "480p": "0.284",
+           "720p": "0.609"
+          }
+         },
+         {
+          "op": "lookup",
+          "key": {
+           "op": "variable",
+           "name": "quality"
+          },
+          "values": {
+           "1080p": "2.5",
+           "480p": "0.465",
+           "720p": "1"
+          }
+         }
+        ]
+       },
+       {
+        "op": "if",
+        "args": [
+         {
+          "op": "variable",
+          "name": "content_filter"
+         },
+         {
+          "op": "constant",
+          "value": "1"
+         },
+         {
+          "op": "constant",
+          "value": "1.1"
+         }
+        ]
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "tencent-video-upscale",
+   "product_id": "tencent-video-upscale",
+   "operation": "video_upscale",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 1,
+   "policy_checksum": "d46eede4f8425d35b6ff0d29252b10c95479ff7ba5b26b49500f9f996faf9838",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "720p",
+      "1080p",
+      "2k",
+      "4k"
+     ],
+     "default": "1080p"
+    },
+    {
+     "name": "output_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "61"
+    },
+    {
+     "name": "output_fps",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "120.05",
+     "default": "30"
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_second",
+     "sku_id": "3107",
+     "unit": "output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "5440",
+      "credits": "0.544",
+      "cny": "0.0544",
+      "usd": "0.008"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-10-04T19:17:23.652Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "max",
+        "args": [
+         {
+          "op": "ceil",
+          "args": [
+           {
+            "op": "subtract",
+            "args": [
+             {
+              "op": "variable",
+              "name": "output_seconds"
+             },
+             {
+              "op": "constant",
+              "value": "0.000001"
+             }
+            ]
+           }
+          ]
+         },
+         {
+          "op": "constant",
+          "value": "1"
+         }
+        ]
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "quality"
+        },
+        "values": {
+         "1080p": "1",
+         "2k": "1.75",
+         "4k": "4",
+         "720p": "0.4375"
+        }
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": [
+      {
+       "when": {
+        "op": "lte",
+        "args": [
+         {
+          "op": "variable",
+          "name": "output_fps"
+         },
+         {
+          "op": "constant",
+          "value": "30.05"
+         }
+        ]
+       },
+       "multiplier": "1",
+       "sku_id": "3107",
+       "rate": {
+        "uc": "5440",
+        "credits": "0.544",
+        "cny": "0.0544",
+        "usd": "0.008"
+       },
+       "minimum_charge": {
+        "uc": "0",
+        "credits": "0",
+        "cny": "0",
+        "usd": "0"
+       },
+       "billing_rule": "per_second",
+       "pricing_status": "available",
+       "effective_at": "2026-10-04T19:17:23.652Z"
+      },
+      {
+       "when": {
+        "op": "and",
+        "args": [
+         {
+          "op": "gt",
+          "args": [
+           {
+            "op": "variable",
+            "name": "output_fps"
+           },
+           {
+            "op": "constant",
+            "value": "30.05"
+           }
+          ]
+         },
+         {
+          "op": "lte",
+          "args": [
+           {
+            "op": "variable",
+            "name": "output_fps"
+           },
+           {
+            "op": "constant",
+            "value": "60.05"
+           }
+          ]
+         }
+        ]
+       },
+       "multiplier": "2",
+       "sku_id": "3107",
+       "rate": {
+        "uc": "10880",
+        "credits": "1.088",
+        "cny": "0.1088",
+        "usd": "0.016"
+       },
+       "minimum_charge": {
+        "uc": "0",
+        "credits": "0",
+        "cny": "0",
+        "usd": "0"
+       },
+       "billing_rule": "per_second",
+       "pricing_status": "available",
+       "effective_at": "2026-10-04T19:17:23.652Z"
+      },
+      {
+       "when": {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "output_fps"
+         },
+         {
+          "op": "constant",
+          "value": "60.05"
+         }
+        ]
+       },
+       "multiplier": "4",
+       "sku_id": "3107",
+       "rate": {
+        "uc": "21760",
+        "credits": "2.176",
+        "cny": "0.2176",
+        "usd": "0.032"
+       },
+       "minimum_charge": {
+        "uc": "0",
+        "credits": "0",
+        "cny": "0",
+        "usd": "0"
+       },
+       "billing_rule": "per_second",
+       "pricing_status": "available",
+       "effective_at": "2026-10-04T19:17:23.652Z"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "model_id": "wan2.7-video-edit",
+   "product_id": "wan-2-7",
+   "operation": "video_edit",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_then_actual",
+   "policy_version": 2,
+   "policy_checksum": "b3ba2a91634455e52805d51bd0381e7191e84989c63ccb002d92b84f3e3c209a",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "default": "10"
+    },
+    {
+     "name": "output_seconds",
+     "type": "decimal",
+     "minimum": "0",
+     "maximum": "10",
+     "default": "0"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "720p",
+      "1080p"
+     ],
+     "default": "720p"
+    }
+   ],
+   "components": [
+    {
+     "id": "video_input_output",
+     "role": "video_input_output",
+     "dimension": "input_plus_output_second",
+     "sku_id": "1353",
+     "unit": "input_plus_output_second",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54400",
+      "credits": "5.44",
+      "cny": "0.544",
+      "usd": "0.08"
+     },
+     "minimum_charge": {
+      "uc": "108800",
+      "credits": "10.88",
+      "cny": "1.088",
+      "usd": "0.16"
+     },
+     "billing_rule": "per_second",
+     "pricing_status": "available",
+     "effective_at": "2026-10-08T20:40:06.504Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "add",
+        "args": [
+         {
+          "op": "min",
+          "args": [
+           {
+            "op": "variable",
+            "name": "input_seconds"
+           },
+           {
+            "op": "constant",
+            "value": "10"
+           }
+          ]
+         },
+         {
+          "op": "if",
+          "args": [
+           {
+            "op": "eq",
+            "args": [
+             {
+              "op": "variable",
+              "name": "output_seconds"
+             },
+             {
+              "op": "constant",
+              "value": "0"
+             }
+            ]
+           },
+           {
+            "op": "min",
+            "args": [
+             {
+              "op": "variable",
+              "name": "input_seconds"
+             },
+             {
+              "op": "constant",
+              "value": "10"
+             }
+            ]
+           },
+           {
+            "op": "max",
+            "args": [
+             {
+              "op": "variable",
+              "name": "output_seconds"
+             },
+             {
+              "op": "constant",
+              "value": "2"
+             }
+            ]
+           }
+          ]
+         }
+        ]
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "quality"
+        },
+        "values": {
+         "1080p": "1.5",
+         "720p": "1"
+        }
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  }
+ ]
+}

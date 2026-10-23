@@ -10,7 +10,7 @@ import { ApprovedRulesEstimate, createRulesEstimate, checkRulesApproval, rulesBu
 import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
-import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failure, money, ok, progressReporter, usdOf } from './shared.js';
+import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, errorResult, failure, money, ok, progressReporter, retryText, usdOf } from './shared.js';
 import { RESULT_DELIVERY_GUIDANCE, TERMINAL_STATUSES, describeTask, waitForTask } from './task-format.js';
 import { PAID_GENERATION_GUIDANCE } from '../tool-guidance.js';
 import { currentRequestCredentials } from '../request-context.js';
@@ -51,7 +51,7 @@ function rangeText(estimate) {
 /** Why max_cost_usd could not be checked, and what the assistant can do next. */
 function uncheckedCap(estimate, pricingWarning) {
     if (estimate.uncheckable_reason === 'usage')
-        return ['published pricing rules need additional billing usage to calculate a complete estimate', `Provide the missing expected or measured usage in pricing_parameters. ${estimate.possible_extras.join(' ')}`];
+        return ['published pricing rules need additional billing usage to calculate a complete estimate', `Provide the missing expected or measured usage. ${(estimate.usage_help ?? estimate.possible_extras).join(' ')}`];
     if (estimate.uncheckable_reason === 'output_duration') {
         return ['the generated output duration is not fixed, so the declared seconds cannot establish an upper bound', 'Use an explicit duration if the model accepts it; otherwise ask the user whether to proceed without a cap.'];
     }
@@ -165,7 +165,8 @@ function registerGenerate(server, config, kind) {
             // media_seconds only prices the request; the body below is built from input alone.
             if (args.account_quote)
                 throw new QuoteError('quote_refresh_required', 'Refresh the legacy account estimate with estimate_cost and obtain user approval.');
-            const rulesEstimate = await createRulesEstimate(entry, effectiveInput, { mediaSeconds: args.media_seconds, pricingParameters: args.pricing_parameters });
+            const rulesEstimate = await createRulesEstimate(entry, effectiveInput, { mediaSeconds: args.media_seconds, pricingParameters: args.pricing_parameters,
+                purpose: 'generation', signal: extra.signal });
             if (args.pricing_quote)
                 checkRulesApproval(args.pricing_quote, rulesEstimate);
             const estimate = rulesEstimate.estimate;
@@ -186,8 +187,14 @@ function registerGenerate(server, config, kind) {
                     });
                 }
             }
-            if (estimate.status === 'needs_input')
-                throw new QuoteError('quote_usage_required', 'No charge can be estimated yet; supply the missing pricing usage before submission.');
+            if (estimate.status === 'needs_input') {
+                return failure([`No total can be estimated for ${entry.id} yet, so nothing was submitted or charged. The total depends on:`,
+                    ...(estimate.usage_help ?? []).map(line => `- ${line}`),
+                    'Estimate again with this usage and get the user\'s approval before generating.'].join('\n'), {
+                    error: { category: 'estimate_unavailable', code: 'quote_usage_required' },
+                    missing_usage: estimate.missing_usage, usage_help: estimate.usage_help, charged: 'no', submission_state: 'not_submitted'
+                });
+            }
             clientRequestId = args.client_request_id ?? newRunId();
             const body = { ...effectiveInput, model: entry.id };
             const submitted = await submitTask(config, {
@@ -269,7 +276,12 @@ function registerGenerate(server, config, kind) {
         }
         catch (error) {
             if (error instanceof PricingRulesError)
-                return failure('The pricing rules could not be verified. Nothing was submitted or charged.', { error: { category: 'estimate_unavailable', code: error.code }, charged: 'no', submission_state: 'not_submitted' });
+                return failure(error.code === 'rate_limit_exceeded'
+                    ? `The platform is limiting pricing requests right now, so the price could not be checked and nothing was submitted or charged. Try again in ${retryText(error.retryAfter)}.`
+                    : 'The pricing rules could not be verified. Nothing was submitted or charged.', {
+                    error: { category: 'estimate_unavailable', code: error.code, ...(error.retryAfter !== undefined ? { retry_after_seconds: error.retryAfter } : {}) },
+                    charged: 'no', submission_state: 'not_submitted'
+                });
             if (error instanceof QuoteError)
                 return failure(`${error.message} Nothing was submitted or charged.`, { error: { category: 'estimate_unavailable', code: error.code }, charged: 'no', submission_state: 'not_submitted' });
             // clientRequestId is set right before the submit, so it also tells whether a request may have gone out.

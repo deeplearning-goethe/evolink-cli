@@ -14,7 +14,7 @@ export function registerPlatformOperations(registry, config) {
     registerSearchModels(registry, config);
     registerDiscovery(registry, config);
     registerGetModel(registry, config);
-    registerPricingRules(registry);
+    registerPricingRules(registry, config);
     registerEstimateCost(registry, config);
     registerGenerateTools(registry, config);
     registerGetTask(registry, config);

@@ -12,7 +12,8 @@ import { prepareSeedanceInput } from '../services/seedance-input.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
 import { currentCredentialMode } from '../request-context.js';
-import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, READ_ONLY, dailyLimitOf, errorResult, failure, money, ok } from './shared.js';
+import { MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, READ_ONLY, dailyLimitOf, errorResult, failure, money, ok, retryText } from './shared.js';
+import { pricingCallLimitReached } from '../services/pricing-call-limit.js';
 export function registerEstimateCost(server, config) {
     server.registerTool('estimate_cost', {
         title: 'Estimate cost',
@@ -31,6 +32,12 @@ export function registerEstimateCost(server, config) {
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
     }, async ({ model, input, media_seconds: mediaSeconds, pricing_source: pricingSource, pricing_parameters: pricingParameters }) => {
+        const over = pricingCallLimitReached('estimate_cost');
+        if (over)
+            return failure(`This account already made ${over.limit} estimate_cost calls in the last minute, the most allowed. Wait ${retryText(over.retryAfterSeconds)}, then estimate again. Nothing was submitted or charged.`, {
+                error: { category: 'rate_limited', code: 'pricing_calls_per_minute', retry_after_seconds: over.retryAfterSeconds },
+                pricing_source: pricingSource, submission_allowed: false, final_budget_enforced: false, charged: 'no'
+            });
         try {
             const { catalog, entry } = await resolveModel(model, config, { fresh: true, allowStale: false, skipPricing: true });
             if (!entry) {
@@ -44,7 +51,7 @@ export function registerEstimateCost(server, config) {
             validation?.warnings.push(...prepared.warnings);
             if (validation?.errors.length)
                 return failure('The generation input is invalid; no estimate was created.', { input_valid: false, problems: validation.errors, error: { category: 'invalid_request' }, charged: 'no' });
-            const rulesEstimate = await createRulesEstimate(entry, values, { mediaSeconds, pricingParameters });
+            const rulesEstimate = await createRulesEstimate(entry, values, { mediaSeconds, pricingParameters, reuseRules: config.reusePricingRules === true });
             const estimate = rulesEstimate.estimate;
             const lines = [`Estimate for ${entry.id} (${entry.kind}); nothing was submitted or charged.`];
             if (!validation) {
@@ -68,7 +75,7 @@ export function registerEstimateCost(server, config) {
             else if (estimate.status === 'token_billed')
                 lines.push('Cost: billed by tokens used; it is only known after the task runs.');
             else if (estimate.status === 'needs_input')
-                lines.push('Cost: cannot estimate yet; see the note below.');
+                lines.push('Cost: cannot estimate yet. The total depends on usage this request does not give:', ...(estimate.usage_help ?? []).map(line => `- ${line}`));
             else if (estimate.uncheckable_reason === 'output_duration')
                 lines.push('Cost: the output duration is unknown, so there is no total or upper bound to quote.');
             else
@@ -79,19 +86,23 @@ export function registerEstimateCost(server, config) {
                 lines.push('May also charge:', ...estimate.possible_extras.map(line => `- ${line}`));
             for (const note of estimate.notes)
                 lines.push(`Note: ${note}`);
+            // Without any priced component there is no total to show or approve: no amounts and no approval record.
+            const priced = estimate.status !== 'needs_input';
             const structured = {
                 model: entry.id,
                 type: entry.kind,
                 pricing_scope: 'public_default',
                 pricing_source: 'pricing_rules',
-                pricing_quote: rulesEstimate.approval,
-                amounts: rulesEstimate.amounts,
+                ...(priced ? { pricing_quote: rulesEstimate.approval, amounts: rulesEstimate.amounts } : { submission_allowed: false }),
+                total_known: estimate.total_known === true,
+                ...(estimate.missing_usage ? { missing_usage: estimate.missing_usage } : {}),
                 components: rulesEstimate.components,
                 pricing_parameters: rulesEstimate.parameters,
                 policy_version: rulesEstimate.rule.policy_version,
                 policy_checksum: rulesEstimate.rule.policy_checksum,
                 settlement_basis: rulesEstimate.rule.settlement_basis,
-                expires_at: rulesEstimate.approval.expires_at,
+                ...(priced ? { expires_at: rulesEstimate.approval.expires_at } : {}),
+                ...('rules_read_at' in rulesEstimate ? { rules_read_at: rulesEstimate.rules_read_at } : {}),
                 final_budget_enforced: false,
                 input_valid: validation ? validation.errors.length === 0 : null,
                 problems: validation?.errors ?? [],
@@ -149,13 +160,18 @@ export function registerEstimateCost(server, config) {
             catch {
                 lines.push('Balance: could not be read right now.');
             }
-            lines.push(`Estimate valid until ${rulesEstimate.approval.expires_at}.`, 'Public default estimate; account discounts are not included. Confirm this estimated cost before generation. Final charges depend on actual usage.');
+            if (priced)
+                lines.push(`Estimate valid until ${rulesEstimate.approval.expires_at}.`, 'Public default estimate; account discounts are not included. Confirm this estimated cost before generation. Final charges depend on actual usage.');
+            else
+                lines.push('No total or approval record was issued. Estimate again with the missing usage before asking the user to approve a generation.');
             return ok(lines.join('\n'), structured);
         }
         catch (error) {
             if (error instanceof PricingRulesError)
-                return failure('The model pricing rules could not be verified. No estimate or generation was created.', {
-                    error: { category: 'estimate_unavailable', code: error.code, status: error.status }, pricing_source: pricingSource,
+                return failure(error.code === 'rate_limit_exceeded'
+                    ? `The platform is limiting pricing requests right now, so no estimate was created. Try again in ${retryText(error.retryAfter)}. Nothing was submitted or charged.`
+                    : 'The model pricing rules could not be verified. No estimate or generation was created.', {
+                    error: { category: 'estimate_unavailable', code: error.code, status: error.status, ...(error.retryAfter !== undefined ? { retry_after_seconds: error.retryAfter } : {}) }, pricing_source: pricingSource,
                     submission_allowed: false, final_budget_enforced: false, charged: 'no'
                 });
             if (error instanceof QuoteError)
