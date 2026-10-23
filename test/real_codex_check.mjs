@@ -123,8 +123,12 @@ checks['vscode: reset puts config.toml back'] = reset2.code === 0 && fs.readFile
 console.log('');
 for (const [k, v] of Object.entries(checks)) console.log(`${v ? 'PASS' : 'FAIL'} ${k}`);
 await gw.close();
-fs.rmSync(home, { recursive: true, force: true });
-fs.rmSync(home2, { recursive: true, force: true });
+// Codex can still be cloning its plugin catalog into a HOME after it exits; give that a moment,
+// and never fail the checks over a leftover temporary directory.
+for (const dir of [home, home2]) {
+  try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); }
+  catch (e) { console.warn(`left ${dir} behind (${e.code})`); }
+}
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1);
 
 // One JSON-RPC session with `codex app-server` over stdio (newline-delimited JSON), as the extension holds it.
