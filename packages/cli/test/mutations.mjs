@@ -78,6 +78,10 @@ const mutants = [
   ['delivery-commit-journal', 'src/files.mjs', 'await beforeCommit?.(receipt);', 'await Promise.resolve();'],
   ['lock-crash-ticket', 'src/state.mjs', 'match[1] === hostID && dead(Number(match[2]))', 'false'],
   ['lock-error-propagation', 'src/state.mjs', "entered || error.code !== 'ENOENT'", "error.code !== 'ENOENT'"],
+  ['state-replace-retry', 'src/state.mjs', "if (process.platform !== 'win32' || !busyReplace.has(error.code) || attempt === 10) throw error;", 'throw error;'],
+  ['state-replace-windows-only', 'src/state.mjs', "if (process.platform !== 'win32' || !busyReplace.has", 'if (!busyReplace.has'],
+  ['state-replace-codes', 'src/state.mjs', '!busyReplace.has(error.code) || attempt', 'attempt'],
+  ['state-replace-limit', 'src/state.mjs', 'attempt === 10) throw error;', 'attempt === 11) throw error;'],
   ['utm-cli-campaign', 'src/api.mjs', "clientName: 'EvoLink CLI', linkCampaign: 'cli',\n", "clientName: 'EvoLink CLI',\n"],
   ['auth-status-offline', 'src/auth.mjs', 'if (!saved?.tokens) return {', 'if (!saved?.tokens || saved.expires_at <= Date.now()) return {'],
   ['login-update-advice', 'src/auth.mjs', 'if (advice) progress(advice);', 'if (false) progress(advice);'],
@@ -181,6 +185,7 @@ const PATTERNS = {
     [['quote-intent-version'], '^two refreshes at once'],
     [['quote-intent-incomplete'], '^crash orderings'],
     [['quote-intent-active-recovery', 'quote-intent-refresh-recovery'], '^an unverified submission of the current quote'],
+    [['state-replace-retry', 'state-replace-windows-only', 'state-replace-codes', 'state-replace-limit'], '^on Windows a replacement denied'],
   ].flatMap(([names, pattern]) => names.map(name => [name, pattern]))),
 };
 
@@ -206,7 +211,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('failed-') ? ['failed-task.test.mjs']
       : name === 'callback-state' ? ['auth.test.mjs']
       : name.startsWith('status-') || name === 'task-specific-help' ? ['task-help.test.mjs']
-      : name.startsWith('lock-') ? ['state.test.mjs']
+      : name.startsWith('lock-') || name.startsWith('state-replace-') ? ['state.test.mjs']
       : ['request-id', 'journal', 'download-ua'].includes(name) ? ['e2e.test.mjs']
       : name.startsWith('update-') || name.startsWith('plain-doctor-') ? ['update.test.mjs']
       : ['auth-status-offline', 'login-update-advice', 'login-update-isolation', 'login-failure-advice', 'login-interrupt-quiet'].includes(name) ? ['auth.test.mjs']
