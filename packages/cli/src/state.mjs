@@ -19,6 +19,17 @@ const hostID = createHash('sha256').update(os.hostname()).digest('hex').slice(0,
 const pause = () => new Promise(resolve => setTimeout(resolve, 100));
 // Windows can briefly deny directory deletion while another waiter reads it.
 const removeLock = dir => fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+// Windows also denies replacing a file while another command reads it; such a read ends within milliseconds.
+const busyReplace = new Set(['EPERM', 'EACCES', 'EBUSY']);
+async function replace(temp, target) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await fs.rename(temp, target); }
+    catch (error) {
+      if (process.platform !== 'win32' || !busyReplace.has(error.code) || attempt === 10) throw error;
+      await new Promise(resolve => setTimeout(resolve, Math.min(10 * 2 ** (attempt - 1), 160)));
+    }
+  }
+}
 function dead(pid) {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); return false; }
@@ -74,7 +85,7 @@ export class State {
       const handle = await fs.open(temp, 'wx', 0o600);
       try { await handle.writeFile(JSON.stringify(data, null, 2)); await handle.sync(); }
       finally { await handle.close(); }
-      await fs.rename(temp, target);
+      await replace(temp, target);
     } finally { await fs.unlink(temp).catch(() => {}); }
   }
   async remove(group, id) { await fs.unlink(this.file(group, id)).catch(e => { if (e.code !== 'ENOENT') throw e; }); }
