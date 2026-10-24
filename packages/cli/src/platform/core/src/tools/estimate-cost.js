@@ -23,7 +23,7 @@ export function registerEstimateCost(server, config) {
         ].join(' '),
         inputSchema: {
             model: z.string().min(1).max(128).describe('Model ID, e.g. "seedance-2.0-text-to-video".'),
-            input: z.record(z.unknown()).optional()
+            input: z.record(z.string(), z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
             pricing_source: z.enum(['pricing_rules', 'account', 'public_reference']).default('pricing_rules').describe('Use published full pricing rules for public default estimates. The old account/public_reference values are compatibility aliases; neither requests a backend account quote.'),
             pricing_parameters: QuoteParameters.optional().describe('Measured or explicitly expected usage declared by the pricing policy, such as input_seconds or search_count. Missing enabled-search counts produce a zero-search partial subtotal and per-search rates. Do not invent counts, include user_group/prices/prompts, or treat expected counts as execution limits.'),
