@@ -7,9 +7,12 @@ import { trackedLink } from '../services/utm.js';
 import { MODEL_SELECTION_GUIDANCE, modelPreference } from '../services/model-recommendations.js';
 import { referenceInputs } from '../services/model-capabilities.js';
 import { READ_ONLY, errorResult, ok } from './shared.js';
+// Assistant-facing text is English by default; a catalog name in Chinese, Japanese or Korean is left out and the ID shown.
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uff00-\uffef]/;
+const english = (text) => text && !CJK.test(text) ? text : undefined;
 export function modelTitle(entry) {
     const title = entry.spec?.title?.replace(/\s+(interface|api)$/i, '').trim();
-    return title || entry.title || entry.priced?.description?.slice(0, 120) || undefined;
+    return title || english(entry.title) || english(entry.priced?.description?.slice(0, 120)) || undefined;
 }
 /** Every term must appear somewhere; matches in the model ID count most. */
 export function scoreModel(entry, terms) {
