@@ -91,7 +91,7 @@ function registerGenerate(server, config, kind) {
             model: z.string().min(1).max(128).describe(`${kind[0].toUpperCase()}${kind.slice(1)} model ID from search_models.`),
             // The cap is checked in the handler: a schema limit makes the SDK answer with a bare validation error.
             prompt: z.string().optional().describe(`Shortcut for input.prompt; up to ${PROMPT_SHORTCUT_MAX.toLocaleString('en-US')} characters (get_model lists the model's own limit).`),
-            input: z.record(z.unknown()).optional()
+            input: z.record(z.string(), z.unknown()).optional()
                 .describe('Model parameters exactly as listed by get_model, e.g. {"prompt":"…","quality":"1080p"}. Do not put model or callback_url here.'),
             client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional()
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
