@@ -7,7 +7,8 @@ export function referenceInputs(spec) {
     const result = [];
     for (const [parameter, value] of Object.entries(spec.params)) {
         let kind;
-        if (/^(?:.*_)?image_urls?$|^(?:images|image|input_image|first_frame|last_frame)$/.test(parameter))
+        // Kling 4.0 and MiniMax H3 take first and last frames as image_start / image_end, and Kling 4.0 middle frames as keyframes.
+        if (/^(?:.*_)?image_urls?$|^(?:images|image|input_image|first_frame|last_frame|image_start|image_end|keyframes)$/.test(parameter))
             kind = 'image';
         else if (/^(?:.*_)?video_urls?$|^videos$/.test(parameter))
             kind = 'video';

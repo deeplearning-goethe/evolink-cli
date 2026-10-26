@@ -3,16 +3,24 @@
 import { currentRequestCredentials } from '../request-context.js';
 import { RequestTimeoutError } from '../services/http-policy.js';
 import { getPricingRules, PricingRulesError, PricingRulesQuery } from '../services/pricing-rules-client.js';
-import { failure, ok, READ_ONLY } from './shared.js';
-export function registerPricingRules(server) {
+import { pricingCallLimitReached } from '../services/pricing-call-limit.js';
+import { failure, ok, READ_ONLY, retryText } from './shared.js';
+export function registerPricingRules(server, config) {
     server.registerTool('get_pricing_rules', {
         title: 'Read public pricing rules',
         description: 'Read schema-2 public default pricing rules, decimal-string rates including fractional UC, minimum charges, tiers and optional full expressions. Free and anonymous upstream. The returned price_selection, when present, identifies route-priority prices or legacy minimum configuration prices. Coverage follows the returned published policies and supported legacy text adapters, including media when available. These are public reference rates, not account prices, live availability, a task quote, a bill or a final spending cap. Do not substitute these rules for media estimate_cost or assume empty media results are free.',
         inputSchema: PricingRulesQuery.shape,
         annotations: { title: 'Read public pricing rules', ...READ_ONLY },
     }, async (input) => {
+        const over = pricingCallLimitReached('get_pricing_rules');
+        if (over)
+            return failure(`This account already made ${over.limit} get_pricing_rules calls in the last minute, the most allowed. Wait ${retryText(over.retryAfterSeconds)}, then try again. No quote or spending limit was established.`, {
+                error: { category: 'rate_limited', code: 'pricing_calls_per_minute', retryable: true, retry_after: over.retryAfterSeconds },
+                charged: 'no', quote_established: false, final_budget_enforced: false
+            });
         try {
-            const { body, source } = await getPricingRules(input);
+            // Hosted: rules stay valid until their own fresh_until, and a burst of lookups must not spend the shared per-IP limit.
+            const { body, source } = await getPricingRules(input, config.reusePricingRules ? { reuseUntilFresh: true } : {});
             const models = 'model' in body ? [body.model] : body.models;
             const selection = body.meta.price_selection ?? 'configured_minimum';
             const warnings = [
@@ -46,7 +54,8 @@ export function registerPricingRules(server) {
             return failure(safeError.status === 404
                 ? 'No public pricing rules are published for this model and filters. This does not mean the model is free or unavailable.'
                 : safeError.code === 'interrupted' ? 'Public pricing rules lookup was interrupted. No quote or spending limit was established.'
-                    : safeError.message, { error: { category: safeError.code === 'interrupted' ? 'interrupted'
+                    : safeError.code === 'rate_limit_exceeded' ? `The platform is limiting pricing requests right now. Try again in ${retryText(safeError.retryAfter)}. No quote or spending limit was established.`
+                        : safeError.message, { error: { category: safeError.code === 'interrupted' ? 'interrupted'
                         : safeError.status === 404 ? 'not_found' : safeError.status === 429 ? 'rate_limit' : 'server_error',
                     code: safeError.code, status: safeError.status,
                     retryable: safeError.status === 429 || safeError.status >= 500

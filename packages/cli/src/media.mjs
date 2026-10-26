@@ -82,6 +82,12 @@ export function checkEstimate(quote, cap) {
       : quote.estimate.max_usd <= cap;
     requireThat(withinBudget, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
   }
+  // The core names each missing usage in MCP terms; say once how they map to CLI options.
+  requireThat(quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length, 'estimate_unavailable', [
+    'The total cannot be estimated yet, so no quote was saved. It depends on:', ...(quote.estimate?.usage_help ?? []).map(line => `- ${line}`),
+    'In the CLI, media_seconds is --media-seconds and pricing_parameters is --pricing-parameters (a JSON object).'].join('\n'),
+  // A copy: the redaction of error details shows an object it has already printed as "[truncated]".
+  { estimate: quote.estimate, missing_usage: [...(quote.estimate?.missing_usage ?? [])] });
   requireThat(['estimated', 'partial', 'token_billed'].includes(quote.estimate?.status), 'estimate_unavailable', 'Complete the estimate input or choose a model with pricing before submission.', { estimate: quote.estimate });
 }
 

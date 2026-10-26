@@ -7,7 +7,7 @@ import { getPricingRules, PricingMoney } from './pricing-rules-client.js';
 import { isSeedanceGeneration } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
 import { effectiveMjV7EditPrompt } from './mj-prompt.js';
-import { CONSERVATIVE_QUOTE_PARAMETERS, derivedQuoteParameter, derivedUsage } from './pricing-derived.js';
+import { CONSERVATIVE_QUOTE_PARAMETERS, derivedQuoteParameter, derivedUsage, isRuleDefaultWord } from './pricing-derived.js';
 const decimal = z.string().max(64).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/);
 const identifier = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const rational = z.string().max(128).regex(/^(?:0|[1-9]\d*)(?:\.\d+|\/[1-9]\d*)?$/);
@@ -53,6 +53,8 @@ function fail(code, message, param) { throw new QuoteError(code, message, param)
 const aliases = { duration_seconds: ['duration'], output_seconds: ['duration'], image_count: ['n', 'count'],
     video_count: ['n', 'count'], resolution: ['quality'], quality: ['resolution'] };
 const measured = /(?:tokens|input_seconds|output_seconds|source_output_seconds|first_input_video_seconds|search_count)$/;
+/** A rule parameter that measures usage (tokens, seconds, searches, a derived rate) rather than a setting. */
+export const isUsageParameter = (model, name) => measured.test(name) || derivedUsage(model, name);
 /** Map only declared billing parameters. Prompts and asset URLs stay in generation input. */
 export function prepareQuoteParameters(rule, entry, input, pricingParameters = {}, mediaSeconds, allowMissingUsage = false) {
     const declared = new Map((rule.parameters ?? []).map(p => [p.name, p]));
@@ -70,14 +72,16 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
     const documented = (key) => entry.spec?.params[key] ?? nestedSpec[key];
     const given = (key) => input[key] !== undefined ? input[key] : nestedSpec[key] ? nestedInput[key] : undefined;
     const model = entry.id ?? '';
-    const usage = (key) => measured.test(key) || derivedUsage(model, key);
+    const usage = (key) => isUsageParameter(model, key);
     for (const [name, p] of declared) {
         const search = searches.find(item => item.parameter === name);
         // A declared duration and duration_seconds have different meanings (smart duration).
         // Video edit's duration=-1 is an operation setting, never expected output seconds.
         const expectedEditDuration = name === 'duration_seconds' && entry.id === 'seedance-2.5-video-edit' && isSeedanceGeneration(entry);
         const generationNames = [name, ...(aliases[name] ?? []).filter(alias => !declared.has(alias) && !(expectedEditDuration && alias === 'duration'))];
-        const supplied = generationNames.map(given).filter(value => value !== undefined);
+        // A documented word for the rule's own default (Kling 4.0 edit duration "auto") prices as that default.
+        const asRule = (value) => isRuleDefaultWord(model, name, value) ? p.default ?? value : value;
+        const supplied = generationNames.map(given).filter(value => value !== undefined).map(asRule);
         if (supplied.some(value => String(value) !== String(supplied[0]))) {
             fail('conflicting_quote_parameter', `Conflicting generation values for ${name}.`, name);
         }
@@ -99,7 +103,7 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         // Expected usage cannot change settings or references the model will actually receive.
         if (value === undefined && pricingParameters[name] !== undefined && !usage(name)
             && generationNames.some(key => documented(key) !== undefined)) {
-            value = generationNames.map(key => documented(key)?.default).find(v => v !== undefined) ?? p.default;
+            value = asRule(generationNames.map(key => documented(key)?.default).find(v => v !== undefined) ?? p.default);
         }
         if (pricingParameters[name] !== undefined) {
             if (value !== undefined && String(value) !== String(pricingParameters[name])) {
@@ -129,7 +133,7 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
             fail('quote_usage_required', `Provide expected generated ${name} in pricing_parameters.`, name);
         }
         if (value === undefined && !usage(name)) {
-            const defaults = generationNames.map(key => documented(key)?.default).filter(v => v !== undefined);
+            const defaults = generationNames.map(key => documented(key)?.default).filter(v => v !== undefined).map(asRule);
             value = defaults[0];
         }
         const references = Array.isArray(input.video_urls) && input.video_urls.length > 0
