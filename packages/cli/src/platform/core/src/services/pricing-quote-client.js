@@ -6,6 +6,8 @@ import { requestAccountQuote } from './api-client.js';
 import { getPricingRules, PricingMoney } from './pricing-rules-client.js';
 import { isSeedanceGeneration } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
+import { effectiveMjV7EditPrompt } from './mj-prompt.js';
+import { CONSERVATIVE_QUOTE_PARAMETERS, derivedQuoteParameter, derivedUsage } from './pricing-derived.js';
 const decimal = z.string().max(64).regex(/^(?:0|[1-9]\d*)(?:\.\d+)?$/);
 const identifier = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const rational = z.string().max(128).regex(/^(?:0|[1-9]\d*)(?:\.\d+|\/[1-9]\d*)?$/);
@@ -60,17 +62,32 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         }
     const parameters = {};
     const searches = searchUsage(entry, input);
+    // Midjourney documents speed and upscale type inside model_params. A setting is read there only where the
+    // documentation puts it, so another model's model_params never changes its price.
+    const nestedSpec = entry.spec?.params.model_params?.properties ?? {};
+    const nestedInput = input.model_params && typeof input.model_params === 'object' && !Array.isArray(input.model_params)
+        ? input.model_params : {};
+    const documented = (key) => entry.spec?.params[key] ?? nestedSpec[key];
+    const given = (key) => input[key] !== undefined ? input[key] : nestedSpec[key] ? nestedInput[key] : undefined;
+    const model = entry.id ?? '';
+    const usage = (key) => measured.test(key) || derivedUsage(model, key);
     for (const [name, p] of declared) {
         const search = searches.find(item => item.parameter === name);
         // A declared duration and duration_seconds have different meanings (smart duration).
         // Video edit's duration=-1 is an operation setting, never expected output seconds.
         const expectedEditDuration = name === 'duration_seconds' && entry.id === 'seedance-2.5-video-edit' && isSeedanceGeneration(entry);
         const generationNames = [name, ...(aliases[name] ?? []).filter(alias => !declared.has(alias) && !(expectedEditDuration && alias === 'duration'))];
-        const supplied = generationNames.filter(key => input[key] !== undefined).map(key => input[key]);
+        const supplied = generationNames.map(given).filter(value => value !== undefined);
         if (supplied.some(value => String(value) !== String(supplied[0]))) {
             fail('conflicting_quote_parameter', `Conflicting generation values for ${name}.`, name);
         }
         let value = supplied[0];
+        // A promptless Midjourney V7 edit runs and bills as fast whatever speed was requested.
+        if (value === undefined && name === 'prompt_present')
+            value = typeof input.prompt === 'string' && effectiveMjV7EditPrompt(input.prompt) !== '';
+        // Some rule parameters come from differently named request fields, as the gateway pre-deducts them.
+        if (value === undefined)
+            value = derivedQuoteParameter(model, name, input, nestedInput);
         if (value === undefined && name === 'input_images') {
             if (Array.isArray(input.image_urls))
                 value = input.image_urls.length;
@@ -80,9 +97,9 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
                 value = 0;
         }
         // Expected usage cannot change settings or references the model will actually receive.
-        if (value === undefined && pricingParameters[name] !== undefined && !measured.test(name)
-            && generationNames.some(key => entry.spec?.params[key] !== undefined)) {
-            value = generationNames.map(key => entry.spec?.params[key]?.default).find(v => v !== undefined) ?? p.default;
+        if (value === undefined && pricingParameters[name] !== undefined && !usage(name)
+            && generationNames.some(key => documented(key) !== undefined)) {
+            value = generationNames.map(key => documented(key)?.default).find(v => v !== undefined) ?? p.default;
         }
         if (pricingParameters[name] !== undefined) {
             if (value !== undefined && String(value) !== String(pricingParameters[name])) {
@@ -111,8 +128,8 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
                 continue;
             fail('quote_usage_required', `Provide expected generated ${name} in pricing_parameters.`, name);
         }
-        if (value === undefined && !measured.test(name)) {
-            const defaults = generationNames.map(key => entry.spec?.params[key]?.default).filter(v => v !== undefined);
+        if (value === undefined && !usage(name)) {
+            const defaults = generationNames.map(key => documented(key)?.default).filter(v => v !== undefined);
             value = defaults[0];
         }
         const references = Array.isArray(input.video_urls) && input.video_urls.length > 0
@@ -122,11 +139,13 @@ export function prepareQuoteParameters(rule, entry, input, pricingParameters = {
         // The rules evaluator separately records the missing actual/expected search count.
         if (value === undefined && search?.enabled && allowMissingUsage)
             value = '0';
-        if (value === undefined && measured.test(name) && (p.required || references || /tokens$/.test(name) || search?.enabled || (name === 'search_count' && input.web_search === true) || p.default === undefined)) {
+        if (value === undefined && usage(name) && (p.required || references || /tokens$/.test(name) || search?.enabled || (name === 'search_count' && input.web_search === true) || p.default === undefined)) {
             if (allowMissingUsage)
                 continue;
             fail('quote_usage_required', `Provide measured or expected usage for ${name} in pricing_parameters.`, name);
         }
+        if (value === undefined)
+            value = CONSERVATIVE_QUOTE_PARAMETERS[`${model.toLowerCase()} ${name}`]?.value;
         if (value === undefined)
             value = p.default;
         if (value === undefined) {

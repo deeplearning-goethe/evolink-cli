@@ -5,6 +5,7 @@ import { getPricingRules } from './pricing-rules-client.js';
 import { QuoteError, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
 import { prepareSeedanceInput } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
+import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
 /**
  * How long an approval from estimate_cost may be passed to generate_*. The rules' own
  * `fresh_until` is a short refresh window (minutes); people confirming a price in a chat
@@ -96,6 +97,17 @@ function checkExpression(node, declared, depth = 0, budget = { nodes: 0 }) {
     }
     for (const child of node.args ?? [])
         checkExpression(child, declared, depth + 1, budget);
+}
+/** Every value an expression reads, so a component short of several usages can name all of them. */
+function variables(node, found) {
+    if (!node)
+        return;
+    if (node.op === 'variable' && node.name)
+        found.add(node.name);
+    if (node.op === 'lookup')
+        variables(node.key, found);
+    for (const child of node.args ?? [])
+        variables(child, found);
 }
 function evaluate(node, params) {
     const nodes = node.args ?? [], at = (i) => evaluate(nodes[i], params), number = (i) => numeric(at(i));
@@ -220,8 +232,16 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
                 subtotal_uc: String(charge.n), minimum_charge_applied: cmp(subtotal, minimum) < 0 });
         }
         catch (error) {
-            if (error instanceof QuoteError && error.code === 'quote_usage_required' && error.param)
+            if (error instanceof QuoteError && error.code === 'quote_usage_required' && error.param) {
                 missing.add(error.param);
+                // The evaluator stops at the first absent usage; name every one this component reads.
+                const read = new Set();
+                for (const expr of [c.condition, c.quantity_rule, ...c.tiers.map(t => t.when)])
+                    variables(expr, read);
+                for (const name of read)
+                    if (!Object.hasOwn(params, name))
+                        missing.add(name);
+            }
             else
                 throw error;
         }
@@ -239,6 +259,11 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         ...(missing.size ? { uncheckable_reason: 'usage' } : {}),
         possible_extras: [...missing].map(name => `Additional charge depends on ${name}; supply expected or measured usage in pricing_parameters.`), notes: ['Public default prices; account discounts are not included.',
             'Confirm the estimated cost before generation. Actual billed usage and final charges may differ.'] };
+    for (const p of rule.parameters ?? []) {
+        const assumed = CONSERVATIVE_QUOTE_PARAMETERS[`${entry.id.toLowerCase()} ${p.name}`];
+        if (assumed && options.pricingParameters?.[p.name] === undefined)
+            estimate.notes.push(assumed.note);
+    }
     if (searchCharges.length) {
         estimate.search_charges = searchCharges;
         for (const search of searchCharges) {

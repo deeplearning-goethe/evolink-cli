@@ -1,0 +1,1634 @@
+{
+ "meta": {
+  "schema_version": "2",
+  "catalog_version": "cat_0b98466f2a60d6e6d92e910a",
+  "pricing_version": "prc_489b27f5e3133e6960d91da7",
+  "price_scope": "public_default",
+  "currency": "USD",
+  "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+  "updated_at": "2026-10-23T12:47:46.001282232Z",
+  "fresh_until": "2026-10-23T12:52:00Z"
+ },
+ "models": [
+  {
+   "model_id": "mj-v7",
+   "product_id": "mj-v7",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "0b9816d7a3f416c4a2e6f4ed7e5f5383c370e275aac9c864765bab779aac2472",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "draft",
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1810",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "27000",
+      "credits": "2.7",
+      "cny": "0.27",
+      "usd": "0.03970588"
+     },
+     "minimum_charge": {
+      "uc": "27000",
+      "credits": "2.7",
+      "cny": "0.27",
+      "usd": "0.03970588"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "draft": "1",
+       "fast": "2",
+       "turbo": "4"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-edit",
+   "product_id": "mj-v7",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "ebcaa005260b10bf260240efe7680eadc83571a991b253724124eb9a19f37cfe",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1818",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-enhance",
+   "product_id": "mj-v7",
+   "operation": "image_upscale",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "a3e52c269cf7101658a49f5c17bc298c955daf369df99bf22231d5345cec8f6f",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1814",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-outpaint",
+   "product_id": "mj-v7",
+   "operation": "image_outpaint",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 2,
+   "policy_checksum": "18f326e156aab335d87e839829e07fd0c81c0123e055e35adb1cbdf5ac3414fe",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    },
+    {
+     "name": "prompt_present",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1816",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "if",
+      "args": [
+       {
+        "op": "variable",
+        "name": "prompt_present"
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "speed"
+        },
+        "values": {
+         "fast": "1",
+         "turbo": "2"
+        }
+       },
+       {
+        "op": "constant",
+        "value": "1"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-pan",
+   "product_id": "mj-v7",
+   "operation": "image_outpaint",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 2,
+   "policy_checksum": "5839f4576762fe040c299b3951608ead2757aaf28afb4b2a7b8f44e91f1c4523",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    },
+    {
+     "name": "prompt_present",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1815",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "if",
+      "args": [
+       {
+        "op": "variable",
+        "name": "prompt_present"
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "speed"
+        },
+        "values": {
+         "fast": "1",
+         "turbo": "2"
+        }
+       },
+       {
+        "op": "constant",
+        "value": "1"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-remix",
+   "product_id": "mj-v7",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "c265966d21623bea17316b579e2555450d53a2b6f71130fa7e3be2d2e39a3754",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1813",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-remove-bg",
+   "product_id": "mj-v7",
+   "operation": "image_background_removal",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "5951f1ddaa93c27cea1736e51e3d6f258e2005a1fcd761404b108529d4e49426",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1819",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-retexture",
+   "product_id": "mj-v7",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "103012953f2981471f5cdfa4708c7d19906b1b7ca6a1f81c0c1d9626eb0d75dc",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1820",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-upload-paint",
+   "product_id": "mj-v7",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "8ffa56f82c5f35309cb0233d73b6944460ec7cb375d946fa34c622ea248df87f",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1821",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-upscale",
+   "product_id": "mj-v7",
+   "operation": "image_upscale",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "a3c9c7455be23eec91ce2d534ad63664d1bd0d709847984ed061579c14257b8b",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "type",
+     "type": "enum",
+     "values": [
+      "standard",
+      "creative"
+     ],
+     "default": "standard"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1812",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "type"
+        },
+        "values": {
+         "creative": "4",
+         "standard": "3"
+        }
+       },
+       {
+        "op": "constant",
+        "value": "3"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v7-variation",
+   "product_id": "mj-v7",
+   "operation": "image_variation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 2,
+   "policy_checksum": "b0295096c2ad0008492c6059d1fc273bb0da447f8e16bef1276b9e177029b1b8",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    },
+    {
+     "name": "prompt_present",
+     "type": "boolean",
+     "default": true
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1811",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-04-11T14:04:31Z",
+     "quantity_rule": {
+      "op": "if",
+      "args": [
+       {
+        "op": "variable",
+        "name": "prompt_present"
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "speed"
+        },
+        "values": {
+         "fast": "1",
+         "turbo": "2"
+        }
+       },
+       {
+        "op": "constant",
+        "value": "1"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1",
+   "product_id": "mj-v8-1",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "82e2c1ecb4a68c6addffd93a6221851b67fc9681733efa78f7dfb7e0cf0836a2",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "draft",
+      "fast"
+     ],
+     "default": "fast"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "standard",
+      "hd"
+     ],
+     "default": "standard"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1830",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "speed"
+        },
+        "values": {
+         "draft": "1",
+         "fast": "1"
+        }
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "quality"
+        },
+        "values": {
+         "hd": "1.5",
+         "standard": "1"
+        }
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-edit",
+   "product_id": "mj-v8-1",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "e354102d3705b2523a8233bc6527514b69215b16415a4fbf91e91bf3f6ea72e4",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1833",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-remix",
+   "product_id": "mj-v8-1",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "3bcc9a0ad9cae444944b29cbd32c9857b72673a9594ee26da25c84920a05cda5",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1832",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-remove-bg",
+   "product_id": "mj-v8-1",
+   "operation": "image_background_removal",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "21ed616867815d51321a5d5754525f9ecf0556b1f9b9e0a2af175a91a1e0830c",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1836",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-retexture",
+   "product_id": "mj-v8-1",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "a4289dc43c50be770a126dd2e52e3cc2d6faf0d0b22f77046e3b09c8b0356ae5",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1834",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-upload-paint",
+   "product_id": "mj-v8-1",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "2674ae011d0f8b75771594dc51e17f14bee857c206501ef30df2be81b398f322",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1835",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "2"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.1-variation",
+   "product_id": "mj-v8-1",
+   "operation": "image_variation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "41f9ec76ce172cecde29e099946b0a200cfc33552d1e6864172acdeb05ed31f7",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "fast",
+      "turbo"
+     ],
+     "default": "fast"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1831",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-06-21T16:55:18Z",
+     "quantity_rule": {
+      "op": "lookup",
+      "key": {
+       "op": "variable",
+       "name": "speed"
+      },
+      "values": {
+       "fast": "1",
+       "turbo": "1"
+      }
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2",
+   "product_id": "mj-v8-2",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "424307dd78631044ee7a7a00d1c62e723caa99610e4fd87582cea7a62d5ac398",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "speed",
+     "type": "enum",
+     "values": [
+      "draft",
+      "fast"
+     ],
+     "default": "fast"
+    },
+    {
+     "name": "quality",
+     "type": "enum",
+     "values": [
+      "standard",
+      "hd"
+     ],
+     "default": "standard"
+    }
+   ],
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1840",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "official_rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "multiply",
+      "args": [
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "speed"
+        },
+        "values": {
+         "draft": "1",
+         "fast": "1"
+        }
+       },
+       {
+        "op": "lookup",
+        "key": {
+         "op": "variable",
+         "name": "quality"
+        },
+        "values": {
+         "hd": "1.5",
+         "standard": "1"
+        }
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-edit",
+   "product_id": "mj-v8-2",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "8334efce234d949df9d1f454fa2eb9f6c98ce6cea8ef7d216ef5c5652ef7a2f7",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1843",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "official_rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-remix",
+   "product_id": "mj-v8-2",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "91b5aff7066bf0748348311e95f4170bb8f602b482bc18f1b8f3208ec91edfa7",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1842",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "official_rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-remove-bg",
+   "product_id": "mj-v8-2",
+   "operation": "image_background_removal",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "6e98af831b70a7f8e39f8b2310a5aa7e04d5391b692c42d891fbbcc9ccdc229c",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1846",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "official_rate": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "minimum_charge": {
+      "uc": "54000",
+      "credits": "5.4",
+      "cny": "0.54",
+      "usd": "0.07941176"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-retexture",
+   "product_id": "mj-v8-2",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "144176eae953935a4710092e017d09d6848dd8cd7cd4a9af1be5caa72a333adc",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1844",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "official_rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-upload-paint",
+   "product_id": "mj-v8-2",
+   "operation": "image_edit",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "8ba7f92e3bc2f0c79919db5bbbbab9ec28c2b48da44b90be8e36ffaa10ce37de",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1845",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "official_rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "mj-v8.2-variation",
+   "product_id": "mj-v8-2",
+   "operation": "image_variation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "request_only",
+   "policy_version": 1,
+   "policy_checksum": "7a3cfc4a2b1faa11c861489bb29aa77b3e58227f514333e1995785abb2a088ec",
+   "policy_source": "published",
+   "components": [
+    {
+     "id": "request",
+     "role": "request",
+     "dimension": "request",
+     "sku_id": "1841",
+     "unit": "request",
+     "billing_unit_size": 1,
+     "display_unit_size": 1,
+     "rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "official_rate": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "minimum_charge": {
+      "uc": "81000",
+      "credits": "8.1",
+      "cny": "0.81",
+      "usd": "0.11911765"
+     },
+     "billing_rule": "per_call",
+     "pricing_status": "available",
+     "effective_at": "2026-09-21T18:44:28.65Z",
+     "quantity_rule": {
+      "op": "constant",
+      "value": "1"
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "half_up"
+     },
+     "tiers": []
+    }
+   ]
+  }
+ ]
+}
