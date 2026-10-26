@@ -197,15 +197,49 @@ async function readBody(response) {
         reader.releaseLock();
     }
 }
-export async function getPricingRules(input, options = {}) {
-    const query = PricingRulesQuery.parse(input), base = controlBaseURL();
+function rulesURL(query) {
+    const base = controlBaseURL();
     const url = new URL(query.model ? `${base}/v1/catalog/models/${encodeURIComponent(query.model)}/pricing-rules`
         : `${base}/v1/catalog/pricing-rules`);
     for (const key of ['product_id', 'operation', 'modality', 'lifecycle', 'view']) {
         if (query[key] !== undefined)
             url.searchParams.set(key, query[key]);
     }
+    return url;
+}
+/** The cached answer to this query while it is still within its cache time; nothing is requested. */
+export function cachedPricingRules(input) {
+    const old = cache.get(rulesURL(PricingRulesQuery.parse(input)).href);
+    return old && old.expires > Date.now() ? old.body : undefined;
+}
+const stillFresh = (entry) => Date.parse(entry.body.meta.fresh_until) > Date.now();
+/** One model's full rules from the cache: its own entry, else its row in the cached full list. */
+function cachedModel(model, usable) {
+    const own = cache.get(rulesURL(PricingRulesQuery.parse({ model, view: 'full' })).href);
+    if (own && usable(own))
+        return own;
+    const list = cache.get(rulesURL(PricingRulesQuery.parse({ view: 'full' })).href);
+    const rule = list && usable(list) && 'models' in list.body ? list.body.models.find(item => item.model_id === model) : undefined;
+    return list && rule ? { body: { meta: list.body.meta, model: rule }, fetchedAt: list.fetchedAt } : undefined;
+}
+/** One model's full rules read at most maxAgeMs ago, even past their fresh_until: an estimate's fallback while the platform limits requests. */
+export function recentModelRules(model, maxAgeMs) {
+    return cachedModel(model, entry => Date.now() - entry.fetchedAt <= maxAgeMs);
+}
+/**
+ * `reuseUntilFresh` serves a model's full rules from the cache (its own entry or the full list) until the rules' own
+ * fresh_until, which estimates use so a burst of them does not spend the platform's per-IP catalog limit; generation
+ * reads `fresh` rules and asks for a new approval when the price moved.
+ */
+export async function getPricingRules(input, options = {}) {
+    const query = PricingRulesQuery.parse(input), url = rulesURL(query);
     const key = url.href, old = cache.get(key);
+    if (options.reuseUntilFresh) {
+        const reusable = query.model && query.view === 'full' && !query.product_id && !query.operation && !query.modality && !query.lifecycle
+            ? cachedModel(query.model, stillFresh) : old && stillFresh(old) ? old : undefined;
+        if (reusable)
+            return { body: reusable.body, source: 'cache' };
+    }
     if (!options.fresh && old && old.expires > Date.now())
         return { body: old.body, source: 'cache' };
     const existing = pending.get(key);
@@ -226,6 +260,7 @@ export async function getPricingRules(input, options = {}) {
                     continue;
                 }
                 old.expires = Math.min(Date.now() + CACHE_TTL_MS, Date.parse(old.body.meta.fresh_until));
+                old.fetchedAt = Date.now();
                 return { body: old.body, source: 'revalidated' };
             }
             if (!response.ok) {
@@ -246,7 +281,7 @@ export async function getPricingRules(input, options = {}) {
             if (cache.size >= MAX_CACHE_ENTRIES)
                 cache.delete(cache.keys().next().value);
             cache.set(key, { body, etag: response.headers.get('ETag') ?? undefined,
-                expires: Math.min(Date.now() + CACHE_TTL_MS, Date.parse(body.meta.fresh_until)) });
+                expires: Math.min(Date.now() + CACHE_TTL_MS, Date.parse(body.meta.fresh_until)), fetchedAt: Date.now() });
             return { body, source: 'live' };
         }
         throw new PricingRulesError('expired_pricing_rules');

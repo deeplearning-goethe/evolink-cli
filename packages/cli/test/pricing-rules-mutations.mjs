@@ -5,8 +5,8 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const mutants = [
   ['anonymous-credential-access', 'src/api.mjs', "if (name === 'get_pricing_rules')", 'if (false)'],
   ['dispatch-wrong-operation', 'src/cli.mjs', "if (action === 'pricing') return client.call('get_pricing_rules'", "if (action === 'pricing') return client.call('estimate_cost'"],
-  ['rules-are-not-quote', 'src/platform/core/src/tools/get-pricing-rules.js', 'quote_established: false', 'quote_established: true'],
-  ['no-final-cap', 'src/platform/core/src/tools/get-pricing-rules.js', 'final_budget_enforced: false', 'final_budget_enforced: true'],
+  ['rules-are-not-quote', 'src/platform/core/src/tools/get-pricing-rules.js', "'/v1/catalog/pricing-rules', quote_established: false", "'/v1/catalog/pricing-rules', quote_established: true"],
+  ['no-final-cap', 'src/platform/core/src/tools/get-pricing-rules.js', 'final_budget_enforced: false,', 'final_budget_enforced: true,'],
   ['signed-parameter-bounds', 'src/platform/core/src/services/pricing-rules-client.js', 'minimum: signedDecimal.optional()', 'minimum: decimal.optional()'],
   ['parameter-values-preserved', 'src/platform/core/src/services/pricing-rules-client.js', 'values: z.array(z.union([z.string(), z.number(), z.boolean()])).max(100).optional(),', ''],
   ['lookup-key-preserved', 'src/platform/core/src/services/pricing-rules-client.js', 'key: ExpressionSchema.optional(),', ''],

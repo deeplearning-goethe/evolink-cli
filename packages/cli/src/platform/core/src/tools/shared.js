@@ -171,6 +171,10 @@ export function progressReporter(extra, totalSeconds) {
         }).catch(() => undefined);
     };
 }
+/** "N seconds" from a Retry-After, or about a minute (the platform's limit window) when it gave none. */
+export function retryText(seconds) {
+    return seconds === undefined ? 'about a minute' : `${seconds} second${seconds === 1 ? '' : 's'}`;
+}
 export function sleep(ms, signal) {
     return new Promise(resolve => {
         if (signal?.aborted) {

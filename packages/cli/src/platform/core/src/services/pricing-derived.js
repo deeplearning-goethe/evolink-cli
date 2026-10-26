@@ -44,6 +44,15 @@ export const CONSERVATIVE_QUOTE_PARAMETERS = {
     'seedance-2.5-draft-to-video content_filter': { value: false,
         note: 'Assumes the source draft was generated without the content filter (10% more); if it kept the default content_filter=true, pass pricing_parameters.content_filter=true.' },
 };
+/**
+ * A documented setting value that stands for the rule's own default. Kling 4.0 video edit documents duration "auto"
+ * (as long as the input video); its rule reads duration_seconds 0 as the input length.
+ */
+const RULE_DEFAULT_WORDS = { 'kling-v4-video-edit duration_seconds': 'auto' };
+export function isRuleDefaultWord(model, name, value) {
+    const word = RULE_DEFAULT_WORDS[`${model.toLowerCase()} ${name}`];
+    return word !== undefined && typeof value === 'string' && value.trim().toLowerCase() === word;
+}
 /** Usage the request cannot state: quoting it needs pricing_parameters unless a mapping above fixes it. */
 export function derivedUsage(model, name) {
     return model.toLowerCase() === 'tencent-video-upscale' && name === 'output_fps';

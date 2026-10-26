@@ -160,6 +160,10 @@ const mutants = [
   // The vendored core prices Midjourney settings from model_params and promptless V7 edits as fast.
   ['mj-quote-nested-read', 'src/platform/core/src/services/pricing-quote-client.js', ': nestedSpec[key] ? nestedInput[key] : undefined', ': undefined'],
   ['mj-quote-prompt-present', 'src/platform/core/src/services/pricing-quote-client.js', "typeof input.prompt === 'string' && effectiveMjV7EditPrompt(input.prompt) !== ''", 'true'],
+  // An estimate short of billing usage names it and how to give it as CLI options, and shows no zero total.
+  ['unknown-total-help', 'src/media.mjs', "quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length", 'true'],
+  ['unknown-total-mapping', 'src/media.mjs', "'In the CLI, media_seconds is --media-seconds and pricing_parameters is --pricing-parameters (a JSON object).'].join('\\n')", "].join('\\n')"],
+  ['unknown-total-zero-amounts', 'src/platform/core/src/services/pricing-rules-estimate.js', "...(status === 'needs_input' ? {} : {", '...(false ? {} : {'],
 ];
 
 // Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.
@@ -190,6 +194,7 @@ const PATTERNS = {
     [['quote-intent-active-recovery', 'quote-intent-refresh-recovery'], '^an unverified submission of the current quote'],
     [['state-replace-retry', 'state-replace-windows-only', 'state-replace-codes', 'state-replace-limit'], '^on Windows a replacement denied'],
     [['mj-quote-nested-read', 'mj-quote-prompt-present'], '^Midjourney settings in model_params'],
+    [['unknown-total-help', 'unknown-total-mapping', 'unknown-total-zero-amounts'], '^an estimate without its billing usage'],
   ].flatMap(([names, pattern]) => names.map(name => [name, pattern]))),
 };
 
@@ -223,6 +228,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('wait-deadline-') ? ['wait-deadline.test.mjs']
       : name.startsWith('quote-intent-') ? ['quote-intent.test.mjs']
       : name.startsWith('mj-quote-') ? ['mj-pricing.test.mjs']
+      : name.startsWith('unknown-total-') ? ['unknown-total.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];
