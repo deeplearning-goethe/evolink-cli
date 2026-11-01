@@ -164,6 +164,14 @@ const mutants = [
   ['unknown-total-help', 'src/media.mjs', "quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length", 'true'],
   ['unknown-total-mapping', 'src/media.mjs', "'In the CLI, media_seconds is --media-seconds and pricing_parameters is --pricing-parameters (a JSON object).'].join('\\n')", "].join('\\n')"],
   ['unknown-total-zero-amounts', 'src/platform/core/src/services/pricing-rules-estimate.js', "...(status === 'needs_input' ? {} : {", '...(false ? {} : {'],
+  // GPT Image token models: a reference price, ignored token counts, 1.5 times the reference against a budget, no quote at 0.
+  ['reference-cap-allowance', 'src/media.mjs', '!referenceBudgetExceeded(quote.pricing_quote.total_uc, cap)', '!rulesBudgetExceeded(quote.pricing_quote.total_uc, cap)'],
+  ['reference-cap-refused', 'src/media.mjs', "const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)", 'const reference = false && Number.isFinite(quote.estimate.max_usd)'],
+  ['reference-range-unchecked', 'src/media.mjs', "quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined", 'false'],
+  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved ? 'token_billed' : 'estimated'", "reserved ? 'estimated' : 'estimated'"],
+  ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && /tokens$/.test(name)).sort() : [];', '.filter(() => false) : [];'],
+  ['reference-zero-total', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (total === 0n) {', 'if (false) {'],
+  ['reference-balance', 'src/platform/core/src/tools/estimate-cost.js', "(estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined", "estimate.status === 'estimated' && estimate.max_credits !== undefined"],
 ];
 
 // Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.
@@ -229,6 +237,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('quote-intent-') ? ['quote-intent.test.mjs']
       : name.startsWith('mj-quote-') ? ['mj-pricing.test.mjs']
       : name.startsWith('unknown-total-') ? ['unknown-total.test.mjs']
+      : name.startsWith('reference-') ? ['token-billed.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];

@@ -6,7 +6,7 @@ import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { formatIssues, validateInput } from '../services/param-validator.js';
 import { formatEstimateRange } from '../services/pricing-client.js';
 import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/pricing-quote-client.js';
-import { ApprovedRulesEstimate, createRulesEstimate, checkRulesApproval, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
+import { ApprovedRulesEstimate, REFERENCE_BUDGET_FACTOR, createRulesEstimate, checkRulesApproval, referenceAllowance, referenceBudgetExceeded, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
@@ -96,7 +96,7 @@ function registerGenerate(server, config, kind) {
             client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional()
                 .describe('Optional idempotency key (16–96 characters: letters, digits, . _ -). Reuse the same value only to retry the same request after a network error or timeout.'),
             max_cost_usd: z.number().positive().max(10_000).optional()
-                .describe('Compatibility option for a budget explicitly specified by the user. Compare the submission estimate against that budget; never derive this value from the estimate. This does not limit the final charge. Refuses when the estimate is incomplete or exceeds the budget.'),
+                .describe(`Compatibility option for a budget explicitly specified by the user. Compare the submission estimate against that budget; never derive this value from the estimate. This does not limit the final charge. Refuses when the estimate is incomplete or exceeds the budget; a token-billed reference price must fit ${REFERENCE_BUDGET_FACTOR} times over.`),
             account_quote: ApprovedAccountQuote.optional().describe('Legacy approval. Refresh with estimate_cost and obtain user approval before using the new pricing rules.'),
             pricing_quote: ApprovedRulesEstimate.optional().describe('Client approval record from estimate_cost, for exactly this input. Rechecked against fresh pricing rules before submission; does not bind final settlement.'),
             pricing_parameters: QuoteParameters.optional().describe('The same explicit billing usage passed to estimate_cost.'),
@@ -170,8 +170,11 @@ function registerGenerate(server, config, kind) {
             if (args.pricing_quote)
                 checkRulesApproval(args.pricing_quote, rulesEstimate);
             const estimate = rulesEstimate.estimate;
+            // A reference price is settled at actual token usage, so a budget must leave room above it.
+            const reference = estimate.status === 'token_billed' && estimate.max_usd !== undefined && estimate.uncheckable_reason === undefined;
+            const allowance = reference ? referenceAllowance(rulesEstimate.amounts.uc) : undefined;
             if (args.max_cost_usd !== undefined) {
-                if (estimate.uncheckable_reason !== undefined || estimate.status !== 'estimated' || estimate.max_usd === undefined) {
+                if (!reference && (estimate.uncheckable_reason !== undefined || estimate.status !== 'estimated' || estimate.max_usd === undefined)) {
                     const [reason, next] = uncheckedCap(estimate, catalog.pricingWarning);
                     return failure(`max_cost_usd cannot be checked for ${entry.id}: ${reason}. Nothing was submitted or charged. ${next}`, {
                         error: { category: 'invalid_request', param: 'max_cost_usd' },
@@ -179,7 +182,14 @@ function registerGenerate(server, config, kind) {
                         charged: 'no',
                     });
                 }
-                if (rulesBudgetExceeded(rulesEstimate.amounts.uc, args.max_cost_usd)) {
+                if (allowance && referenceBudgetExceeded(rulesEstimate.amounts.uc, args.max_cost_usd)) {
+                    return failure(`The reference price ${rangeText(estimate)} is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it ($${allowance.usd}, ${allowance.credits} credits) is above max_cost_usd $${args.max_cost_usd}. Nothing was submitted or charged. Lower the size, quality, count or reference images, or ask the user to raise the cap.`, {
+                        error: { category: 'invalid_request', param: 'max_cost_usd' },
+                        estimate, budget_check: { factor: REFERENCE_BUDGET_FACTOR, amounts: allowance },
+                        charged: 'no',
+                    });
+                }
+                if (!allowance && rulesBudgetExceeded(rulesEstimate.amounts.uc, args.max_cost_usd)) {
                     return failure(`The estimated cost ${rangeText(estimate)} is above max_cost_usd $${formatUsd(args.max_cost_usd)}. Nothing was submitted or charged. Lower the duration, count or quality, or ask the user to raise the cap.`, {
                         error: { category: 'invalid_request', param: 'max_cost_usd' },
                         estimate,
@@ -238,6 +248,10 @@ function registerGenerate(server, config, kind) {
             }
             if (estimate.status === 'estimated')
                 lines.push(`Estimate before submitting: ${rangeText(estimate)}`);
+            if (reference)
+                lines.push(`Reference price before submitting: ${rangeText(estimate)}. Billed by actual token usage; the final charge is settled when the task finishes.`);
+            if (allowance && args.max_cost_usd !== undefined)
+                lines.push(`max_cost_usd $${args.max_cost_usd} covers ${REFERENCE_BUDGET_FACTOR} times the reference price ($${allowance.usd}, ${allowance.credits} credits). This was checked before submitting; it does not limit the final charge.`);
             if (estimate.search_charges?.length && estimate.status === 'estimated') {
                 for (const note of estimate.notes.filter(note => /^(Web|Image) search is enabled\./.test(note)))
                     lines.push(`Note: ${note}`);
@@ -271,6 +285,9 @@ function registerGenerate(server, config, kind) {
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),
                 ...(estimate.status === 'estimated' && !estimate.search_charges?.length ? { estimate: { min_usd: estimate.min_usd, max_usd: estimate.max_usd } } : {}),
                 ...(estimate.status === 'partial' ? { estimate } : {}),
+                ...(reference ? { estimate: { status: estimate.status, min_usd: estimate.min_usd, max_usd: estimate.max_usd, total_known: false,
+                        reference_usage: estimate.reference_usage } } : {}),
+                ...(allowance && args.max_cost_usd !== undefined ? { budget_check: { factor: REFERENCE_BUDGET_FACTOR, amounts: allowance, max_cost_usd: args.max_cost_usd } } : {}),
                 ...(warnings.length ? { warnings } : {}),
             }, view.resources);
         }

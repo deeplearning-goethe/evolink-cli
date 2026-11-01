@@ -27,7 +27,7 @@ export function registerEstimateCost(server, config) {
             input: z.record(z.string(), z.unknown()).optional()
                 .describe('The input you plan to pass to the generate tool, e.g. {"prompt":"…","duration":5,"quality":"1080p"}.'),
             pricing_source: z.enum(['pricing_rules', 'account', 'public_reference']).default('pricing_rules').describe('Use published full pricing rules for public default estimates. The old account/public_reference values are compatibility aliases; neither requests a backend account quote.'),
-            pricing_parameters: QuoteParameters.optional().describe('Measured or explicitly expected usage declared by the pricing policy, such as input_seconds or search_count. Missing enabled-search counts produce a zero-search partial subtotal and per-search rates. Do not invent counts, include user_group/prices/prompts, or treat expected counts as execution limits.'),
+            pricing_parameters: QuoteParameters.optional().describe('Measured or explicitly expected usage declared by the pricing policy, such as input_seconds or search_count. Missing enabled-search counts produce a zero-search partial subtotal and per-search rates. GPT Image token models do not use token counts here: their reference price comes from the input. Do not invent counts, include user_group/prices/prompts, or treat expected counts as execution limits.'),
             media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         },
         annotations: { title: 'Estimate cost', ...READ_ONLY },
@@ -72,6 +72,8 @@ export function registerEstimateCost(server, config) {
                 lines.push(`Estimated cost: ${range}`);
             else if (estimate.status === 'partial' && range)
                 lines.push(`Partial estimate at published rates: ${range} (not a total or an upper bound).`);
+            else if (estimate.status === 'token_billed' && range)
+                lines.push(`Reference price: ${range}. Billed by actual token usage and settled when the task finishes, so the final charge may be lower or slightly higher.`);
             else if (estimate.status === 'token_billed')
                 lines.push('Cost: billed by tokens used; it is only known after the task runs.');
             else if (estimate.status === 'needs_input')
@@ -113,12 +115,14 @@ export function registerEstimateCost(server, config) {
                 ...(prepared.applies ? { effective_input: values, defaults_applied: prepared.defaults,
                     amount_scope: estimate.status === 'partial' ? 'known_components_subtotal' : estimate.status === 'estimated' ? 'expected_usage_estimate' : 'not_established' } : {}),
             };
+            // A reference price is what the gateway reserves at submission, so balances and limits are checked against it.
+            const checkable = (estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined;
             try {
                 const credits = await getCredits(config, 'estimate_cost');
                 const balance = Math.max(0, credits.user.remaining_credits);
                 lines.push(`Account balance: ${money(balance)}`);
                 structured.balance_credits = balance;
-                if (estimate.status === 'estimated' && estimate.max_credits !== undefined) {
+                if (checkable && estimate.max_credits !== undefined) {
                     const enough = balance >= estimate.max_credits;
                     structured.enough_balance = enough;
                     if (!enough)
@@ -133,7 +137,7 @@ export function registerEstimateCost(server, config) {
                         : `This API key's limit left: ${money(left)}.`);
                     structured.limit_scope = signedIn ? 'mcp' : 'api_key';
                     structured.limit_remaining_credits = left;
-                    if (estimate.status === 'estimated' && estimate.max_credits !== undefined) {
+                    if (checkable && estimate.max_credits !== undefined) {
                         const enoughLimit = left >= estimate.max_credits;
                         structured.enough_limit = enoughLimit;
                         if (!enoughLimit) {
@@ -144,7 +148,7 @@ export function registerEstimateCost(server, config) {
                     }
                 }
                 const daily = dailyLimitOf(credits.token);
-                if (daily && estimate.status === 'estimated' && estimate.max_credits !== undefined) {
+                if (daily && checkable && estimate.max_credits !== undefined) {
                     const signedIn = currentCredentialMode() === 'signed_in';
                     const enoughToday = daily.left >= estimate.max_credits;
                     structured.daily_left_credits = daily.left;
@@ -161,7 +165,9 @@ export function registerEstimateCost(server, config) {
                 lines.push('Balance: could not be read right now.');
             }
             if (priced)
-                lines.push(`Estimate valid until ${rulesEstimate.approval.expires_at}.`, 'Public default estimate; account discounts are not included. Confirm this estimated cost before generation. Final charges depend on actual usage.');
+                lines.push(`Estimate valid until ${rulesEstimate.approval.expires_at}.`, estimate.status === 'token_billed'
+                    ? 'Public default reference price; account discounts are not included. Confirm it before generation. The final charge follows actual token usage.'
+                    : 'Public default estimate; account discounts are not included. Confirm this estimated cost before generation. Final charges depend on actual usage.');
             else
                 lines.push('No total or approval record was issued. Estimate again with the missing usage before asking the user to approve a generation.');
             return ok(lines.join('\n'), structured);

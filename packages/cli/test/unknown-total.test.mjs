@@ -12,12 +12,15 @@ import { Credentials } from '../src/auth.mjs';
 import { Media } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 
-// Published usage-billed rules of 2026-10-23, the snapshot the MCP repository tests with.
+// Published usage-billed rules of 2026-10-23, the snapshot the MCP repository tests with, and a Gemini Omni video of
+// 2026-10-31 that is billed only by token counts (GPT Image models now get a reference price: token-billed.test.mjs).
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-usage-20261023.json', import.meta.url)));
-const models = { 'gpt-image-2': ['image', 'openai-images'], 'seedance-2.0-mini-reference-to-video': ['video', 'evolink-video-generations'] };
+const tokenBilled = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-token-billed-20261031.json', import.meta.url)));
+const OMNI = 'gemini-omni-flash-text-to-video';
+const models = { [OMNI]: ['video', 'evolink-video-generations'], 'seedance-2.0-mini-reference-to-video': ['video', 'evolink-video-generations'] };
 const policy = id => ({ meta: { ...snapshot.meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
-  model: structuredClone(snapshot.models.find(row => row.model_id === id)) });
-const TOKENS = ['image_cached_input_tokens', 'image_input_tokens', 'image_output_tokens', 'text_cached_input_tokens', 'text_input_tokens'];
+  model: structuredClone([...snapshot.models, ...tokenBilled.models].find(row => row.model_id === id)) });
+const TOKENS = ['input_tokens', 'other_output_tokens', 'video_output_tokens'];
 const mapping = 'In the CLI, media_seconds is --media-seconds and pricing_parameters is --pricing-parameters (a JSON object).';
 
 async function fixture(t) {
@@ -33,7 +36,7 @@ async function fixture(t) {
     if (url.pathname === '/v1/models') return send({ data: rows.map(row => ({ id: row.model_id })) });
     if (url.pathname.endsWith('/pricing-rules')) {
       const id = decodeURIComponent(url.pathname.split('/')[4] ?? '');
-      return send(id ? policy(id) : { meta: policy('gpt-image-2').meta, models: Object.keys(models).map(model => policy(model).model) });
+      return send(id ? policy(id) : { meta: policy(OMNI).meta, models: Object.keys(models).map(model => policy(model).model) });
     }
     if (url.pathname === '/v1/credits') return send({ success: true, data: { user: { remaining_credits: 10000 }, token: { unlimited_credits: true } } });
     if (/^\/v1\/(images|videos)\/generations$/.test(url.pathname)) { f.submissions++; return send({ id: 'task-unexpected', status: 'pending' }); }
@@ -60,13 +63,13 @@ async function fixture(t) {
 
 test('an estimate without its billing usage saves no quote and says which usage to give, in CLI options', async t => {
   const f = await fixture(t);
-  await assert.rejects(f.media.estimate({ model: 'gpt-image-2', input: { prompt: 'a red bicycle' } }), error => {
+  await assert.rejects(f.media.estimate({ model: OMNI, input: { prompt: 'a red bicycle' } }), error => {
     assert.equal(error.code, 'estimate_unavailable');
     assert.deepEqual(error.details.missing_usage, TOKENS);
     assert.equal(error.details.estimate.status, 'needs_input'); assert.equal(error.details.estimate.max_usd, undefined);
     const lines = error.message.split('\n');
     assert.equal(lines[0], 'The total cannot be estimated yet, so no quote was saved. It depends on:');
-    assert.match(lines[1], /^- image_cached_input_tokens, .*: billed by the tokens the task actually uses, known only after it runs \(public default rates: image_input \$0\.0072 per 1K tokens;/);
+    assert.match(lines[1], /^- input_tokens, other_output_tokens, video_output_tokens: billed by the tokens the task actually uses, known only after it runs \(public default rates: input \$0\.001275 per 1K tokens;/);
     assert.equal(lines.at(-1), mapping);
     return true;
   });

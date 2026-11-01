@@ -24,7 +24,8 @@ the input and explicit user budget and obtain approval again. The refreshed quot
 replaces the old one and keeps its request ID: submit only the newest quote, which
 `quote_superseded` names. Supply missing billing
 usage with `--pricing-parameters JSON`; never invent unknown token counts or media
-lengths. Partial subtotals cannot check a budget. If rules are unavailable or change,
+lengths. GPT Image token models need no token counts: their reference price comes
+from the input, and a `--max-cost-usd` budget must cover 1.5 times it. Partial subtotals cannot check a budget. If rules are unavailable or change,
 pause and preserve the budget. Actual usage can change the final charge; final
 settlement caps require gateway/Worker support.
 

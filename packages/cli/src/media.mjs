@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
-import { APPROVAL_TTL_MS, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
+import { APPROVAL_TTL_MS, REFERENCE_BUDGET_FACTOR, referenceBudgetExceeded, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 import { DASHBOARD_URL } from './platform/core/src/services/http-policy.js';
 import { dashboardCheck } from './platform/core/src/tools/shared.js';
@@ -67,7 +67,7 @@ export function checkEstimate(quote, cap) {
   requireThat(quote.enough_limit !== false, 'insufficient_limit', 'The EvoLink MCP or API key spending limit does not cover this estimate. Adjust that limit; this is not the account balance.', { limit_scope: quote.limit_scope });
   requireThat(quote.enough_daily_limit !== false, 'insufficient_daily_limit', 'The daily spending limit does not cover this estimate. Wait for its reset or adjust that limit; this is not the account balance.');
   requireThat(quote.enough_balance !== false, 'insufficient_balance', 'The EvoLink account balance does not cover this estimate.');
-  if (quote.estimate?.status === 'estimated') {
+  if (quote.estimate?.status === 'estimated' || quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined) {
     const { min_usd, max_usd } = quote.estimate;
     requireThat(Number.isFinite(max_usd) && max_usd >= 0 && (min_usd === undefined || Number.isFinite(min_usd) && min_usd >= 0 && min_usd <= max_usd),
       'estimate_unavailable', 'The service returned an invalid price range. Obtain a valid quote before submission.');
@@ -75,12 +75,17 @@ export function checkEstimate(quote, cap) {
   if (cap !== undefined) {
     requireThat(Number.isFinite(cap) && cap > 0 && cap <= 10_000, 'invalid_cap', 'max-cost-usd must be greater than 0 and at most 10000.');
     requireThat(quote.input_valid === true, 'uncheckable_input', 'The service could not validate the model input. The CLI cannot submit this request with a spending cap.', { problems: quote.problems });
-    requireThat(quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
+    // A token-billed reference price settles at actual usage: the budget must cover the core's allowance above it.
+    const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)
+      && quote.estimate.uncheckable_reason === undefined && quote.pricing_quote;
+    requireThat(reference || quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
       'uncheckable_cap', 'This request has no complete cost estimate. The CLI cannot submit it with a spending cap.', { estimate: quote.estimate });
-    const withinBudget = quote.pricing_quote ? !rulesBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.account_quote
+    const withinBudget = reference ? !referenceBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.pricing_quote ? !rulesBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.account_quote
       ? compareDecimal(quote.account_quote.quote.amount, String(cap)) <= 0
       : quote.estimate.max_usd <= cap;
-    requireThat(withinBudget, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
+    requireThat(withinBudget, 'cost_exceeds_cap', reference
+      ? `The reference price is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it exceeds max-cost-usd.`
+      : 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
   }
   // The core names each missing usage in MCP terms; say once how they map to CLI options.
   requireThat(quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length, 'estimate_unavailable', [

@@ -5,7 +5,7 @@ import { modelParamsMeta } from '../data/model-params.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { billedByMediaLength, formatPrice } from '../services/pricing-client.js';
 import { cachedPricingRules } from '../services/pricing-rules-client.js';
-import { billingUsageHelp } from '../services/pricing-rules-estimate.js';
+import { billingUsageHelp, tokenReferenceHelp } from '../services/pricing-rules-estimate.js';
 import { formatUsd } from '../services/error-handler.js';
 import { trackedLink } from '../services/utm.js';
 import { READ_ONLY, errorResult, failure, ok } from './shared.js';
@@ -46,7 +46,8 @@ export function describeParam(name, spec, indent = '') {
 function billingUsage(entry) {
     const body = cachedPricingRules({ view: 'full' });
     const rule = body && 'models' in body ? body.models.find(model => model.model_id === entry.id.toLowerCase()) : undefined;
-    return rule?.policy_source === 'published' && rule.pricing_status === 'available' ? billingUsageHelp(rule, entry) : [];
+    return rule?.policy_source === 'published' && rule.pricing_status === 'available'
+        ? { usage: billingUsageHelp(rule, entry), reference: tokenReferenceHelp(rule, entry) } : { usage: [] };
 }
 function priceLine(price) {
     const minimum = price.min_charge_usd !== undefined ? ` (minimum $${formatUsd(price.min_charge_usd)} per task)` : '';
@@ -153,10 +154,14 @@ export function registerGetModel(server, config) {
             else {
                 lines.push(catalog.pricingWarning ?? 'Pricing data is unavailable in this catalog.');
             }
-            const usage = billingUsage(entry);
+            const { usage, reference } = billingUsage(entry);
             if (usage.length) {
                 lines.push('Billing usage (estimate_cost needs these for a total and names any that are missing):', ...usage.map(line => `- ${line}`));
                 structured.billing_usage = usage;
+            }
+            if (reference) {
+                lines.push(`Token billing: ${reference}`);
+                structured.token_billing = reference;
             }
             if (catalog.pricingWarning)
                 structured.pricing_warning = catalog.pricingWarning;

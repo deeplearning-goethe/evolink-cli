@@ -2,10 +2,11 @@
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { z } from 'zod';
 import { PricingRulesError, getPricingRules, recentModelRules } from './pricing-rules-client.js';
-import { QuoteError, isUsageParameter, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
+import { QuoteError, compareDecimal, isUsageParameter, prepareQuoteParameters, quoteRequestHash } from './pricing-quote-client.js';
 import { prepareSeedanceInput } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
 import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
+import { INPUT_IMAGE_TOKENS, isTokenImageModel, tokenImageReservation } from './gpt-image-tokens.js';
 /**
  * How long an approval from estimate_cost may be passed to generate_*. The rules' own
  * `fresh_until` is a short refresh window (minutes); people confirming a price in a chat
@@ -71,12 +72,25 @@ export function amountsForUC(uc) {
     const a = decimal(uc);
     return { uc, credits: display(div(a, rat(10000n)), 4), cny: display(div(a, rat(100000n)), 5), usd: display(div(a, rat(680000n)), 8) };
 }
-export function rulesBudgetExceeded(uc, budget) {
+function budgetUC(budget) {
     // String(number) may use scientific notation for a small, explicit budget.
     const [mantissa, exp = '0'] = String(budget).split('e');
     const power = Number(exp), b = decimal(mantissa);
     const value = power < 0 ? div(b, rat(10n ** BigInt(-power))) : mul(b, rat(10n ** BigInt(power)));
-    return cmp(decimal(uc), mul(value, rat(680000n))) > 0;
+    return mul(value, rat(680000n));
+}
+export function rulesBudgetExceeded(uc, budget) {
+    return cmp(decimal(uc), budgetUC(budget)) > 0;
+}
+/**
+ * A token-billed reference price fits a budget only with room for the tokens a task actually uses: 1.5 times the
+ * reference must fit. The largest overrun on record is 20% (gpt-image-2, 4K high); large reference images are unmeasured.
+ */
+export const REFERENCE_BUDGET_FACTOR = '1.5';
+/** The amount a budget has to cover for a reference price, for messages. */
+export function referenceAllowance(uc) { return amountsForUC(display(mul(decimal(uc), decimal(REFERENCE_BUDGET_FACTOR)), 4)); }
+export function referenceBudgetExceeded(uc, budget) {
+    return cmp(mul(decimal(uc), decimal(REFERENCE_BUDGET_FACTOR)), budgetUC(budget)) > 0;
 }
 const arity = { constant: [0, 0], variable: [0, 0], lookup: [0, 0],
     add: [2, 32], multiply: [2, 32], subtract: [2, 2], divide: [2, 2], min: [2, 32], max: [2, 32], clamp: [3, 3],
@@ -147,8 +161,48 @@ function helpLines(names, entry, rule, declared) {
 }
 /** Every usage value a rule can bill by, with how to give it; get_model lists them before any estimate. */
 export function billingUsageHelp(rule, entry) {
+    if (reservesTokens(rule, entry))
+        return [];
     const declared = new Set((rule.parameters ?? []).map(p => p.name));
     return helpLines([...declared].filter(name => isUsageParameter(entry.id, name)).sort(), entry, rule, declared);
+}
+// GPT Image token models: the reference price counts the tokens the gateway reserves at submission for the input.
+const RESERVED_TOKENS = new Set(['image_input_tokens', 'image_cached_input_tokens', 'image_output_tokens',
+    'text_input_tokens', 'text_cached_input_tokens', 'text_output_tokens']);
+/** Only a rule billed by these token counts alone, with an output component, can price the reservation. */
+function reservesTokens(rule, entry) {
+    const names = (rule.parameters ?? []).map(p => p.name);
+    return isTokenImageModel(entry.id.toLowerCase()) && rule.settlement_basis === 'actual_usage' && names.every(name => RESERVED_TOKENS.has(name))
+        && rule.components.some(c => c.role === 'image_output' && c.pricing_status === 'available' && componentReads(c).has('image_output_tokens'));
+}
+/** How estimate_cost prices a GPT Image token model, for get_model. */
+export function tokenReferenceHelp(rule, entry) {
+    if (!reservesTokens(rule, entry))
+        return undefined;
+    const rates = rule.components.map(c => `${c.id} $${c.rate.usd} per ${c.unit === '1k_tokens' ? '1K tokens' : c.unit.replace(/_/g, ' ')}`);
+    return `Billed by actual token usage. estimate_cost gives a reference price for the exact input: the tokens EvoLink reserves at submission for its size, quality, n, prompt and reference images, at the published rates (public default rates: ${rates.join('; ')}). The task settles at the tokens it actually uses.`;
+}
+function reservation(rule, entry, input, countPromptTokens) {
+    if (!reservesTokens(rule, entry))
+        return undefined;
+    const usage = tokenImageReservation(entry.id.toLowerCase(), input, countPromptTokens);
+    const parameters = {};
+    for (const p of rule.parameters ?? [])
+        parameters[p.name] = usage.per_image[p.name] ?? 0;
+    return { usage, parameters };
+}
+function reservationNotes(usage, ignored) {
+    const notes = ['Confirm this reference price before generation. It is billed by actual token usage: EvoLink reserves this amount at submission and settles the task at the tokens it actually uses, refunding or charging the difference when it finishes, so the final charge may be lower or slightly higher.'];
+    if (usage.output.size === 'auto')
+        notes.push('size is auto, so the reference counts a 2048×2048 output, as EvoLink reserves for auto; the image is often smaller, so set a size for a closer reference price.');
+    if (usage.reference_images)
+        notes.push(`Each reference image or mask counts ${INPUT_IMAGE_TOKENS.toLocaleString('en-US')} input tokens; larger reference images can use more.`);
+    if (usage.images > 1)
+        notes.push(`n=${usage.images}: the reference covers ${usage.images} images; the model often returns fewer, and the task is billed for what it returns.`);
+    notes.push('Prompt tokens are approximated; EvoLink counts them exactly at submission.');
+    if (ignored.length)
+        notes.push(`pricing_parameters ${ignored.join(', ')} ${ignored.length > 1 ? 'are' : 'is'} not used for this model: the reference price comes from the generation input.`);
+    return notes;
 }
 function evaluate(node, params) {
     const nodes = node.args ?? [], at = (i) => evaluate(nodes[i], params), number = (i) => numeric(at(i));
@@ -210,6 +264,7 @@ function economicRules(rule) {
     return { ...rule, components: rule.components.map(({ effective_at, official_rate, ...c }) => ({ ...c,
             tiers: c.tiers.map(({ effective_at, official_rate, ...t }) => t) })) };
 }
+/** countPromptTokens replaces the approximate prompt token count, for comparing with the gateway's exact count. */
 export function calculateRulesEstimate(body, entry, input, options = {}) {
     const rule = 'model' in body ? body.model : body.models.find(model => model.model_id === entry.id);
     if (!rule || rule.model_id !== entry.id.toLowerCase() || rule.modality !== entry.kind || rule.policy_source !== 'published' || rule.pricing_status !== 'available') {
@@ -219,8 +274,17 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     if (prepared.errors.length)
         throw new QuoteError('invalid_quote_parameter', `${prepared.errors[0].param} ${prepared.errors[0].problem}`, prepared.errors[0].param);
     const effectiveInput = prepared.input;
-    const params = prepareQuoteParameters(rule, entry, effectiveInput, options.pricingParameters, options.mediaSeconds, true);
     const declared = new Set((rule.parameters ?? []).map(p => p.name)), ids = new Set();
+    // GPT Image token models never use token counts from pricing_parameters: the reference counts what the gateway
+    // reserves for this input. Leaving them out of the request hash lets a generation pass them or not.
+    const ignored = isTokenImageModel(entry.id.toLowerCase())
+        ? Object.keys(options.pricingParameters ?? {}).filter(name => declared.has(name) && /tokens$/.test(name)).sort() : [];
+    const pricingParameters = ignored.length
+        ? Object.fromEntries(Object.entries(options.pricingParameters).filter(([name]) => !ignored.includes(name))) : options.pricingParameters;
+    const reserved = reservation(rule, entry, effectiveInput, options.countPromptTokens);
+    const params = { ...prepareQuoteParameters(rule, entry, effectiveInput, pricingParameters, options.mediaSeconds, true), ...reserved?.parameters };
+    // The gateway rounds each image's charge up separately, then reserves it once per image.
+    const images = BigInt(reserved?.usage.images ?? 1);
     const components = [];
     let total = 0n;
     const missing = new Set();
@@ -268,9 +332,9 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
             const charge = cmp(subtotal, minimum) < 0 ? minimum : subtotal;
             if (charge.d !== 1n || charge.n < 0n || charge.n > BigInt(Number.MAX_SAFE_INTEGER))
                 fail('invalid_pricing_expression', 'The pricing rule does not produce a supported integer UC charge.');
-            total += charge.n;
-            components.push({ id: c.id, sku_id: selected.sku_id, quantity: exact(q), billed_quantity: exact(billed),
-                subtotal_uc: String(charge.n), minimum_charge_applied: cmp(subtotal, minimum) < 0 });
+            total += charge.n * images;
+            components.push({ id: c.id, sku_id: selected.sku_id, quantity: exact(mul(q, rat(images))), billed_quantity: exact(mul(billed, rat(images))),
+                subtotal_uc: String(charge.n * images), minimum_charge_applied: cmp(subtotal, minimum) < 0 });
         }
         catch (error) {
             if (error instanceof QuoteError && error.code === 'quote_usage_required' && error.param) {
@@ -286,24 +350,46 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     }
     if (total > BigInt(Number.MAX_SAFE_INTEGER))
         fail('invalid_pricing_expression', 'The estimated charge exceeds its supported range.');
-    const amounts = amountsForUC(String(total)), requestHash = quoteRequestHash(entry.id, effectiveInput, options.mediaSeconds, options.pricingParameters);
+    // No media generation is free. A total of 0 comes only from usage given as 0, which then counts as missing, so
+    // nothing is quoted; if no usage explains it, the published rules themselves price the input at 0.
+    const zeroUsage = total === 0n ? [...declared].filter(name => isUsageParameter(entry.id, name) && pricingParameters?.[name] !== undefined
+        && /^\d+(?:\.\d+)?$/.test(String(params[name])) && compareDecimal(String(params[name]), '0') === 0
+        && rule.components.some(c => componentReads(c).has(name))) : [];
+    if (total === 0n) {
+        if (!zeroUsage.length && !missing.size)
+            fail('pricing_rules_unavailable', 'The published rules price this input at 0, and no media generation is free, so it cannot be quoted.');
+        for (const name of zeroUsage)
+            missing.add(name);
+        components.length = 0;
+    }
+    const amounts = amountsForUC(String(total)), requestHash = quoteRequestHash(entry.id, effectiveInput, options.mediaSeconds, pricingParameters);
     const approval = { source: 'pricing_rules', price_scope: 'public_default', model_id: entry.id,
         request_hash: requestHash, total_uc: amounts.uc, expires_at: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
         fingerprint: quoteRequestHash(entry.id, { rules: economicRules(rule), parameters: params,
-            exchange_rate_version: body.meta.exchange_rate_version, components, missing: [...missing].sort(), total_uc: amounts.uc }) };
-    const status = missing.size ? components.length ? 'partial' : 'needs_input' : 'estimated';
+            exchange_rate_version: body.meta.exchange_rate_version, components, missing: [...missing].sort(), total_uc: amounts.uc,
+            ...(reserved ? { reservation: reserved.usage } : {}) }) };
+    const status = missing.size ? components.length ? 'partial' : 'needs_input' : reserved ? 'token_billed' : 'estimated';
     const missingUsage = [...missing].sort(), usageHelp = helpLines(missingUsage, entry, rule, declared);
+    const usage = reserved?.usage;
     const estimate = { status,
         // Nothing could be priced: a zero amount would read as free.
         ...(status === 'needs_input' ? {} : { min_usd: Number(amounts.usd), max_usd: Number(amounts.usd),
             min_credits: Number(amounts.credits), max_credits: Number(amounts.credits) }),
         total_known: status === 'estimated',
-        basis: ['Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
+        basis: [status === 'token_billed' && usage
+                ? `Reference price: published token rates applied to what EvoLink reserves at submission for this input. Per image: ${usage.per_image.image_output_tokens.toLocaleString('en-US')} output tokens (${usage.output.width}×${usage.output.height}, quality ${usage.output.quality}), about ${usage.per_image.text_input_tokens.toLocaleString('en-US')} prompt tokens and ${usage.per_image.image_input_tokens.toLocaleString('en-US')} reference-image tokens, each part rounded up; ${usage.images} image${usage.images > 1 ? 's' : ''}.`
+                : 'Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
         ...(missing.size ? { uncheckable_reason: 'usage', missing_usage: missingUsage, usage_help: usageHelp } : {}),
+        ...(status === 'token_billed' && usage ? { reference_usage: usage } : {}),
         possible_extras: status === 'partial' ? usageHelp.map(line => `Additional charge depends on ${line}`) : [],
-        notes: ['Public default prices; account discounts are not included.', status === 'needs_input'
-                ? 'No total is quoted until the missing usage is known, and generate_* will not submit before then.'
-                : 'Confirm the estimated cost before generation. Actual billed usage and final charges may differ.'] };
+        notes: ['Public default prices; account discounts are not included.', ...status === 'needs_input'
+                ? ['No total is quoted until the missing usage is known, and generate_* will not submit before then.']
+                : status === 'token_billed' && usage ? reservationNotes(usage, ignored)
+                    : ['Confirm the estimated cost before generation. Actual billed usage and final charges may differ.']] };
+    if (zeroUsage.length)
+        estimate.notes.push(`pricing_parameters ${zeroUsage.join(', ')} given as 0 would price this generation at 0. No media generation is free, so ${zeroUsage.length > 1 ? 'they count' : 'it counts'} as missing.`);
+    if (ignored.length && status !== 'token_billed')
+        estimate.notes.push(`pricing_parameters ${ignored.join(', ')} ${ignored.length > 1 ? 'are' : 'is'} not used for this model.`);
     for (const p of rule.parameters ?? []) {
         const assumed = CONSERVATIVE_QUOTE_PARAMETERS[`${entry.id.toLowerCase()} ${p.name}`];
         if (assumed && options.pricingParameters?.[p.name] === undefined)

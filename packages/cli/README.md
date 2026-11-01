@@ -116,7 +116,7 @@ evolink download TASK_ID --output /absolute/result.png --json
 
 For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last at most 30 minutes and never outlive the returned pricing approval. They bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
-Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused.
+Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused. GPT Image token models (`gpt-image-1.5`, `gpt-image-2`, `gpt-image-2.5-*`) return a `token_billed` reference price, what EvoLink reserves at submission for the exact input; the task settles at the tokens it actually uses, and a `--max-cost-usd` budget must cover 1.5 times the reference price.
 
 A failed or blocked estimate is not a quote. Catalog starting prices must not replace a task quote. Fix the reported problem and quote again while retaining the user's cap; do not ask for generation approval or submit using an invented total. Quote errors report `submission_allowed: false` and preserve the supplied budget.
 
@@ -290,5 +290,7 @@ readable after expiry; check the original task before preparing another request.
 Supply required measured or expected billing usage with
 `--pricing-parameters '{"input_seconds":5.77}'`. Default `--pricing-source pricing_rules`
 and old `account`/`public_reference` aliases use the same published full rules.
-Partial estimates name missing usage and cannot check a budget. Estimates exclude
-personal discounts and do not reserve quota or guarantee the final charge.
+Partial estimates name missing usage and cannot check a budget. GPT Image token
+models need no token counts; `--pricing-parameters` token counts are not used for
+them. Estimates exclude personal discounts and do not reserve quota or guarantee
+the final charge.
