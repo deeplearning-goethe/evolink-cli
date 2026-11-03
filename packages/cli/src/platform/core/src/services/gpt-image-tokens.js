@@ -2,7 +2,7 @@
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { QuoteError } from './pricing-quote-client.js';
 // The tokens the gateway reserves for a GPT Image task at submission. Ported from GroAPI (feat/task-microservice-split)
-// common/gpt_image2_token.go and controller/unified_images.go calculateAzureImageTokenPreBillingCost. The output token
+// common/gpt_image2_token.go and the token image pre-charge in controller/unified_images.go. The output token
 // calculator is the one on OpenAI's image generation guide; its floating-point steps keep the same order, so every count
 // matches the gateway's. The task itself settles at the tokens the upstream reports.
 const STEP = 16, MIN_PIXELS = 655_360, MAX_PIXELS = 8_294_400, MAX_EDGE = 3840, MAX_RATIO = 3;
