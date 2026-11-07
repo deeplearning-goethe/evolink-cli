@@ -22,4 +22,4 @@ Use these notes when the user requests an image edit, a reference-based video, s
 
 ## Several outputs
 
-Keep each quote bound to its exact inputs and budget. Approval must cover the concrete quoted outputs. Record each quote and task ID separately so a lost reply can be recovered without submitting duplicate tasks. If a task is already running, waiting or downloading its results does not authorize another generation.
+Keep each quote bound to its exact inputs and budget. Approval must cover the concrete quoted outputs. For several outputs of one model, prefer one batch quote (`estimate --inputs-file`, up to 50 inputs): one approval covers the listed inputs, and its quote ID finishes or recovers the whole batch with `tasks resume`. Otherwise record each quote and task ID separately so a lost reply can be recovered without submitting duplicate tasks. If a task is already running, waiting or downloading its results does not authorize another generation.
