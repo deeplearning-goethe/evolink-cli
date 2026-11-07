@@ -6,10 +6,10 @@ const MAX_KEYS = 10_000;
 const calls = new Map();
 let clock = () => Date.now();
 /**
- * Price checks (estimate_cost, get_pricing_rules) each signed-in account may make per minute, per tool. The hosted
- * service reaches the platform's per-IP catalog limit from one address for everyone, so one busy assistant must not
- * use it up. A local server serves one user and is not limited here. EVOLINK_MCP_PRICING_CALLS_PER_MINUTE changes
- * the number; 0 turns the limit off.
+ * Price checks (estimate_cost, get_pricing_rules) that read the platform's pricing rules, per signed-in account, per
+ * minute and tool; one answered from rules read moments ago is not counted. The hosted service reaches the platform's
+ * per-IP catalog limit from one address for everyone, so one busy assistant must not use it up. A local server serves
+ * one user and is not limited here. EVOLINK_MCP_PRICING_CALLS_PER_MINUTE changes the number; 0 turns the limit off.
  */
 export function pricingCallsPerMinute() {
     const raw = process.env.EVOLINK_MCP_PRICING_CALLS_PER_MINUTE;

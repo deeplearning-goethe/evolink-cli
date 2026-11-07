@@ -114,7 +114,7 @@ evolink tasks wait TASK_ID --json
 evolink download TASK_ID --output /absolute/result.png --json
 ```
 
-For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last at most 30 minutes and never outlive the returned pricing approval. They bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
+For video/audio, choose the corresponding generation command and a model's documented input. `estimate` never submits a task. Quotes last at most 24 hours and never outlive the returned pricing approval. They bind to the login and exact input, and are checked again before generation. A changed quote requires a new approval. `--confirm` conveys the user's approval; the CLI cannot verify a conversation by itself.
 
 Show the estimated cost and ask the user to confirm the task. The CLI does not turn that estimate into a spending cap. If the user explicitly specifies a budget, compare the estimate with it; pause if it exceeds that budget or cannot be fully estimated. The legacy `--max-cost-usd` option remains compatible for this estimate comparison and does not limit the final charge. `--media-seconds` is a pricing hint, never a model parameter. Actual-usage billing requires explaining the relevant uncertainty; a missing price is refused. GPT Image token models (`gpt-image-1.5`, `gpt-image-2`, `gpt-image-2.5-*`) return a `token_billed` reference price, what EvoLink reserves at submission for the exact input; the task settles at the tokens it actually uses, and a `--max-cost-usd` budget must cover 1.5 times the reference price.
 
@@ -273,7 +273,7 @@ A failed task is not charged: the credits reserved at submission are returned au
 `evolink estimate` reads the published full pricing policy for the canonical model.
 The local `quote_id` stores input binding, pricing fingerprint, integer UC subtotal
 and expiry; there is no backend `estimate_id`. The local quote shares the core's
-30-minute approval window and never outlives the returned approval. Before first submission, the CLI reads the rules
+24-hour approval window and never outlives the returned approval. Before first submission, the CLI reads the rules
 again and refuses changed prices, policy or usage until a new estimate is approved.
 Neither backend Quote nor new OAuth quote access is required. Existing login,
 shared MCP key, quota and permissions remain.

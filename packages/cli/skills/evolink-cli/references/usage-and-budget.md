@@ -18,7 +18,7 @@ A final task/workflow cap requires server-side reservation and settlement enforc
 
 
 Estimates use published full pricing rules and show public default prices, excluding
-personal discounts. Local approvals last up to 30 minutes; submission verifies fresh rules.
+personal discounts. Local approvals last up to 24 hours; submission verifies fresh rules.
 Use `evolink estimate --refresh-quote ID` only for an unsubmitted approval; preserve
 the input and explicit user budget and obtain approval again. The refreshed quote
 replaces the old one and keeps its request ID: submit only the newest quote, which

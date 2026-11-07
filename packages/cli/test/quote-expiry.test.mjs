@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { Media } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
+import { APPROVAL_TTL_MS } from '../src/platform/core/src/services/pricing-rules-estimate.js';
 
 const minute = 60_000;
 
@@ -38,14 +39,14 @@ async function context(t, kind, source, serverMinutes, budget, seed) {
   return { media, state, result, start, submissions, advance: elapsed => { now = start + elapsed; } };
 }
 
-test('seed 20261015: saved quotes use 30 minutes without extending a shorter server approval', async t => {
+test('seed 20261015: saved quotes use the core approval window without extending a shorter server approval', async t => {
   let seed = 20261015, cases = 0;
   for (const kind of ['image', 'video', 'audio']) for (const source of ['rules', 'account', 'legacy']) {
-    for (const serverMinutes of source === 'legacy' ? [undefined] : [10, 30, 45]) for (const budget of [undefined, 0.05]) {
+    for (const serverMinutes of source === 'legacy' ? [undefined] : [10, 30, 45, 48 * 60]) for (const budget of [undefined, 0.05]) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       const c = await context(t, kind, source, serverMinutes, budget, seed);
       const saved = await c.state.read('quotes', c.result.quote_id);
-      const expected = c.start + Math.min(30, serverMinutes ?? Infinity) * minute;
+      const expected = c.start + Math.min(APPROVAL_TTL_MS, (serverMinutes ?? Infinity) * minute);
       assert.equal(saved.expires_at, expected, `${kind}/${source}/${serverMinutes}`);
       assert.equal(Date.parse(c.result.expires_at), expected);
       assert.equal(saved.args.max_cost_usd, budget);
@@ -54,17 +55,19 @@ test('seed 20261015: saved quotes use 30 minutes without extending a shorter ser
       cases++;
     }
   }
-  assert.equal(cases, 42);
+  assert.equal(cases, 54);
 });
 
-test('seed 20261015: minute 16 and just before 30 can submit; the expiry instant and later cannot', async t => {
+test('seed 20261015: halfway and just before the expiry can submit; the expiry instant and later cannot', async t => {
   let seed = 20261015, cases = 0;
   for (const kind of ['image', 'video', 'audio']) for (const source of ['rules', 'account', 'legacy']) {
-    for (const budget of [undefined, 0.05]) for (const elapsed of [16 * minute, 30 * minute - 1, 30 * minute, 30 * minute + 1]) {
+    // A server approval of 30 minutes bounds the saved quote; without one the core's window does.
+    const ttl = source === 'legacy' ? APPROVAL_TTL_MS : 30 * minute;
+    for (const budget of [undefined, 0.05]) for (const elapsed of [Math.floor(ttl / 2), ttl - 1, ttl, ttl + 1]) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       const c = await context(t, kind, source, 30, budget, seed);
       c.advance(elapsed);
-      if (elapsed < 30 * minute) {
+      if (elapsed < ttl) {
         await assert.rejects(c.media.generate(kind, c.result.quote_id), { code: 'confirmation_required' });
         await c.media.generate(kind, c.result.quote_id, { confirmed: true });
         assert.equal(c.submissions.length, 1);

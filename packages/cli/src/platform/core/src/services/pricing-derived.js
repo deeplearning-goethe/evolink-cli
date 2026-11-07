@@ -45,10 +45,10 @@ export const CONSERVATIVE_QUOTE_PARAMETERS = {
         note: 'Assumes the source draft was generated without the content filter (10% more); if it kept the default content_filter=true, pass pricing_parameters.content_filter=true.' },
 };
 /**
- * A documented setting value that stands for the rule's own default. Kling 4.0 video edit documents duration "auto"
- * (as long as the input video); its rule reads duration_seconds 0 as the input length.
+ * A documented setting value that stands for the rule's own default. Kling 4.0 and 4.0 Flash video edit document
+ * duration "auto" (as long as the input video); their rules read duration_seconds 0 as the input length.
  */
-const RULE_DEFAULT_WORDS = { 'kling-v4-video-edit duration_seconds': 'auto' };
+const RULE_DEFAULT_WORDS = { 'kling-v4-video-edit duration_seconds': 'auto', 'kling-v4-flash-video-edit duration_seconds': 'auto' };
 export function isRuleDefaultWord(model, name, value) {
     const word = RULE_DEFAULT_WORDS[`${model.toLowerCase()} ${name}`];
     return word !== undefined && typeof value === 'string' && value.trim().toLowerCase() === word;

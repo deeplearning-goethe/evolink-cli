@@ -12,6 +12,7 @@ import { READ_ONLY, errorResult, failure, ok } from './shared.js';
 import { modelTitle } from './search-models.js';
 import { referenceInputs } from '../services/model-capabilities.js';
 import { seedanceInputRules } from '../services/seedance-input.js';
+import { conditionText, shapeText } from '../services/param-validator.js';
 function value(v) {
     return JSON.stringify(v);
 }
@@ -91,6 +92,10 @@ export function registerGetModel(server, config) {
                     lines.push('', `Example input: ${JSON.stringify(spec.example)}`);
                 if (spec.constraints?.mutuallyExclusive)
                     lines.push(...spec.constraints.mutuallyExclusive.map(group => `Input constraint: ${group.join(' and ')} are mutually exclusive.`));
+                if (spec.requestShapes?.length)
+                    lines.push(`Request shapes (pass exactly one): ${spec.requestShapes.map((shape, index) => `${index + 1}) ${shapeText(shape)}`).join('; ')}.`);
+                for (const condition of spec.conditions ?? [])
+                    lines.push(`Input condition: when ${conditionText(condition.if)}, then ${conditionText(condition.then)}.`);
                 const sizeRule = spec.constraints?.imageSize;
                 if (sizeRule)
                     lines.push(sizeRule.allowPixels
@@ -101,6 +106,8 @@ export function registerGetModel(server, config) {
                     docs,
                     required: spec.required,
                     parameters: spec.params,
+                    ...(spec.requestShapes ? { request_shapes: spec.requestShapes } : {}),
+                    ...(spec.conditions ? { input_conditions: spec.conditions } : {}),
                     constraints: spec.constraints,
                     example_input: spec.example,
                     parameters_source: modelParamsMeta(entry.id),

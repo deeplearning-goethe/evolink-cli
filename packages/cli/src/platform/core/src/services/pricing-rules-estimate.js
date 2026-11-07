@@ -8,12 +8,13 @@ import { searchUsage } from './search-usage.js';
 import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
 import { INPUT_IMAGE_TOKENS, isTokenImageModel, tokenImageReservation } from './gpt-image-tokens.js';
 /**
- * How long an approval from estimate_cost may be passed to generate_*. The rules' own
- * `fresh_until` is a short refresh window (minutes); people confirming a price in a chat
- * need longer. generate_* re-evaluates the current rules and refuses with `price_changed`
- * when the price moved, so a longer approval cannot submit at a stale price.
+ * How long an approval from estimate_cost is shown as current. The rules' own `fresh_until`
+ * is a short refresh window (minutes); people confirming a price in a chat may come back much
+ * later. generate_* re-evaluates the current rules and refuses with `price_changed` when the
+ * price moved, so an approval never submits at a stale price; one past this time still holds
+ * for the same input and price (checkRulesApproval).
  */
-export const APPROVAL_TTL_MS = 30 * 60_000;
+export const APPROVAL_TTL_MS = 24 * 60 * 60_000;
 function fail(code, message) { throw new QuoteError(code, message); }
 function gcd(a, b) { while (b)
     [a, b] = [b, a % b]; return a < 0n ? -a : a; }
@@ -264,10 +265,13 @@ function evaluate(node, params) {
         default: return fail('invalid_pricing_expression', 'The pricing rule uses an unsupported operation.');
     }
 }
+/** The most inputs one estimate_cost or generate_* call takes (`inputs`), all for one model. */
+export const MAX_BATCH_ITEMS = 50;
+/** `batch_items` marks an approval of a whole batch (inputs); it never approves a single input, nor the reverse. */
 export const ApprovedRulesEstimate = z.object({ source: z.literal('pricing_rules'), price_scope: z.literal('public_default'),
     model_id: z.string().min(1).max(100), request_hash: z.string().regex(/^[a-f0-9]{64}$/),
     fingerprint: z.string().regex(/^[a-f0-9]{64}$/), total_uc: z.string().max(32).regex(/^\d+$/),
-    expires_at: z.string().datetime({ offset: true }) }).strict();
+    expires_at: z.string().datetime({ offset: true }), batch_items: z.number().int().min(1).max(MAX_BATCH_ITEMS).optional() }).strict();
 function economicRules(rule) {
     // Freshness and configuration timestamps do not change the approved price.
     return { ...rule, components: rule.components.map(({ effective_at, official_rate, ...c }) => ({ ...c,
@@ -420,6 +424,8 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
 export const RECENT_RULES_MAX_AGE_MS = 10 * 60_000;
 /** The longest Retry-After a generation waits, once, before its fresh rules read gives up. */
 export const GENERATION_RULES_RETRY_MAX_SECONDS = 5;
+/** Generation takes a model's rules read this recently (and still fresh), so a batch of submissions reads them once. */
+export const GENERATION_RULES_REUSE_MS = 10_000;
 const limited = (error) => error instanceof PricingRulesError && error.code === 'rate_limit_exceeded';
 function pause(ms, signal) {
     return new Promise(resolve => {
@@ -432,7 +438,7 @@ function pause(ms, signal) {
 }
 async function generationRules(model, signal) {
     try {
-        return (await getPricingRules({ model, view: 'full' }, { fresh: true })).body;
+        return (await getPricingRules({ model, view: 'full' }, { fresh: true, maxAgeMs: GENERATION_RULES_REUSE_MS })).body;
     }
     catch (error) {
         const wait = limited(error) ? error.retryAfter ?? 1 : undefined;
@@ -441,40 +447,58 @@ async function generationRules(model, signal) {
         await pause(wait * 1000, signal);
         if (signal?.aborted)
             throw error;
-        return (await getPricingRules({ model, view: 'full' }, { fresh: true })).body;
+        return (await getPricingRules({ model, view: 'full' }, { fresh: true, maxAgeMs: GENERATION_RULES_REUSE_MS })).body;
     }
 }
 /**
- * Generation reads the rules fresh. A hosted estimate (`reuseRules`) reuses them until their fresh_until and, while
- * the platform limits requests, may use rules read in the last 10 minutes; any other estimate reads them fresh. An
- * approval from cached or recent rules can never submit at a changed price: checkRulesApproval refuses it.
+ * The rules an estimate or a generation evaluates. Generation reads them fresh, or takes them from a read in the last
+ * 10 seconds. A hosted estimate (`reuseRules`) reuses them until their fresh_until and, while the platform limits
+ * requests, may use rules read in the last 10 minutes (`readAt`); any other estimate reads them fresh. A batch reads
+ * them once for all its inputs.
  */
-export async function createRulesEstimate(entry, input, options = {}) {
+export async function readPricingRulesFor(entry, options = {}) {
     const model = entry.id.toLowerCase();
     if (options.purpose === 'generation')
-        return calculateRulesEstimate(await generationRules(model, options.signal), entry, input, options);
+        return { body: await generationRules(model, options.signal) };
     if (!options.reuseRules)
-        return calculateRulesEstimate((await getPricingRules({ model, view: 'full' }, { fresh: true })).body, entry, input, options);
+        return { body: (await getPricingRules({ model, view: 'full' }, { fresh: true })).body };
     try {
-        const { body } = await getPricingRules({ model, view: 'full' }, { reuseUntilFresh: true });
-        return calculateRulesEstimate(body, entry, input, options);
+        return { body: (await getPricingRules({ model, view: 'full' }, { reuseUntilFresh: true })).body };
     }
     catch (error) {
         const recent = limited(error) ? recentModelRules(model, RECENT_RULES_MAX_AGE_MS) : undefined;
         if (!recent)
             throw error;
-        const result = calculateRulesEstimate(recent.body, entry, input, options), readAt = new Date(recent.fetchedAt).toISOString();
-        result.estimate.notes.push(`The platform is limiting pricing requests right now, so this estimate uses the published rules read at ${readAt}. generate_* reads the current rules again before submitting and asks for a new approval if the price changed.`);
-        return { ...result, rules_read_at: readAt };
+        return { body: recent.body, readAt: new Date(recent.fetchedAt).toISOString() };
     }
 }
+/** Said with an estimate made from rules read earlier, while the platform limits pricing requests. */
+export function recentRulesNote(readAt) {
+    return `The platform is limiting pricing requests right now, so this estimate uses the published rules read at ${readAt}. generate_* reads the current rules again before submitting and asks for a new approval if the price changed.`;
+}
+/** An approval from cached or recent rules can never submit at a changed price: checkRulesApproval refuses it. */
+export async function createRulesEstimate(entry, input, options = {}) {
+    const { body, readAt } = await readPricingRulesFor(entry, options);
+    const result = calculateRulesEstimate(body, entry, input, options);
+    if (!readAt)
+        return result;
+    result.estimate.notes.push(recentRulesNote(readAt));
+    return { ...result, rules_read_at: readAt };
+}
+/**
+ * An approval holds for the same input at the same price. Past its expires_at it still holds when neither changed
+ * (`expired: true`, for the result to say so); a changed input or price needs a new estimate and approval.
+ */
 export function checkRulesApproval(approval, fresh) {
-    if (Date.parse(approval.expires_at) <= Date.now())
-        fail('quote_expired', 'The approved estimate expired. Estimate again and obtain approval.');
+    const expired = Date.parse(approval.expires_at) <= Date.now();
+    if (approval.batch_items !== undefined) {
+        fail('quote_input_changed', 'This pricing_quote approves a batch (inputs); pass the same inputs, or estimate this input and obtain approval.');
+    }
     if (approval.request_hash !== fresh.approval.request_hash || approval.model_id !== fresh.approval.model_id) {
         fail('quote_input_changed', 'The generation input differs from the approved estimate.');
     }
     if (approval.fingerprint !== fresh.approval.fingerprint || approval.total_uc !== fresh.approval.total_uc) {
         fail('price_changed', 'The pricing rules or estimated price changed. Estimate again and obtain approval.');
     }
+    return { expired };
 }

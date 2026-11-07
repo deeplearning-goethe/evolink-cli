@@ -102,7 +102,7 @@ newer release exists. EVOLINK_CLI_UPDATE_CHECK=0 turns these npm registry checks
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
-Quotes last at most 30 minutes, never beyond the returned approval expiry.
+Quotes last at most 24 hours, never beyond the returned approval expiry.
 --confirm is only for an already approved quote.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.

@@ -41,10 +41,11 @@ export function withModelConstraints(model) {
         if (properties)
             properties.duration = { type: 'integer', anyOf: model.params.duration.anyOf, description: model.params.duration.description, default: model.params.duration.default };
     }
-    // mintlify-docs kling-v4-video-edit.json: duration is 3-30 seconds or "auto" (as long as the input video);
-    // the generated index keeps the range but leaves any string open.
-    if (model.model === 'kling-v4-video-edit') {
-        const anyOf = [{ type: 'integer', minimum: 3, maximum: 30 }, { type: 'string', enum: ['auto'] }];
+    // mintlify-docs kling-v4-video-edit.json and kling-v4-flash-video-edit.json: duration is 3-30 (Flash 3-20) seconds
+    // or "auto" (as long as the input video); the generated index keeps the range but leaves any string open.
+    const klingEditMaximum = { 'kling-v4-video-edit': 30, 'kling-v4-flash-video-edit': 20 }[model.model];
+    if (klingEditMaximum) {
+        const anyOf = [{ type: 'integer', minimum: 3, maximum: klingEditMaximum }, { type: 'string', enum: ['auto'] }];
         model.params.duration = { ...model.params.duration, anyOf };
         const properties = model.inputSchema?.schema.properties;
         if (properties)

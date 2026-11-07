@@ -173,7 +173,7 @@ export async function submitTask(config, options) {
         body: options.body,
         tool: options.tool,
         idempotencyKey,
-    }), 1, 500);
+    }).catch((error) => { options.onAttemptError?.(error); throw error; }), 1, 500);
     const receipt = parseTaskReceipt(data, requestId);
     if (headers.get('idempotency-replayed') === 'true')
         receipt.idempotency_replayed = true;

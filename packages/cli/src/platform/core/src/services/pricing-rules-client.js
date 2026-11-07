@@ -226,19 +226,37 @@ function cachedModel(model, usable) {
 export function recentModelRules(model, maxAgeMs) {
     return cachedModel(model, entry => Date.now() - entry.fetchedAt <= maxAgeMs);
 }
+/** The cached answer to a query that `usable` accepts: a model's full rules may come from its row in the cached full list. */
+function reusable(query, usable) {
+    if (query.model && query.view === 'full' && !query.product_id && !query.operation && !query.modality && !query.lifecycle)
+        return cachedModel(query.model, usable);
+    const old = cache.get(rulesURL(query).href);
+    return old && usable(old) ? old : undefined;
+}
+/** Whether getPricingRules(input, { reuseUntilFresh: true }) would answer from the cache now, without reading the platform. */
+export function reusablePricingRules(input) {
+    return reusable(PricingRulesQuery.parse(input), stillFresh) !== undefined;
+}
 /**
  * `reuseUntilFresh` serves a model's full rules from the cache (its own entry or the full list) until the rules' own
  * fresh_until, which estimates use so a burst of them does not spend the platform's per-IP catalog limit; generation
- * reads `fresh` rules and asks for a new approval when the price moved.
+ * reads `fresh` rules and asks for a new approval when the price moved. `maxAgeMs` lets a fresh read take rules read
+ * that recently, still within their fresh_until, so a batch of generations reads them once. Concurrent reads of one
+ * query always share a single request.
  */
 export async function getPricingRules(input, options = {}) {
     const query = PricingRulesQuery.parse(input), url = rulesURL(query);
     const key = url.href, old = cache.get(key);
     if (options.reuseUntilFresh) {
-        const reusable = query.model && query.view === 'full' && !query.product_id && !query.operation && !query.modality && !query.lifecycle
-            ? cachedModel(query.model, stillFresh) : old && stillFresh(old) ? old : undefined;
-        if (reusable)
-            return { body: reusable.body, source: 'cache' };
+        const cached = reusable(query, stillFresh);
+        if (cached)
+            return { body: cached.body, source: 'cache' };
+    }
+    if (options.maxAgeMs !== undefined) {
+        const maxAgeMs = options.maxAgeMs;
+        const recent = reusable(query, entry => stillFresh(entry) && Date.now() - entry.fetchedAt <= maxAgeMs);
+        if (recent)
+            return { body: recent.body, source: 'recent' };
     }
     if (!options.fresh && old && old.expires > Date.now())
         return { body: old.body, source: 'cache' };
