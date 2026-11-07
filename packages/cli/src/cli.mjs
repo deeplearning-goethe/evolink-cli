@@ -13,6 +13,7 @@ import { setup } from './setup.mjs';
 import { checkForUpdate, updateNotice } from './update.mjs';
 import { CLI_VERSION } from './version.mjs';
 import { CliError, requireThat, errorView, localFile } from './errors.mjs';
+import { MAX_BATCH_ITEMS } from './platform/core/src/services/batch-generation.js';
 
 const TASK_STATUS_FILTERS = Object.freeze(['processing', 'completed', 'failed', 'cancelled']);
 const TASK_STATUS_HELP = `Allowed task status filters: ${TASK_STATUS_FILTERS.join(', ')}.
@@ -64,8 +65,12 @@ const HELP = `EvoLink CLI ${CLI_VERSION} (Node.js 22+)
   docs search --query TEXT        Search official model reference excerpts (free)
   estimate --model MODEL --input-file FILE [--media-seconds N]
            [--pricing-parameters JSON] [--pricing-source pricing_rules]
+  estimate --model MODEL --inputs-file FILE
+                                 One quote for 1-50 inputs of one model (JSON array or JSONL)
   estimate --refresh-quote ID      Refresh saved input and budget; approval required
   generate image|video|audio --quote ID --confirm [--wait] [--timeout SECONDS]
+  generate image|video|audio --model MODEL --input-file FILE|--inputs-file FILE --skip-estimate
+                                 Submit without a quote, only when the user opted out of estimates
   tasks get ID | tasks wait ID [--timeout SECONDS]
   tasks list [--type TYPE] [--status STATUS] [--since TIME] [--limit N]
              [--until TIME] [--model MODEL] [--page N]
@@ -88,7 +93,8 @@ Options: --json, --server RESOURCE_URL, --api-url URL, --files-url URL,
 The CLI calls the platform API directly. --server identifies the OAuth resource.
 Agents: all (default), codex, claude-code, cursor, gemini, opencode, copilot,
         openclaw, hermes.
-Input: --input JSON or --input-file FILE, plus optional --prompt TEXT.
+Input: --input JSON or --input-file FILE, plus optional --prompt TEXT; --inputs-file FILE
+holds a batch: a JSON array or JSONL of 1-50 inputs for one model.
 ${TASK_STATUS_HELP}
 Task list types: image, video, audio; omit --type to include all types.
 Task list example: evolink tasks list --status processing --json
@@ -102,8 +108,13 @@ newer release exists. EVOLINK_CLI_UPDATE_CHECK=0 turns these npm registry checks
 
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
-Quotes last at most 24 hours, never beyond the returned approval expiry.
---confirm is only for an already approved quote.
+Quotes are current for at most 24 hours, never beyond the returned approval expiry.
+generate estimates again before submitting: an expired quote whose input and price
+are unchanged is submitted under its approval; a changed price needs a new approval.
+--confirm is only for an already approved quote. --skip-estimate is only for a user
+who explicitly said not to estimate or confirm.
+A batch quote submits all its inputs in one call; tasks resume finishes the rest
+with the same request ID within 24 hours.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;
@@ -111,9 +122,9 @@ Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 // setup, doctor and auth login report the update status in their own result; auth status stays offline.
 const NO_UPDATE_NOTICE = new Set(['setup', 'doctor', 'auth login', 'auth status']);
 
-const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle', 'input', 'input-file', 'prompt', 'media-seconds',
+const OPTIONS = Object.fromEntries(['server', 'api-url', 'files-url', 'query', 'type', 'limit', 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle', 'input', 'input-file', 'inputs-file', 'prompt', 'media-seconds',
   'pricing-source', 'pricing-parameters', 'refresh-quote', 'max-cost-usd', 'quote', 'timeout', 'status', 'since', 'until', 'page', 'ids', 'references', 'max-pages', 'output', 'output-dir', 'template', 'index', 'upload-path', 'agent'].map(k => [k, { type: 'string' }]));
-for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
+for (const k of ['json', 'token-stdin', 'no-browser', 'replace-modified', 'confirm', 'skip-estimate', 'wait', 'all', 'resume', 'help', 'version']) OPTIONS[k] = { type: 'boolean' };
 
 function number(value, name, min, max, integer = false) {
   if (value === undefined) return undefined;
@@ -131,8 +142,9 @@ export function validateCommand(args, options) {
     'models pricing': [2, 'model', 'modality', 'view', 'product-id', 'operation', 'lifecycle'],
     'models recommend': [2, 'type', 'query', 'references', 'limit'], 'docs search': [2, 'query', 'type', 'limit'],
     usage: [1, 'since', 'until', 'type', 'model', 'max-pages'],
-    estimate: [1, 'model', 'input', 'input-file', 'prompt', 'media-seconds', 'max-cost-usd', 'pricing-source', 'pricing-parameters', 'refresh-quote'],
-    'generate image': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate video': [2, 'quote', 'confirm', 'wait', 'timeout'], 'generate audio': [2, 'quote', 'confirm', 'wait', 'timeout'],
+    estimate: [1, 'model', 'input', 'input-file', 'inputs-file', 'prompt', 'media-seconds', 'max-cost-usd', 'pricing-source', 'pricing-parameters', 'refresh-quote'],
+    ...Object.fromEntries(['image', 'video', 'audio'].map(type => [`generate ${type}`, [2, 'quote', 'confirm', 'wait', 'timeout',
+      'skip-estimate', 'model', 'input', 'input-file', 'inputs-file', 'prompt', 'media-seconds', 'pricing-parameters', 'max-cost-usd']])),
     'tasks get': [3], 'tasks wait': [3, 'timeout'], 'tasks batch': [2, 'ids'], 'tasks list': [2, 'type', 'status', 'since', 'until', 'model', 'page', 'limit'], 'tasks resume': [2, 'quote'],
     upload: [2, 'upload-path'], 'uploads get': [3], download: [2, 'output', 'index', 'all', 'output-dir', 'template', 'resume'],
     'skills install': [2, 'agent', 'replace-modified'], 'skills status': [2, 'agent'], doctor: [1, 'agent'],
@@ -154,6 +166,16 @@ export function validateCommand(args, options) {
     if (options.references !== undefined) references(options.references);
   }
   if (command === 'docs') requireThat(options.query?.trim(), 'missing_query', 'Pass --query with model reference keywords.');
+  if (command === 'generate') {
+    if (options['skip-estimate']) {
+      requireThat(options.quote === undefined && !options.confirm, 'invalid_option',
+        '--skip-estimate submits without a quote, only when the user explicitly said not to estimate or confirm; --quote and --confirm are for an approved quote.');
+      requireThat(!(options.wait && options['inputs-file']), 'invalid_option', BATCH_WAIT);
+    } else {
+      requireThat(!DIRECT_OPTIONS.some(key => options[key] !== undefined), 'invalid_option',
+        'Generation submits the saved quote as approved; change its input with a new estimate. These options are only for --skip-estimate.');
+    }
+  }
   if (command === 'tasks' && action === 'batch') taskIds(options.ids);
   if (command === 'download') {
     requireThat(options.all ? options['output-dir'] && !options.output && !options.index : options.output && !options['output-dir'] && !options.template && !options.resume,
@@ -181,17 +203,46 @@ function taskIds(value) {
   return [...new Set(ids)];
 }
 
+const BATCH_FILE_FORMAT = 'The inputs file must contain a JSON array of input objects, or one JSON object per line (JSONL).';
+const BATCH_WAIT = '--wait follows one task. A batch returns its task IDs right away; collect them with evolink tasks batch --ids.';
+/** The input of a generation without a quote (--skip-estimate); a quoted generation submits its saved input. */
+const DIRECT_OPTIONS = ['model', 'input', 'input-file', 'inputs-file', 'prompt', 'media-seconds', 'pricing-parameters', 'max-cost-usd'];
+
+/** --inputs-file: a JSON array of model inputs, or JSONL with one input object per line (blank lines ignored). */
+async function batchInputs(file) {
+  const raw = await localFile(() => fs.readFile(file, 'utf8'), { file });
+  let items;
+  try { items = JSON.parse(raw); }
+  catch {
+    try { items = raw.split(/\r?\n/).filter(line => line.trim()).map(line => JSON.parse(line)); }
+    catch { throw new CliError('invalid_input', BATCH_FILE_FORMAT); }
+  }
+  // A JSONL file of one line is a batch of one.
+  if (items && typeof items === 'object' && !Array.isArray(items)) items = [items];
+  requireThat(Array.isArray(items) && items.every(item => item && typeof item === 'object' && !Array.isArray(item)), 'invalid_input', BATCH_FILE_FORMAT);
+  requireThat(items.length >= 1 && items.length <= MAX_BATCH_ITEMS, 'invalid_input',
+    `The inputs file must contain 1-${MAX_BATCH_ITEMS} inputs for one model; it has ${items.length}.`, { inputs: items.length, maximum: MAX_BATCH_ITEMS });
+  return items;
+}
+
 async function estimateArgs(options) {
   requireThat(options.model, 'missing_model', 'Pass --model.');
-  requireThat(!(options.input && options['input-file']), 'invalid_input', 'Choose --input or --input-file.');
-  let input = {};
-  const raw = options['input-file'] ? await localFile(() => fs.readFile(options['input-file'], 'utf8'), { file: options['input-file'] }) : options.input || '{}';
-  try { input = JSON.parse(raw); }
-  catch { throw new CliError('invalid_input', 'The input must contain valid JSON.'); }
-  requireThat(input && typeof input === 'object' && !Array.isArray(input), 'invalid_input', 'The model input must be a JSON object.');
-  if (options.prompt !== undefined) {
-    requireThat(input.prompt === undefined || input.prompt === options.prompt, 'invalid_input', 'prompt was supplied twice with different values.');
-    input.prompt = options.prompt;
+  requireThat(['input', 'input-file', 'inputs-file'].filter(key => options[key] !== undefined).length <= 1, 'invalid_input', 'Choose one of --input, --input-file or --inputs-file.');
+  let body;
+  if (options['inputs-file'] !== undefined) {
+    requireThat(options.prompt === undefined, 'invalid_input', '--prompt is for one input; put each prompt in its item of --inputs-file.');
+    body = { inputs: await batchInputs(options['inputs-file']) };
+  } else {
+    let input = {};
+    const raw = options['input-file'] ? await localFile(() => fs.readFile(options['input-file'], 'utf8'), { file: options['input-file'] }) : options.input || '{}';
+    try { input = JSON.parse(raw); }
+    catch { throw new CliError('invalid_input', 'The input must contain valid JSON.'); }
+    requireThat(input && typeof input === 'object' && !Array.isArray(input), 'invalid_input', 'The model input must be a JSON object.');
+    if (options.prompt !== undefined) {
+      requireThat(input.prompt === undefined || input.prompt === options.prompt, 'invalid_input', 'prompt was supplied twice with different values.');
+      input.prompt = options.prompt;
+    }
+    body = { input };
   }
   let pricingParameters;
   if (options['pricing-parameters'] !== undefined) {
@@ -201,7 +252,7 @@ async function estimateArgs(options) {
   requireThat(options['pricing-source'] === undefined || ['pricing_rules', 'account', 'public_reference'].includes(options['pricing-source']), 'invalid_option', 'pricing-source must be pricing_rules (account/public_reference remain compatibility aliases).');
   const media = number(options['media-seconds'], 'media-seconds', Number.MIN_VALUE, 3600);
   const cap = number(options['max-cost-usd'], 'max-cost-usd', Number.MIN_VALUE, 10_000);
-  return { model: options.model, input, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
+  return { model: options.model, ...body, ...(pricingParameters !== undefined ? { pricing_parameters: pricingParameters } : {}), ...(options['pricing-source'] ? { pricing_source: options['pricing-source'] } : {}), ...(media !== undefined ? { media_seconds: media } : {}), ...(cap !== undefined ? { max_cost_usd: cap } : {}) };
 }
 
 export async function dispatch(positionals, options, { state, server, credentials, client, mcp = client, signal, progress, skillHome, updates, budget }) {
@@ -250,12 +301,16 @@ export async function dispatch(positionals, options, { state, server, credential
     return media.estimate(await estimateArgs(options));
   }
   if (command === 'generate') {
-    requireThat(options.quote, 'missing_quote', 'Run estimate and obtain user approval before generation.');
-    requireThat(!['model', 'input', 'input-file', 'prompt', 'max-cost-usd', 'media-seconds'].some(k => options[k] !== undefined), 'quote_changed', 'Generation uses the saved quote. Change inputs by preparing a new estimate.');
-    const result = await media.generate(action, options.quote, { confirmed: options.confirm });
+    let result;
+    if (options['skip-estimate']) result = await media.direct(action, await estimateArgs(options));
+    else {
+      requireThat(options.quote, 'missing_quote', 'Run estimate and obtain user approval before generation. Use --skip-estimate only when the user explicitly said not to estimate or confirm.');
+      if (options.wait) requireThat(!Array.isArray((await state.read('quotes', options.quote))?.args?.inputs), 'invalid_option', BATCH_WAIT);
+      result = await media.generate(action, options.quote, { confirmed: options.confirm });
+    }
     if (options.wait && result.task_id && result.status !== 'completed') {
       const task = await media.wait(result.task_id, { timeout: number(options.timeout, 'timeout', 1, 86400, true) || 1800, signal, progress, budget });
-      return { ...task, quote_id: options.quote, client_request_id: result.client_request_id };
+      return { ...task, quote_id: result.quote_id, client_request_id: result.client_request_id };
     }
     return result;
   }

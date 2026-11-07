@@ -13,30 +13,31 @@ async function context(t, kind, source, serverMinutes, budget, seed) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-quote-expiry-'));
   t.after(() => fs.rm(home, { recursive: true, force: true }));
   const start = Date.parse('2026-10-15T00:00:00Z') + seed % 1000;
-  let now = start;
+  let now = start, usd = 0.02;
   const state = new State(home);
   const submissions = [];
-  const quote = {
+  // Each estimate is current from the moment it is made, at the price of that moment.
+  const quote = () => ({
     ok: true, _binding: 'expiry-test', model: `fixture-${kind}`, type: kind, input_valid: true,
-    estimate: { status: 'estimated', min_usd: 0.02, max_usd: 0.02 },
+    estimate: { status: 'estimated', min_usd: usd, max_usd: usd },
     ...(source === 'rules' ? { pricing_quote: { source: 'pricing_rules', request_hash: 'a'.repeat(64),
-      fingerprint: 'b'.repeat(64), total_uc: '13600', expires_at: new Date(start + serverMinutes * minute).toISOString() } } : {}),
+      fingerprint: 'b'.repeat(64), total_uc: String(Math.round(usd * 680_000)), expires_at: new Date(now + serverMinutes * minute).toISOString() } } : {}),
     ...(source === 'account' ? { account_quote: { request_hash: 'a'.repeat(64), parameters: {},
-      quote: { amount: '0.02', policy_checksum: 'b'.repeat(64), expires_at: new Date(start + serverMinutes * minute).toISOString() } } } : {}),
-  };
+      quote: { amount: String(usd), policy_checksum: 'b'.repeat(64), expires_at: new Date(now + serverMinutes * minute).toISOString() } } } : {}),
+  });
   const client = {
     credentials: { access: async () => ({ binding: 'expiry-test' }) },
     async call(name, args) {
-      if (name === 'estimate_cost') return structuredClone(quote);
+      if (name === 'estimate_cost') return quote();
       assert.equal(name, `generate_${kind}`);
       submissions.push(args);
       return { ok: true, task_id: `fixture-task-${seed}` };
     },
   };
   const media = new Media({ client, state, server: new URL('https://mcp.evolink.ai/mcp'), now: () => now });
-  const result = await media.estimate({ model: quote.model, input: { prompt: `expiry-${seed}` },
+  const result = await media.estimate({ model: `fixture-${kind}`, input: { prompt: `expiry-${seed}` },
     ...(budget === undefined ? {} : { max_cost_usd: budget }) });
-  return { media, state, result, start, submissions, advance: elapsed => { now = start + elapsed; } };
+  return { media, state, result, start, submissions, advance: elapsed => { now = start + elapsed; }, setPrice: value => { usd = value; } };
 }
 
 test('seed 20261015: saved quotes use the core approval window without extending a shorter server approval', async t => {
@@ -58,27 +59,39 @@ test('seed 20261015: saved quotes use the core approval window without extending
   assert.equal(cases, 54);
 });
 
-test('seed 20261015: halfway and just before the expiry can submit; the expiry instant and later cannot', async t => {
+test('seed 20261015: a quote submits as current before its expiry, and at the expiry instant and later still submits, saying so', async t => {
   let seed = 20261015, cases = 0;
   for (const kind of ['image', 'video', 'audio']) for (const source of ['rules', 'account', 'legacy']) {
     // A server approval of 30 minutes bounds the saved quote; without one the core's window does.
     const ttl = source === 'legacy' ? APPROVAL_TTL_MS : 30 * minute;
-    for (const budget of [undefined, 0.05]) for (const elapsed of [Math.floor(ttl / 2), ttl - 1, ttl, ttl + 1]) {
+    for (const budget of [undefined, 0.05]) for (const elapsed of [Math.floor(ttl / 2), ttl - 1, ttl, ttl + 1, ttl + 3 * 86_400_000]) {
       seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
       const c = await context(t, kind, source, 30, budget, seed);
       c.advance(elapsed);
-      if (elapsed < ttl) {
-        await assert.rejects(c.media.generate(kind, c.result.quote_id), { code: 'confirmation_required' });
-        await c.media.generate(kind, c.result.quote_id, { confirmed: true });
-        assert.equal(c.submissions.length, 1);
-        assert.equal(c.submissions[0].max_cost_usd, budget);
-      } else {
-        await assert.rejects(c.media.generate(kind, c.result.quote_id, { confirmed: true }), { code: 'quote_expired' });
-        assert.equal(c.submissions.length, 0);
-        assert.equal((await c.state.read('quotes', c.result.quote_id)).state, 'quoted');
-      }
+      await assert.rejects(c.media.generate(kind, c.result.quote_id), { code: 'confirmation_required' });
+      const result = await c.media.generate(kind, c.result.quote_id, { confirmed: true });
+      assert.equal(c.submissions.length, 1);
+      assert.equal(c.submissions[0].max_cost_usd, budget);
+      const saved = await c.state.read('quotes', c.result.quote_id);
+      assert.equal(result.approval_expired, elapsed >= ttl ? true : undefined, `${kind}/${source}/${elapsed}`);
+      if (elapsed >= ttl) assert.equal(result.quote_expired_at, new Date(c.start + ttl).toISOString());
+      assert.equal(saved.state, 'submitted');
       cases++;
     }
   }
-  assert.equal(cases, 72);
+  assert.equal(cases, 90);
+});
+
+test('seed 20261015: a quote whose price changed is refused before or after its expiry and stays unsubmitted', async t => {
+  let seed = 20261015, cases = 0;
+  for (const kind of ['image', 'video', 'audio']) for (const source of ['rules', 'account', 'legacy']) for (const elapsed of [10 * minute, APPROVAL_TTL_MS + 1]) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    const c = await context(t, kind, source, 30, undefined, seed);
+    c.advance(elapsed); c.setPrice(0.03);
+    await assert.rejects(c.media.generate(kind, c.result.quote_id, { confirmed: true }), { code: 'price_changed' });
+    assert.equal(c.submissions.length, 0);
+    assert.equal((await c.state.read('quotes', c.result.quote_id)).state, 'quoted');
+    cases++;
+  }
+  assert.equal(cases, 18);
 });
