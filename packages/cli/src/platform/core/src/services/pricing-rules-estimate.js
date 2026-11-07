@@ -7,6 +7,7 @@ import { prepareSeedanceInput } from './seedance-input.js';
 import { searchUsage } from './search-usage.js';
 import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
 import { INPUT_IMAGE_TOKENS, isTokenImageModel, tokenImageReservation } from './gpt-image-tokens.js';
+import { OMNI_IMAGE_TOKENS, OMNI_UNREAD_TIER, isOmniTokenModel, omniLowerInputTier, omniReservation } from './omni-tokens.js';
 /**
  * How long an approval from estimate_cost is shown as current. The rules' own `fresh_until`
  * is a short refresh window (minutes); people confirming a price in a chat may come back much
@@ -132,6 +133,8 @@ function componentReads(c) {
 }
 /** How to give a usage value an estimate lacks, or why only the finished task knows it. */
 function usageHint(name, entry, declared) {
+    if (name === 'media_seconds')
+        return 'pass the length of the input video in seconds as media_seconds (for several reference videos, the longest one\'s): EvoLink measures it at submission and reserves its tokens with the output\'s.';
     if (name === 'input_seconds' || name === 'first_input_video_seconds')
         return 'pass the length of the input video or audio, in seconds, as media_seconds.';
     if (name === 'source_output_seconds')
@@ -167,39 +170,59 @@ export function billingUsageHelp(rule, entry) {
     const declared = new Set((rule.parameters ?? []).map(p => p.name));
     return helpLines([...declared].filter(name => isUsageParameter(entry.id, name)).sort(), entry, rule, declared);
 }
-// GPT Image token models: the reference price counts the tokens the gateway reserves at submission for the input.
+// GPT Image and Gemini Omni token models: the reference price counts the tokens the gateway reserves at submission for the input.
 const RESERVED_TOKENS = new Set(['image_input_tokens', 'image_cached_input_tokens', 'image_output_tokens',
     'text_input_tokens', 'text_cached_input_tokens', 'text_output_tokens']);
+const OMNI_TOKENS = new Set(['input_tokens', 'video_output_tokens', 'other_output_tokens']);
 /** GPT Image 2.6 rules also bill an SVG's author model. SVG output is not quoted, so a reference price uses none. */
 const NO_SVG_AUTHOR = { svg_model: 'none', svg_input_tokens: 0, svg_output_tokens: 0 };
 const svgAuthor = (name) => Object.hasOwn(NO_SVG_AUTHOR, name);
 /** Only a rule billed by these token counts alone, with an output component, can price the reservation. */
 function reservesTokens(rule, entry) {
-    return isTokenImageModel(entry.id.toLowerCase()) && rule.settlement_basis === 'actual_usage'
+    const id = entry.id.toLowerCase();
+    if (rule.settlement_basis !== 'actual_usage')
+        return false;
+    if (isOmniTokenModel(id)) {
+        return (rule.parameters ?? []).every(p => OMNI_TOKENS.has(p.name))
+            && rule.components.some(c => c.role === 'video_output' && c.pricing_status === 'available' && componentReads(c).has('video_output_tokens'));
+    }
+    return isTokenImageModel(id)
         && (rule.parameters ?? []).every(p => RESERVED_TOKENS.has(p.name)
             || svgAuthor(p.name) && (p.name !== 'svg_model' || (p.values ?? p.enum ?? []).includes(NO_SVG_AUTHOR.svg_model)))
         && rule.components.some(c => c.role === 'image_output' && c.pricing_status === 'available' && componentReads(c).has('image_output_tokens'));
 }
-/** How estimate_cost prices a GPT Image token model, for get_model. */
+/** How estimate_cost prices a token model, for get_model. */
 export function tokenReferenceHelp(rule, entry) {
     if (!reservesTokens(rule, entry))
         return undefined;
     const rates = rule.components.filter(c => ![...componentReads(c)].some(svgAuthor))
         .map(c => `${c.id} $${c.rate.usd} per ${c.unit === '1k_tokens' ? '1K tokens' : c.unit.replace(/_/g, ' ')}`);
+    if (isOmniTokenModel(entry.id.toLowerCase())) {
+        return `Billed by actual token usage. estimate_cost gives a reference price for the exact input: the tokens EvoLink reserves at submission for its resolution, duration, prompt, images and input videos, at the published rates (public default rates: ${rates.join('; ')}). Give an input or reference video's length as media_seconds; its resolution is read at submission, so the reference counts the highest (${OMNI_UNREAD_TIER}). The task settles at the tokens it actually uses.`;
+    }
     return `Billed by actual token usage. estimate_cost gives a reference price for the exact input: the tokens EvoLink reserves at submission for its size, quality, n, prompt and reference images, at the published rates (public default rates: ${rates.join('; ')}). The task settles at the tokens it actually uses.`;
 }
-function reservation(rule, entry, input, countPromptTokens) {
+/** An Omni reservation's tokens as the rule's parameters. */
+const omniParameters = (rule, usage) => Object.fromEntries((rule.parameters ?? []).map(p => [p.name, usage.tokens[p.name] ?? 0]));
+function reservation(rule, entry, input, countPromptTokens, mediaSeconds) {
     if (!reservesTokens(rule, entry))
         return undefined;
-    const usage = tokenImageReservation(entry.id.toLowerCase(), input, countPromptTokens);
+    const id = entry.id.toLowerCase();
+    if (isOmniTokenModel(id)) {
+        const usage = omniReservation(id, input, mediaSeconds, { countPromptTokens });
+        return 'needs' in usage ? usage : { omni: usage, parameters: omniParameters(rule, usage) };
+    }
+    const usage = tokenImageReservation(id, input, countPromptTokens);
     const parameters = {};
     for (const p of rule.parameters ?? []) {
         parameters[p.name] = svgAuthor(p.name) ? NO_SVG_AUTHOR[p.name] : usage.per_image[p.name] ?? 0;
     }
-    return { usage, parameters };
+    return { gpt: usage, parameters };
 }
+const CONFIRM_REFERENCE = 'Confirm this reference price before generation. It is billed by actual token usage: EvoLink reserves this amount at submission and settles the task at the tokens it actually uses, refunding or charging the difference when it finishes, so the final charge may be lower or slightly higher.';
+const ignoredNote = (ignored) => `pricing_parameters ${ignored.join(', ')} ${ignored.length > 1 ? 'are' : 'is'} not used for this model: the reference price comes from the generation input.`;
 function reservationNotes(usage, ignored) {
-    const notes = ['Confirm this reference price before generation. It is billed by actual token usage: EvoLink reserves this amount at submission and settles the task at the tokens it actually uses, refunding or charging the difference when it finishes, so the final charge may be lower or slightly higher.'];
+    const notes = [CONFIRM_REFERENCE];
     const gif = usage.output.gif;
     if (gif)
         notes.push(`output_format is gif: the ${gif.frames} frames of ${gif.frame_width}×${gif.frame_height}${usage.output.size === 'auto' ? ' (size auto)' : ''} are drawn ${gif.columns}×${gif.rows} on one ${usage.output.width}×${usage.output.height} image, and the reference counts that image's output tokens.`);
@@ -211,7 +234,41 @@ function reservationNotes(usage, ignored) {
         notes.push(`n=${usage.images}: the reference covers ${usage.images} images; the model often returns fewer, and the task is billed for what it returns.`);
     notes.push('Prompt tokens are approximated; EvoLink counts them exactly at submission.');
     if (ignored.length)
-        notes.push(`pricing_parameters ${ignored.join(', ')} ${ignored.length > 1 ? 'are' : 'is'} not used for this model: the reference price comes from the generation input.`);
+        notes.push(ignoredNote(ignored));
+    return notes;
+}
+const tokenText = (tokens) => tokens.toLocaleString('en-US');
+function omniBasis(usage) {
+    const t = usage.tokens, videos = usage.input_videos;
+    const parts = [`${tokenText(t.video_output_tokens)} video output tokens (${usage.upscale ? `upscale ${usage.upscale.source} to ${usage.upscale.target}` : usage.output.resolution}, ${usage.output.seconds} s)`];
+    if (t.input_tokens) {
+        const inputs = [`about ${tokenText(usage.prompt_tokens)} prompt tokens`, ...usage.images ? [`${usage.images} image${usage.images > 1 ? 's' : ''}`] : [],
+            ...videos ? [`${videos.count > 1 ? `${videos.count} reference videos of` : 'an input video of'} ${videos.seconds} s at ${videos.resolution}`] : []];
+        parts.push(`${tokenText(t.input_tokens)} input tokens (${inputs.join(', ')})`);
+    }
+    if (t.other_output_tokens)
+        parts.push(`${tokenText(t.other_output_tokens)} other output tokens`);
+    return `Reference price: published token rates applied to what EvoLink reserves at submission for this input: ${parts.join(', ')}, each part rounded up.`;
+}
+function omniNotes(usage, ignored, lower) {
+    const notes = [CONFIRM_REFERENCE];
+    const videos = usage.input_videos;
+    if (videos?.resolution_assumed) {
+        notes.push(`EvoLink reads the input video's resolution at submission; the request does not give it, so the reference counts the highest, ${videos.resolution}, as EvoLink reserves when it cannot read it.${lower ? ` A ${lower.tier} input video reserves ${lower.amounts.credits} credits (about $${lower.amounts.usd}) instead.` : ''}`);
+    }
+    if (usage.upscale?.source_assumed) {
+        notes.push(`EvoLink reads the source video's resolution at submission; the reference counts the source that costs most for ${usage.upscale.target}, ${usage.upscale.source}.${lower ? ` A ${lower.tier} source reserves ${lower.amounts.credits} credits (about $${lower.amounts.usd}) instead.` : ''}`);
+    }
+    if (videos && usage.route !== 'upscale')
+        notes.push(`media_seconds counts ${videos.count > 1 ? 'each reference video' : 'the input video'} at ${videos.seconds} s (rounded up); EvoLink measures ${videos.count > 1 ? 'each' : 'it'} at submission.`);
+    if (usage.output.follows_input)
+        notes.push('quality is auto, so the output follows the input video\'s resolution.');
+    if (usage.images)
+        notes.push(`Each input image counts ${tokenText(OMNI_IMAGE_TOKENS)} input tokens.`);
+    if (usage.prompt_tokens)
+        notes.push('Prompt tokens are approximated; EvoLink counts them exactly at submission.');
+    if (ignored.length > 0)
+        notes.push(ignoredNote(ignored));
     return notes;
 }
 function evaluate(node, params) {
@@ -265,55 +322,11 @@ function evaluate(node, params) {
         default: return fail('invalid_pricing_expression', 'The pricing rule uses an unsupported operation.');
     }
 }
-/** The most inputs one estimate_cost or generate_* call takes (`inputs`), all for one model. */
-export const MAX_BATCH_ITEMS = 50;
-/** `batch_items` marks an approval of a whole batch (inputs); it never approves a single input, nor the reverse. */
-export const ApprovedRulesEstimate = z.object({ source: z.literal('pricing_rules'), price_scope: z.literal('public_default'),
-    model_id: z.string().min(1).max(100), request_hash: z.string().regex(/^[a-f0-9]{64}$/),
-    fingerprint: z.string().regex(/^[a-f0-9]{64}$/), total_uc: z.string().max(32).regex(/^\d+$/),
-    expires_at: z.string().datetime({ offset: true }), batch_items: z.number().int().min(1).max(MAX_BATCH_ITEMS).optional() }).strict();
-function economicRules(rule) {
-    // Freshness and configuration timestamps do not change the approved price.
-    return { ...rule, components: rule.components.map(({ effective_at, official_rate, ...c }) => ({ ...c,
-            tiers: c.tiers.map(({ effective_at, official_rate, ...t }) => t) })) };
-}
-/** countPromptTokens replaces the approximate prompt token count, for comparing with the gateway's exact count. */
-export function calculateRulesEstimate(body, entry, input, options = {}) {
-    const rule = 'model' in body ? body.model : body.models.find(model => model.model_id === entry.id);
-    if (!rule || rule.model_id !== entry.id.toLowerCase() || rule.modality !== entry.kind || rule.policy_source !== 'published' || rule.pricing_status !== 'available') {
-        fail('pricing_rules_unavailable', 'This model has no available published media pricing policy.');
-    }
-    const prepared = prepareSeedanceInput(entry, input);
-    if (prepared.errors.length)
-        throw new QuoteError('invalid_quote_parameter', `${prepared.errors[0].param} ${prepared.errors[0].problem}`, prepared.errors[0].param);
-    const effectiveInput = prepared.input;
-    const declared = new Set((rule.parameters ?? []).map(p => p.name)), ids = new Set();
-    // GPT Image token models never use token counts from pricing_parameters: the reference counts what the gateway
-    // reserves for this input. Leaving them out of the request hash lets a generation pass them or not.
-    const ignored = isTokenImageModel(entry.id.toLowerCase())
-        ? Object.keys(options.pricingParameters ?? {}).filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];
-    const pricingParameters = ignored.length
-        ? Object.fromEntries(Object.entries(options.pricingParameters).filter(([name]) => !ignored.includes(name))) : options.pricingParameters;
-    const reserved = reservation(rule, entry, effectiveInput, options.countPromptTokens);
-    const params = { ...prepareQuoteParameters(rule, entry, effectiveInput, pricingParameters, options.mediaSeconds, true), ...reserved?.parameters };
-    // The gateway rounds each image's charge up separately, then reserves it once per image.
-    const images = BigInt(reserved?.usage.images ?? 1);
+/** The rule's components for these parameters: each subtotal rounded and at least its minimum, times count. */
+function chargeComponents(rule, declared, params, images, missing) {
     const components = [];
+    const ids = new Set();
     let total = 0n;
-    const missing = new Set();
-    const searchCharges = searchUsage(entry, effectiveInput).filter(search => search.enabled).map(search => {
-        const component = rule.components.find(item => item.role === search.role);
-        if (!declared.has(search.parameter) || !component || component.pricing_status !== 'available' || component.unit !== 'search'
-            || component.billing_unit_size !== 1 || component.tiers.length) {
-            fail('search_pricing_unavailable', 'The enabled search unit price could not be verified. Refresh pricing before generation.');
-        }
-        const expected = options.pricingParameters?.[search.parameter] !== undefined || effectiveInput[search.parameter] !== undefined;
-        if (!expected)
-            missing.add(search.parameter);
-        return { role: search.role, input_parameter: search.input_parameter, usage_parameter: search.parameter,
-            assumed_count: String(params[search.parameter]), assumption: expected ? 'expected_usage' : 'zero_searches',
-            actual_count_known: false, unit: 'search', unit_price_amounts: amountsForUC(component.rate.uc) };
-    });
     for (const c of rule.components) {
         if (ids.has(c.id) || !c.quantity_rule || !c.rounding)
             fail('invalid_pricing_expression', 'The pricing rule is incomplete or has duplicate components.');
@@ -361,6 +374,60 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
                 throw error;
         }
     }
+    return { components, total };
+}
+/** The most inputs one estimate_cost or generate_* call takes (`inputs`), all for one model. */
+export const MAX_BATCH_ITEMS = 50;
+/** `batch_items` marks an approval of a whole batch (inputs); it never approves a single input, nor the reverse. */
+export const ApprovedRulesEstimate = z.object({ source: z.literal('pricing_rules'), price_scope: z.literal('public_default'),
+    model_id: z.string().min(1).max(100), request_hash: z.string().regex(/^[a-f0-9]{64}$/),
+    fingerprint: z.string().regex(/^[a-f0-9]{64}$/), total_uc: z.string().max(32).regex(/^\d+$/),
+    expires_at: z.string().datetime({ offset: true }), batch_items: z.number().int().min(1).max(MAX_BATCH_ITEMS).optional() }).strict();
+function economicRules(rule) {
+    // Freshness and configuration timestamps do not change the approved price.
+    return { ...rule, components: rule.components.map(({ effective_at, official_rate, ...c }) => ({ ...c,
+            tiers: c.tiers.map(({ effective_at, official_rate, ...t }) => t) })) };
+}
+/** countPromptTokens replaces the approximate prompt token count, for comparing with the gateway's exact count. */
+export function calculateRulesEstimate(body, entry, input, options = {}) {
+    const rule = 'model' in body ? body.model : body.models.find(model => model.model_id === entry.id);
+    if (!rule || rule.model_id !== entry.id.toLowerCase() || rule.modality !== entry.kind || rule.policy_source !== 'published' || rule.pricing_status !== 'available') {
+        fail('pricing_rules_unavailable', 'This model has no available published media pricing policy.');
+    }
+    const prepared = prepareSeedanceInput(entry, input);
+    if (prepared.errors.length)
+        throw new QuoteError('invalid_quote_parameter', `${prepared.errors[0].param} ${prepared.errors[0].problem}`, prepared.errors[0].param);
+    const effectiveInput = prepared.input;
+    const declared = new Set((rule.parameters ?? []).map(p => p.name));
+    const id = entry.id.toLowerCase();
+    // GPT Image and Gemini Omni token models never use token counts from pricing_parameters: the reference counts what
+    // the gateway reserves for this input. Leaving them out of the request hash lets a generation pass them or not.
+    const ignored = isTokenImageModel(id) || isOmniTokenModel(id)
+        ? Object.keys(options.pricingParameters ?? {}).filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];
+    const pricingParameters = ignored.length
+        ? Object.fromEntries(Object.entries(options.pricingParameters).filter(([name]) => !ignored.includes(name))) : options.pricingParameters;
+    const reserved = reservation(rule, entry, effectiveInput, options.countPromptTokens, options.mediaSeconds);
+    const params = { ...prepareQuoteParameters(rule, entry, effectiveInput, pricingParameters, options.mediaSeconds, true), ...reserved?.parameters };
+    // The gateway rounds each image's charge up separately, then reserves it once per image.
+    const images = BigInt(reserved?.gpt?.images ?? 1);
+    const missing = new Set();
+    // An Omni input video is billed by its length, which only media_seconds gives before submission.
+    if (reserved?.needs)
+        missing.add('media_seconds');
+    const searchCharges = searchUsage(entry, effectiveInput).filter(search => search.enabled).map(search => {
+        const component = rule.components.find(item => item.role === search.role);
+        if (!declared.has(search.parameter) || !component || component.pricing_status !== 'available' || component.unit !== 'search'
+            || component.billing_unit_size !== 1 || component.tiers.length) {
+            fail('search_pricing_unavailable', 'The enabled search unit price could not be verified. Refresh pricing before generation.');
+        }
+        const expected = options.pricingParameters?.[search.parameter] !== undefined || effectiveInput[search.parameter] !== undefined;
+        if (!expected)
+            missing.add(search.parameter);
+        return { role: search.role, input_parameter: search.input_parameter, usage_parameter: search.parameter,
+            assumed_count: String(params[search.parameter]), assumption: expected ? 'expected_usage' : 'zero_searches',
+            actual_count_known: false, unit: 'search', unit_price_amounts: amountsForUC(component.rate.uc) };
+    });
+    const { components, total } = reserved?.needs ? { components: [], total: 0n } : chargeComponents(rule, declared, params, images, missing);
     if (total > BigInt(Number.MAX_SAFE_INTEGER))
         fail('invalid_pricing_expression', 'The estimated charge exceeds its supported range.');
     // No media generation is free. A total of 0 comes only from usage given as 0, which then counts as missing, so
@@ -380,10 +447,20 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         request_hash: requestHash, total_uc: amounts.uc, expires_at: new Date(Date.now() + APPROVAL_TTL_MS).toISOString(),
         fingerprint: quoteRequestHash(entry.id, { rules: economicRules(rule), parameters: params,
             exchange_rate_version: body.meta.exchange_rate_version, components, missing: [...missing].sort(), total_uc: amounts.uc,
-            ...(reserved ? { reservation: reserved.usage } : {}) }) };
-    const status = missing.size ? components.length ? 'partial' : 'needs_input' : reserved ? 'token_billed' : 'estimated';
+            ...(reserved?.gpt || reserved?.omni ? { reservation: reserved.gpt ?? reserved.omni } : {}) }) };
+    const status = missing.size ? components.length ? 'partial' : 'needs_input'
+        : reserved?.gpt || reserved?.omni ? 'token_billed' : 'estimated';
     const missingUsage = [...missing].sort(), usageHelp = helpLines(missingUsage, entry, rule, declared);
-    const usage = reserved?.usage;
+    const usage = reserved?.gpt, omni = reserved?.omni;
+    // An Omni input video of unknown resolution counts the highest; the same input at a lower one, for the notes.
+    const lowerTier = omni && status === 'token_billed' ? omniLowerInputTier(omni) : undefined;
+    let lower;
+    if (omni && lowerTier) {
+        const alternative = omniReservation(id, effectiveInput, options.mediaSeconds, { countPromptTokens: options.countPromptTokens, inputTier: lowerTier });
+        const cost = 'needs' in alternative ? undefined : chargeComponents(rule, declared, { ...params, ...omniParameters(rule, alternative) }, 1n, new Set()).total;
+        if (cost !== undefined && cost < total)
+            lower = { tier: lowerTier, amounts: amountsForUC(String(cost)) };
+    }
     const estimate = { status,
         // Nothing could be priced: a zero amount would read as free.
         ...(status === 'needs_input' ? {} : { min_usd: Number(amounts.usd), max_usd: Number(amounts.usd),
@@ -391,14 +468,17 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
         total_known: status === 'estimated',
         basis: [status === 'token_billed' && usage
                 ? `Reference price: published token rates applied to what EvoLink reserves at submission for this input. Per image: ${usage.per_image.image_output_tokens.toLocaleString('en-US')} output tokens (${usage.output.width}×${usage.output.height}${usage.output.gif ? `, ${usage.output.gif.frames} GIF frames` : ''}, quality ${usage.output.quality}), about ${usage.per_image.text_input_tokens.toLocaleString('en-US')} prompt tokens and ${usage.per_image.image_input_tokens.toLocaleString('en-US')} reference-image tokens, each part rounded up; ${usage.images} image${usage.images > 1 ? 's' : ''}.`
-                : 'Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
+                : status === 'token_billed' && omni ? omniBasis(omni)
+                    : 'Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
         ...(missing.size ? { uncheckable_reason: 'usage', missing_usage: missingUsage, usage_help: usageHelp } : {}),
         ...(status === 'token_billed' && usage ? { reference_usage: usage } : {}),
+        ...(status === 'token_billed' && omni ? { reference_usage: { ...omni, ...(lower ? { lower_input: { resolution: lower.tier, amounts: lower.amounts } } : {}) } } : {}),
         possible_extras: status === 'partial' ? usageHelp.map(line => `Additional charge depends on ${line}`) : [],
         notes: ['Public default prices; account discounts are not included.', ...status === 'needs_input'
                 ? ['No total is quoted until the missing usage is known, and generate_* will not submit before then.']
                 : status === 'token_billed' && usage ? reservationNotes(usage, ignored)
-                    : ['Confirm the estimated cost before generation. Actual billed usage and final charges may differ.']] };
+                    : status === 'token_billed' && omni ? omniNotes(omni, ignored, lower)
+                        : ['Confirm the estimated cost before generation. Actual billed usage and final charges may differ.']] };
     if (zeroUsage.length)
         estimate.notes.push(`pricing_parameters ${zeroUsage.join(', ')} given as 0 would price this generation at 0. No media generation is free, so ${zeroUsage.length > 1 ? 'they count' : 'it counts'} as missing.`);
     if (ignored.length && status !== 'token_billed')

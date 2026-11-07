@@ -20,7 +20,7 @@ export function dashboardCheck() {
 }
 /** The media_seconds argument of estimate_cost and the generate tools. */
 export const MEDIA_SECONDS_MAX = 3_600;
-export const MEDIA_SECONDS_DESCRIPTION = 'Only for models billed per second that have no duration parameter (get_model explains which length is billed): usually the input video or audio length; for generated audio with unknown duration, only an expected output length for an illustrative estimate. It is not sent to the model, and EvoLink charges by the measured duration. It cannot establish max_cost_usd for unknown output duration or for per-second video requests with video_urls, video_url or source_task_id, whose billing is not fully covered by published prices.';
+export const MEDIA_SECONDS_DESCRIPTION = 'Only for models billed per second that have no duration parameter (get_model explains which length is billed): usually the input video or audio length; for generated audio with unknown duration, only an expected output length for an illustrative estimate. For Gemini Omni Flash, the length of the input video, or of the reference videos (the longest one\'s), which its reference price counts. It is not sent to the model, and EvoLink charges by the measured duration. It cannot establish max_cost_usd for unknown output duration or for per-second video requests with video_urls, video_url or source_task_id, whose billing is not fully covered by published prices.';
 /** Text and structured content carry the same facts: some clients show the model only one of them. */
 export function ok(text, structured, resources = []) {
     return { content: [{ type: 'text', text }, ...resources], structuredContent: { ok: true, ...structured } };

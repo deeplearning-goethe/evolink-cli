@@ -9,6 +9,7 @@ import { formatEstimateRange } from '../services/pricing-client.js';
 import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/pricing-quote-client.js';
 import { ApprovedRulesEstimate, REFERENCE_BUDGET_FACTOR, amountsForUC, calculateRulesEstimate, createRulesEstimate, checkRulesApproval, readPricingRulesFor, referenceAllowance, referenceBudgetExceeded, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
+import { isOmniTokenModel } from '../services/omni-tokens.js';
 import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { DASHBOARD_CHECK_GUIDANCE, MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, dashboardCheck, errorResult, failure, money, ok, progressReporter, retryText, usdOf } from './shared.js';
@@ -72,6 +73,8 @@ function inputSchema(kind) {
     };
 }
 const argsSchema = (kind) => z.object(inputSchema(kind));
+/** What lowers a reference price: GPT Image's output settings, or a Gemini Omni video's resolution, length and media. */
+const lowerReference = (model) => isOmniTokenModel(model) ? 'quality, duration, images or input videos' : 'size, quality, count or reference images';
 function rangeText(estimate) {
     return formatEstimateRange(estimate) ?? 'unknown';
 }
@@ -274,7 +277,7 @@ function registerGenerate(server, config, kind) {
                     });
                 }
                 if (allowance && referenceBudgetExceeded(rulesEstimate.amounts.uc, args.max_cost_usd)) {
-                    return failure(`The reference price ${rangeText(estimate)} is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it ($${allowance.usd}, ${allowance.credits} credits) is above max_cost_usd $${args.max_cost_usd}. Nothing was submitted or charged. Lower the size, quality, count or reference images, or ask the user to raise the cap.`, {
+                    return failure(`The reference price ${rangeText(estimate)} is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it ($${allowance.usd}, ${allowance.credits} credits) is above max_cost_usd $${args.max_cost_usd}. Nothing was submitted or charged. Lower the ${lowerReference(entry.id)}, or ask the user to raise the cap.`, {
                         error: { category: 'invalid_request', param: 'max_cost_usd' },
                         estimate, budget_check: { factor: REFERENCE_BUDGET_FACTOR, amounts: allowance },
                         charged: 'no',
@@ -556,7 +559,7 @@ async function generateBatch(config, kind, args, extra, startedMono) {
                 });
             }
             if (budgetRoom && referenceBudgetExceeded(total.amounts.uc, args.max_cost_usd)) {
-                return failure(`The reference price of the batch, ${rangeText(total.estimate)}, is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it ($${budgetRoom.usd}, ${budgetRoom.credits} credits) is above max_cost_usd $${args.max_cost_usd}. Nothing was submitted or charged. Use fewer inputs, or lower the size, quality, count or reference images, or ask the user to raise the cap.`, {
+                return failure(`The reference price of the batch, ${rangeText(total.estimate)}, is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it ($${budgetRoom.usd}, ${budgetRoom.credits} credits) is above max_cost_usd $${args.max_cost_usd}. Nothing was submitted or charged. Use fewer inputs, or lower the ${lowerReference(entry.id)}, or ask the user to raise the cap.`, {
                     error: { category: 'invalid_request', param: 'max_cost_usd' }, estimate: total.estimate, budget_check: { factor: REFERENCE_BUDGET_FACTOR, amounts: budgetRoom }, charged: 'no', batch
                 });
             }

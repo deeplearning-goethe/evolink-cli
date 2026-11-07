@@ -176,7 +176,7 @@ function gifSheet(model, size, frames, quality) {
     return { ...best, frames, frame_width: frameWidth, frame_height: frameHeight };
 }
 /** CJK ideographs, kana, Hangul and their punctuation and full-width forms. */
-const CJK = /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿︰-﹏＀-￯]/u;
+export const CJK = /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿︰-﹏＀-￯]/u;
 // Hundredths of a token per character, by class. Calibrated on 10-31 against the gateway's o200k_base counts
 // (scripts/gpt-image-reservation): typical prompts come out 0.8 to 1.8 times the exact count, most a little above it.
 const LETTER = 25, DIGIT_OR_MARK = 75, CJK_CHARACTER = 110, OTHER_SCRIPT = 50, ASTRAL = 300;
