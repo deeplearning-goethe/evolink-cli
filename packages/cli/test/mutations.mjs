@@ -193,10 +193,11 @@ const mutants = [
   ['reference-cap-allowance', 'src/media.mjs', '!referenceBudgetExceeded(quote.pricing_quote.total_uc, cap)', '!rulesBudgetExceeded(quote.pricing_quote.total_uc, cap)'],
   ['reference-cap-refused', 'src/media.mjs', "const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)", 'const reference = false && Number.isFinite(quote.estimate.max_usd)'],
   ['reference-range-unchecked', 'src/media.mjs', "quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined", 'false'],
-  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved ? 'token_billed' : 'estimated'", "reserved ? 'estimated' : 'estimated'"],
+  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved?.gpt || reserved?.omni ? 'token_billed' : 'estimated'", "reserved?.gpt || reserved?.omni ? 'estimated' : 'estimated'"],
   ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];', '.filter(() => false) : [];'],
   ['reference-zero-total', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (total === 0n) {', 'if (false) {'],
   ['reference-balance', 'src/platform/core/src/tools/estimate-cost.js', "(estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined", "estimate.status === 'estimated' && estimate.max_credits !== undefined"],
+  ['reference-omni', 'src/platform/core/src/services/pricing-rules-estimate.js', "if (isOmniTokenModel(id)) {\n        const usage = omniReservation(", "if (false) {\n        const usage = omniReservation("],
 ];
 
 // Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.

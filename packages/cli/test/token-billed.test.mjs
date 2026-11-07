@@ -1,5 +1,5 @@
-// GPT Image token models get a reference price from the shared core: the CLI saves the quote, submits only the
-// generation input after approval, and compares an explicit budget with 1.5 times the reference.
+// GPT Image token models and Gemini Omni Flash videos get a reference price from the shared core: the CLI saves the
+// quote, submits only the generation input after approval, and compares an explicit budget with 1.5 times the reference.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -16,14 +16,17 @@ import { State } from '../src/state.mjs';
 import { calculateRulesEstimate } from '../src/platform/core/src/services/pricing-rules-estimate.js';
 import { findModelParams } from '../src/platform/core/src/data/model-params.js';
 
-// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video billed only by token counts;
-// and of 2026-11-07: GPT Image 2.6.
+// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video; of 2026-11-07: GPT Image 2.6;
+// and of 2026-10-14: a speech model billed only by token counts the request cannot give.
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-token-billed-20261031.json', import.meta.url)));
 const snapshot26 = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-gpt-image-26-20261107.json', import.meta.url)));
+const snapshotTts = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-tts-20261014.json', import.meta.url)));
 const kinds = { 'gpt-image-1.5': 'image', 'gpt-image-2': 'image', 'gpt-image-2.5-flare': 'image', 'gpt-image-2.5-sunburst': 'image',
-  'gpt-image-2.6-flare': 'image', 'gpt-image-2.6-sunburst': 'image', 'gemini-omni-flash-text-to-video': 'video' };
+  'gpt-image-2.6-flare': 'image', 'gpt-image-2.6-sunburst': 'image', 'gemini-omni-flash-text-to-video': 'video',
+  'qwen-audio-3.1-tts-flash': 'audio' };
+const OMNI = 'gemini-omni-flash-text-to-video', TTS = 'qwen-audio-3.1-tts-flash';
 const GPT = Object.keys(kinds).filter(id => kinds[id] === 'image');
-const rulesOf = id => snapshot.models.some(row => row.model_id === id) ? snapshot : snapshot26;
+const rulesOf = id => [snapshot, snapshot26, snapshotTts].find(rules => rules.models.some(row => row.model_id === id));
 const policy = id => ({ meta: { ...rulesOf(id).meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
   model: structuredClone(rulesOf(id).models.find(row => row.model_id === id)) });
 const reference = (id, input) => calculateRulesEstimate(policy(id), { id, kind: kinds[id], aliases: [], spec: findModelParams(id) }, input);
@@ -33,7 +36,7 @@ async function fixture(t, { balance = 10000 } = {}) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-token-billed-'));
   const f = { submissions: [] };
   const rows = Object.entries(kinds).map(([id, kind]) => ({ model_id: id, aliases: [], display_name: id, capabilities: [kind],
-    protocols: [kind === 'image' ? 'openai-images' : 'evolink-video-generations'], lifecycle: 'active' }));
+    protocols: [{ image: 'openai-images', video: 'evolink-video-generations', audio: 'openai-audio' }[kind]], lifecycle: 'active' }));
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, f.origin);
     let body = ''; for await (const chunk of req) body += chunk;
@@ -46,10 +49,11 @@ async function fixture(t, { balance = 10000 } = {}) {
       return send(id ? policy(id) : { meta: policy(GPT[0]).meta, models: Object.keys(kinds).map(model => policy(model).model) });
     }
     if (url.pathname === '/v1/credits') return send({ success: true, data: { user: { remaining_credits: balance }, token: { unlimited_credits: true } } });
-    if (/^\/v1\/(images|videos)\/generations$/.test(url.pathname)) {
+    if (/^\/v1\/(images|videos|audios)\/generations$/.test(url.pathname)) {
       f.submissions.push(JSON.parse(body));
       // Already finished, so the generation does not wait for it.
-      return send({ id: `task-token-${f.submissions.length}`, type: 'image', status: 'completed', progress: 100, results: [`${f.origin}/out.png`] });
+      return send({ id: `task-token-${f.submissions.length}`, type: url.pathname.split('/')[2].replace(/s$/, ''), status: 'completed', progress: 100,
+        results: [`${f.origin}/out.png`] });
     }
     res.writeHead(404); res.end('{}');
   });
@@ -161,13 +165,29 @@ test('token counts in --pricing-parameters do not change a GPT Image reference p
 });
 
 test('token counts given as 0 for a model that needs them save no quote', async t => {
-  const f = await fixture(t), model = 'gemini-omni-flash-text-to-video';
-  const zeros = { input_tokens: 0, video_output_tokens: 0, other_output_tokens: 0 };
-  const refused = await f.run(['estimate', '--model', model, '--input', JSON.stringify({ prompt: 'a fox' }), '--pricing-parameters', JSON.stringify(zeros)]);
+  const f = await fixture(t);
+  const zeros = { input_tokens: 0, output_tokens: 0 };
+  const refused = await f.run(['estimate', '--model', TTS, '--input', JSON.stringify({ input: 'a fox' }), '--pricing-parameters', JSON.stringify(zeros)]);
   assert.notEqual(refused.status, 0); assert.equal(refused.data.error.code, 'estimate_unavailable');
-  assert.deepEqual(refused.data.error.details.missing_usage, ['input_tokens', 'other_output_tokens', 'video_output_tokens']);
+  assert.deepEqual(refused.data.error.details.missing_usage, ['input_tokens', 'output_tokens']);
   assert.match(refused.data.error.message, /^The total cannot be estimated yet, so no quote was saved\./);
   assert.equal(f.submissions.length, 0);
+});
+
+test('the real CLI quotes a Gemini Omni Flash video by its reference price; token counts are not used', async t => {
+  const f = await fixture(t), input = { prompt: 'A red fox running through fresh snow at dawn.' };
+  const quoted = await f.run(['estimate', '--model', OMNI, '--input', JSON.stringify(input)]);
+  assert.equal(quoted.status, 0, JSON.stringify(quoted)); const view = quoted.data;
+  assert.equal(view.estimate.status, 'token_billed'); assert.equal(view.total_known, false);
+  assert.deepEqual(view.amounts, reference(OMNI, input).amounts); assert.ok(Number(view.amounts.uc) > 0);
+  const zeros = { input_tokens: 0, video_output_tokens: 0, other_output_tokens: 0 };
+  const counted = await f.run(['estimate', '--model', OMNI, '--input', JSON.stringify(input), '--pricing-parameters', JSON.stringify(zeros)]);
+  assert.equal(counted.status, 0, JSON.stringify(counted));
+  assert.deepEqual(counted.data.amounts, view.amounts); assert.equal(counted.data.pricing_quote.request_hash, view.pricing_quote.request_hash);
+  assert.ok(counted.data.estimate.notes.some(note => note.startsWith('pricing_parameters input_tokens, other_output_tokens, video_output_tokens are not used')));
+  const generated = await f.run(['generate', 'video', '--quote', view.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.ok(generated.data.task_id);
+  assert.deepEqual(f.submissions, [{ ...input, model: OMNI }]);
 });
 
 test('the balance is checked against the reference price', async t => {
