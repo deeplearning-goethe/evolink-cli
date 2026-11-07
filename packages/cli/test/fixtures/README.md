@@ -26,3 +26,7 @@ at 15:58 UTC: `gpt-image-1.5`, `gpt-image-2`, `gpt-image-2.5-flare` and
 `gemini-omni-flash-text-to-video`, which is billed only by token counts the
 request cannot give. The GPT Image rules are the same as the MCP repository's
 `pricing-rules-gpt-image-20261031.json`.
+
+`pricing-rules-gpt-image-26-20261107.json` is the MCP repository's file of the
+same name: the anonymous full rules of `gpt-image-2.6-flare` and
+`gpt-image-2.6-sunburst`, read on 2026-11-07 at 07:03 UTC.

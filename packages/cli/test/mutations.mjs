@@ -169,7 +169,7 @@ const mutants = [
   ['reference-cap-refused', 'src/media.mjs', "const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)", 'const reference = false && Number.isFinite(quote.estimate.max_usd)'],
   ['reference-range-unchecked', 'src/media.mjs', "quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined", 'false'],
   ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved ? 'token_billed' : 'estimated'", "reserved ? 'estimated' : 'estimated'"],
-  ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && /tokens$/.test(name)).sort() : [];', '.filter(() => false) : [];'],
+  ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];', '.filter(() => false) : [];'],
   ['reference-zero-total', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (total === 0n) {', 'if (false) {'],
   ['reference-balance', 'src/platform/core/src/tools/estimate-cost.js', "(estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined", "estimate.status === 'estimated' && estimate.max_credits !== undefined"],
 ];

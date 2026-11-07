@@ -2,28 +2,38 @@
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { QuoteError } from './pricing-quote-client.js';
 // The tokens the gateway reserves for a GPT Image task at submission. Ported from GroAPI (feat/task-microservice-split)
-// common/gpt_image2_token.go and the token image pre-charge in controller/unified_images.go. The output token
-// calculator is the one on OpenAI's image generation guide; its floating-point steps keep the same order, so every count
-// matches the gateway's. The task itself settles at the tokens the upstream reports.
+// common/gpt_image2_token.go, common/gpt_image26_gif.go, the GPT Image 2.6 checks in controller/unified_images_gpt_image26.go
+// and the token image pre-charge in controller/unified_images.go. The output token calculator is the one on OpenAI's image
+// generation guide; its floating-point steps keep the same order, so every count matches the gateway's. The task itself
+// settles at the tokens the upstream reports.
 const STEP = 16, MIN_PIXELS = 655_360, MAX_PIXELS = 8_294_400, MAX_EDGE = 3840, MAX_RATIO = 3;
 const RATIOS = { '1:1': [1, 1], '1:2': [1, 2], '2:1': [2, 1], '1:3': [1, 3], '3:1': [3, 1],
     '2:3': [2, 3], '3:2': [3, 2], '3:4': [3, 4], '4:3': [4, 3], '4:5': [4, 5], '5:4': [5, 4], '9:16': [9, 16], '16:9': [16, 9],
     '21:9': [21, 9], '9:21': [9, 21] };
 /** Pixel budget of each resolution tier for a ratio size. */
 const BUDGETS = { '1K': 1024 * 1024, '2K': 2048 * 2048, '4K': MAX_PIXELS };
-/** Long-edge tile base by quality: gpt-image-2, and the 2.5 family, whose tiers sit lower. */
+/** Long-edge tile base by quality: gpt-image-2, and the 2.5 generation, whose tiers sit lower. */
 const BASE_2 = { low: 16, medium: 48, high: 96 };
 const BASE_25 = { low: 16, medium: 24, high: 48, xhigh: 64, max: 96 };
+/** 2.6 multiplies the 2.5 count by quality, in tenths, rounding up with integer steps as the gateway does. */
+const TENTHS_26 = { low: 42, medium: 33, high: 10, xhigh: 10, max: 10 };
 /** gpt-image-1 and 1.5 bill fixed tiles by quality: portrait, landscape, square. */
 const TILES_1 = { low: [408, 400, 272], medium: [1584, 1568, 1056], high: [6240, 6208, 4160] };
 /** Reserved for each reference image or mask: the most a 1024² input has used. Larger inputs can use more. */
 export const INPUT_IMAGE_TOKENS = 1536;
-const family25 = (model) => model.trim().toLowerCase().startsWith('gpt-image-2.5');
+/** A 2.6 GIF's frames are drawn on one sheet, which is what is billed; size auto uses frames of this edge. */
+const GIF_AUTO_FRAME = 512, GIF_DEFAULT_FRAMES = 9;
+const family26 = (model) => model.trim().toLowerCase().startsWith('gpt-image-2.6');
+/** The 2.5 generation: 2.5 and 2.6 share qualities, tile bases and sizes. */
+const family25 = (model) => model.trim().toLowerCase().startsWith('gpt-image-2.5') || family26(model);
 const family1 = (model) => model === 'gpt-image-1.5' || model === 'gpt-image-1';
 /** Models the gateway reserves and bills by token counts. */
 export const isTokenImageModel = (model) => model === 'gpt-image-2' || family1(model) || family25(model);
 function invalid(param, message) { throw new QuoteError('invalid_quote_parameter', message, param); }
 const text = (param, value) => value === undefined ? '' : typeof value === 'string' ? value : invalid(param, `${param} must be a string.`);
+const nestedParams = (input) => input.model_params && typeof input.model_params === 'object' && !Array.isArray(input.model_params)
+    ? input.model_params : {};
+const lower = (value) => typeof value === 'string' ? value.trim().toLowerCase() : '';
 /** strconv.Atoi for the sizes the gateway reads; a longer number is not a size it can accept. */
 const integer = (part) => /^[+-]?\d{1,15}$/.test(part) ? Number(part) : NaN;
 function pixelSize(size) {
@@ -100,10 +110,73 @@ export function imageOutputTokens(model, width, height, quality) {
         return width < height ? tiles[0] : width > height ? tiles[1] : tiles[2];
     }
     const base = (family25(model) ? BASE_25 : BASE_2)[quality];
-    return Math.ceil(base * scaledTiles(base, Math.max(width, height), Math.min(width, height)) * (2_000_000 + width * height) / 4_000_000);
+    const tokens = Math.ceil(base * scaledTiles(base, Math.max(width, height), Math.min(width, height)) * (2_000_000 + width * height) / 4_000_000);
+    return family26(model) ? Math.trunc((tokens * TENTHS_26[quality] + 9) / 10) : tokens;
+}
+/** The layouts, columns × rows, the upstream tries for a GIF's frame count, in its order. */
+function gifGrids(frames) {
+    if (frames >= 2 && frames <= 8)
+        return [[4, 2], [2, 4]];
+    if (frames === 9)
+        return [[3, 3]];
+    if (frames >= 10 && frames <= 12)
+        return [[3, 4], [4, 3], [4, 4]];
+    if (frames >= 13 && frames <= 16)
+        return [[4, 4]];
+    return [];
+}
+/** A sheet keeps to the limits of a single image; its minimum pixel count is left to the upstream. */
+function sheetFits(width, height) {
+    const longer = Math.max(width, height), shorter = Math.min(width, height);
+    return shorter > 0 && longer <= MAX_EDGE && width * height <= MAX_PIXELS && longer <= MAX_RATIO * shorter;
+}
+/** model_params.frame_count and frame_duration_ms of a GIF, as the gateway checks them; 9 frames when absent. */
+function gifFrames(params) {
+    const duration = params.frame_duration_ms;
+    if (duration !== undefined && duration !== null && !(Number.isInteger(duration) && duration >= 20 && duration <= 2000)) {
+        invalid('model_params.frame_duration_ms', 'model_params.frame_duration_ms must be a whole number from 20 to 2000.');
+    }
+    const frames = params.frame_count;
+    if (frames === undefined || frames === null)
+        return GIF_DEFAULT_FRAMES;
+    return Number.isInteger(frames) && frames >= 2 && frames <= 16 ? frames
+        : invalid('model_params.frame_count', 'model_params.frame_count must be a whole number from 2 to 16.');
+}
+/**
+ * The sheet a 2.6 GIF is billed for: frames of the size given (512×512 for auto) laid out on the layout of the fewest
+ * cells that fits; of two orientations that both fit, the one with more output tokens (EstimateGPTImage26GIFOutputTokens).
+ */
+function gifSheet(model, size, frames, quality) {
+    const trimmed = size.trim();
+    let frameWidth = GIF_AUTO_FRAME, frameHeight = GIF_AUTO_FRAME;
+    if (!['', 'auto'].includes(trimmed.toLowerCase())) {
+        const pixels = trimmed.includes(':') ? undefined : pixelSize(trimmed);
+        if (!pixels)
+            invalid('size', `With output_format gif, size is auto or the WIDTHxHEIGHT of each frame, not ${size}.`);
+        [frameWidth, frameHeight] = pixels;
+        if (frameWidth % STEP || frameHeight % STEP || frameWidth > MAX_EDGE || frameHeight > MAX_EDGE) {
+            invalid('size', `GIF frame edges must be multiples of ${STEP} and at most ${MAX_EDGE}px, got ${frameWidth}x${frameHeight}.`);
+        }
+    }
+    const grids = gifGrids(frames);
+    let fewest = 0, best;
+    for (const [columns, rows] of grids) {
+        const width = columns * frameWidth, height = rows * frameHeight, cells = columns * rows;
+        if (!sheetFits(width, height) || fewest && cells > fewest)
+            continue;
+        fewest = cells;
+        const tokens = imageOutputTokens(model, width, height, quality);
+        if (!best || tokens > best.tokens)
+            best = { width, height, columns, rows, tokens };
+    }
+    if (!best) {
+        const [columns, rows] = grids[0];
+        invalid('size', `GIF frames of ${frameWidth}x${frameHeight} do not fit: for frame_count=${frames} the frames are tiled ${columns}x${rows} into one image of at most ${MAX_EDGE}px per edge and ${MAX_PIXELS} pixels, so each frame has at most ${Math.trunc(MAX_PIXELS / (columns * rows))} pixels, one edge up to ${Math.trunc(MAX_EDGE / columns)} and the other up to ${Math.trunc(MAX_EDGE / rows)} (size auto uses ${GIF_AUTO_FRAME}x${GIF_AUTO_FRAME} frames).`);
+    }
+    return { ...best, frames, frame_width: frameWidth, frame_height: frameHeight };
 }
 /** CJK ideographs, kana, Hangul and their punctuation and full-width forms. */
-const CJK = /[\u1100-\u11ff\u2e80-\u9fff\ua960-\ua97f\uac00-\ud7ff\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]/u;
+const CJK = /[ᄀ-ᇿ⺀-鿿ꥠ-꥿가-퟿豈-﫿︰-﹏＀-￯]/u;
 // Hundredths of a token per character, by class. Calibrated on 10-31 against the gateway's o200k_base counts
 // (scripts/gpt-image-reservation): typical prompts come out 0.8 to 1.8 times the exact count, most a little above it.
 const LETTER = 25, DIGIT_OR_MARK = 75, CJK_CHARACTER = 110, OTHER_SCRIPT = 50, ASTRAL = 300;
@@ -124,9 +197,45 @@ const filled = (value) => typeof value === 'string' && value !== '';
 /** parseFlexibleStringArray: one string or a list; empty and non-string entries do not count. */
 const referenceCount = (value) => Array.isArray(value) ? value.filter(filled).length : filled(value) ? 1 : 0;
 /**
+ * The output settings the gateway refuses before it reserves anything, for gpt-image-2 and the 2.5 generation; true for
+ * a GPT Image 2.6 GIF. The format and background are read as the gateway reads them: the top-level value, then
+ * model_params, trimmed and lower-cased.
+ */
+function gifOutput(model, input, images) {
+    const params = nestedParams(input);
+    const format = lower(input.output_format) || lower(params.output_format), background = lower(input.background) || lower(params.background);
+    if (background === 'transparent' && (format === 'jpeg' || format === 'jpg'))
+        invalid('background', `background transparent needs png or webp output; ${format} cannot keep transparency.`);
+    if (!family26(model))
+        return false;
+    // SVG output is paused on the gateway, and its author model would be priced on top, so it is never quoted.
+    if (format === 'svg')
+        invalid('output_format', `output_format svg is not available on ${model}; use png, jpeg, webp or gif.`);
+    if (['svg_model', 'svg_reasoning_effort'].some(key => Object.hasOwn(params, key)))
+        invalid('model_params', 'model_params.svg_model and svg_reasoning_effort need output_format svg, which is not available.');
+    if (format !== 'gif' && ['frame_count', 'frame_duration_ms'].some(key => Object.hasOwn(params, key)))
+        invalid('model_params', 'model_params.frame_count and frame_duration_ms need output_format gif.');
+    const markup = [input.markup_url, params.markup_url].map(value => typeof value === 'string' ? value.trim() : '').find(Boolean);
+    if (markup) {
+        if (!(referenceCount(input.image_url) + referenceCount(input.image_urls) + referenceCount(params.image_url) + referenceCount(params.image_urls))) {
+            invalid('markup_url', 'markup_url marks up the first reference image, so it needs image_urls.');
+        }
+        if ([input.mask_url, params.mask_url].some(value => typeof value === 'string' && value.trim() !== ''))
+            invalid('markup_url', 'markup_url cannot be combined with mask_url.');
+    }
+    if (format !== 'gif')
+        return false;
+    if (images > 1)
+        invalid('n', `output_format gif on ${model} needs n=1.`);
+    if (background === 'transparent')
+        invalid('background', 'background transparent needs png or webp output, not gif.');
+    return true;
+}
+/**
  * The tokens the gateway reserves at submission for this input, as the reference price counts them. Without a size (or
- * with auto) gpt-image-2 and the 2.5 family count a 2048×2048 output; quality defaults to medium, high for gpt-image-1
- * and 1.5. countPromptTokens replaces the approximation when the exact count is known.
+ * with auto) gpt-image-2 and the 2.5 generation count a 2048×2048 output, and a 2.6 GIF counts 512×512 frames; quality
+ * defaults to medium, high for gpt-image-1 and 1.5. A markup layer is not counted as a reference image.
+ * countPromptTokens replaces the approximation when the exact count is known.
  */
 export function tokenImageReservation(model, input, countPromptTokens = approximatePromptTokens) {
     const n = input.n === undefined ? 1 : Number.isInteger(input.n) ? Math.max(1, input.n) : invalid('n', 'n must be a whole number.');
@@ -136,12 +245,20 @@ export function tokenImageReservation(model, input, countPromptTokens = approxim
         invalid('quality', `quality ${given} is not supported by ${model}.`);
     const size = text('size', input.size), resolution = text('resolution', input.resolution);
     const auto = !family1(model) && ['', 'auto'].includes(size.trim().toLowerCase());
-    const [width, height] = auto ? [2048, 2048] : family1(model) ? family1Size(size) : outputSize(size, resolution);
+    let output, outputTokens;
+    if (!family1(model) && gifOutput(model, input, n)) {
+        const { tokens, width, height, ...gif } = gifSheet(model, size, gifFrames(nestedParams(input)), quality);
+        output = { width, height, quality, size: auto ? 'auto' : 'pixels', gif };
+        outputTokens = tokens;
+    }
+    else {
+        const [width, height] = auto ? [2048, 2048] : family1(model) ? family1Size(size) : outputSize(size, resolution);
+        output = { width, height, quality, size: family1(model) ? 'fixed' : auto ? 'auto' : pixelSize(size.trim()) ? 'pixels' : 'ratio' };
+        outputTokens = imageOutputTokens(model, width, height, quality);
+    }
     const mask = text('mask_url', input.mask_url);
     const references = referenceCount(input.image_url) + referenceCount(input.image_urls) + (mask !== '' ? 1 : 0);
     const prompt = text('prompt', input.prompt);
-    return { per_image: { image_output_tokens: imageOutputTokens(model, width, height, quality),
-            text_input_tokens: prompt === '' ? 0 : countPromptTokens(prompt), image_input_tokens: INPUT_IMAGE_TOKENS * references },
-        images: n, output: { width, height, quality, size: family1(model) ? 'fixed' : auto ? 'auto' : pixelSize(size.trim()) ? 'pixels' : 'ratio' },
-        reference_images: references };
+    return { per_image: { image_output_tokens: outputTokens, text_input_tokens: prompt === '' ? 0 : countPromptTokens(prompt),
+            image_input_tokens: INPUT_IMAGE_TOKENS * references }, images: n, output, reference_images: references };
 }

@@ -169,17 +169,22 @@ export function billingUsageHelp(rule, entry) {
 // GPT Image token models: the reference price counts the tokens the gateway reserves at submission for the input.
 const RESERVED_TOKENS = new Set(['image_input_tokens', 'image_cached_input_tokens', 'image_output_tokens',
     'text_input_tokens', 'text_cached_input_tokens', 'text_output_tokens']);
+/** GPT Image 2.6 rules also bill an SVG's author model. SVG output is not quoted, so a reference price uses none. */
+const NO_SVG_AUTHOR = { svg_model: 'none', svg_input_tokens: 0, svg_output_tokens: 0 };
+const svgAuthor = (name) => Object.hasOwn(NO_SVG_AUTHOR, name);
 /** Only a rule billed by these token counts alone, with an output component, can price the reservation. */
 function reservesTokens(rule, entry) {
-    const names = (rule.parameters ?? []).map(p => p.name);
-    return isTokenImageModel(entry.id.toLowerCase()) && rule.settlement_basis === 'actual_usage' && names.every(name => RESERVED_TOKENS.has(name))
+    return isTokenImageModel(entry.id.toLowerCase()) && rule.settlement_basis === 'actual_usage'
+        && (rule.parameters ?? []).every(p => RESERVED_TOKENS.has(p.name)
+            || svgAuthor(p.name) && (p.name !== 'svg_model' || (p.values ?? p.enum ?? []).includes(NO_SVG_AUTHOR.svg_model)))
         && rule.components.some(c => c.role === 'image_output' && c.pricing_status === 'available' && componentReads(c).has('image_output_tokens'));
 }
 /** How estimate_cost prices a GPT Image token model, for get_model. */
 export function tokenReferenceHelp(rule, entry) {
     if (!reservesTokens(rule, entry))
         return undefined;
-    const rates = rule.components.map(c => `${c.id} $${c.rate.usd} per ${c.unit === '1k_tokens' ? '1K tokens' : c.unit.replace(/_/g, ' ')}`);
+    const rates = rule.components.filter(c => ![...componentReads(c)].some(svgAuthor))
+        .map(c => `${c.id} $${c.rate.usd} per ${c.unit === '1k_tokens' ? '1K tokens' : c.unit.replace(/_/g, ' ')}`);
     return `Billed by actual token usage. estimate_cost gives a reference price for the exact input: the tokens EvoLink reserves at submission for its size, quality, n, prompt and reference images, at the published rates (public default rates: ${rates.join('; ')}). The task settles at the tokens it actually uses.`;
 }
 function reservation(rule, entry, input, countPromptTokens) {
@@ -187,13 +192,17 @@ function reservation(rule, entry, input, countPromptTokens) {
         return undefined;
     const usage = tokenImageReservation(entry.id.toLowerCase(), input, countPromptTokens);
     const parameters = {};
-    for (const p of rule.parameters ?? [])
-        parameters[p.name] = usage.per_image[p.name] ?? 0;
+    for (const p of rule.parameters ?? []) {
+        parameters[p.name] = svgAuthor(p.name) ? NO_SVG_AUTHOR[p.name] : usage.per_image[p.name] ?? 0;
+    }
     return { usage, parameters };
 }
 function reservationNotes(usage, ignored) {
     const notes = ['Confirm this reference price before generation. It is billed by actual token usage: EvoLink reserves this amount at submission and settles the task at the tokens it actually uses, refunding or charging the difference when it finishes, so the final charge may be lower or slightly higher.'];
-    if (usage.output.size === 'auto')
+    const gif = usage.output.gif;
+    if (gif)
+        notes.push(`output_format is gif: the ${gif.frames} frames of ${gif.frame_width}×${gif.frame_height}${usage.output.size === 'auto' ? ' (size auto)' : ''} are drawn ${gif.columns}×${gif.rows} on one ${usage.output.width}×${usage.output.height} image, and the reference counts that image's output tokens.`);
+    else if (usage.output.size === 'auto')
         notes.push('size is auto, so the reference counts a 2048×2048 output, as EvoLink reserves for auto; the image is often smaller, so set a size for a closer reference price.');
     if (usage.reference_images)
         notes.push(`Each reference image or mask counts ${INPUT_IMAGE_TOKENS.toLocaleString('en-US')} input tokens; larger reference images can use more.`);
@@ -278,7 +287,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     // GPT Image token models never use token counts from pricing_parameters: the reference counts what the gateway
     // reserves for this input. Leaving them out of the request hash lets a generation pass them or not.
     const ignored = isTokenImageModel(entry.id.toLowerCase())
-        ? Object.keys(options.pricingParameters ?? {}).filter(name => declared.has(name) && /tokens$/.test(name)).sort() : [];
+        ? Object.keys(options.pricingParameters ?? {}).filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];
     const pricingParameters = ignored.length
         ? Object.fromEntries(Object.entries(options.pricingParameters).filter(([name]) => !ignored.includes(name))) : options.pricingParameters;
     const reserved = reservation(rule, entry, effectiveInput, options.countPromptTokens);
@@ -377,7 +386,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
             min_credits: Number(amounts.credits), max_credits: Number(amounts.credits) }),
         total_known: status === 'estimated',
         basis: [status === 'token_billed' && usage
-                ? `Reference price: published token rates applied to what EvoLink reserves at submission for this input. Per image: ${usage.per_image.image_output_tokens.toLocaleString('en-US')} output tokens (${usage.output.width}×${usage.output.height}, quality ${usage.output.quality}), about ${usage.per_image.text_input_tokens.toLocaleString('en-US')} prompt tokens and ${usage.per_image.image_input_tokens.toLocaleString('en-US')} reference-image tokens, each part rounded up; ${usage.images} image${usage.images > 1 ? 's' : ''}.`
+                ? `Reference price: published token rates applied to what EvoLink reserves at submission for this input. Per image: ${usage.per_image.image_output_tokens.toLocaleString('en-US')} output tokens (${usage.output.width}×${usage.output.height}${usage.output.gif ? `, ${usage.output.gif.frames} GIF frames` : ''}, quality ${usage.output.quality}), about ${usage.per_image.text_input_tokens.toLocaleString('en-US')} prompt tokens and ${usage.per_image.image_input_tokens.toLocaleString('en-US')} reference-image tokens, each part rounded up; ${usage.images} image${usage.images > 1 ? 's' : ''}.`
                 : 'Published full pricing rules evaluated for the supplied generation parameters; exact UC rounding and component minimums.'],
         ...(missing.size ? { uncheckable_reason: 'usage', missing_usage: missingUsage, usage_help: usageHelp } : {}),
         ...(status === 'token_billed' && usage ? { reference_usage: usage } : {}),

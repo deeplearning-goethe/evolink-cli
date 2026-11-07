@@ -176,7 +176,15 @@ export function validateInput(spec, input) {
     }
     const size = spec.constraints?.imageSize;
     const value = size ? rest[size.param] : undefined;
-    if (size && typeof value === 'string' && !size.allowed.includes(value)) {
+    const frames = size?.frames && rest.output_format === size.frames.outputFormat ? size.frames : undefined;
+    if (frames && typeof value === 'string' && value !== 'auto') {
+        const pixels = /^(\d+)[x×](\d+)$/.exec(value), width = Number(pixels?.[1]), height = Number(pixels?.[2]);
+        if (!pixels || width < frames.minEdge || height < frames.minEdge || width > frames.maxEdge || height > frames.maxEdge
+            || width % frames.step !== 0 || height % frames.step !== 0) {
+            result.errors.push({ param: size.param, problem: `with output_format ${frames.outputFormat} is each frame's size: auto, or WxH with edges ${frames.minEdge}–${frames.maxEdge} in multiples of ${frames.step}.` });
+        }
+    }
+    else if (size && typeof value === 'string' && !size.allowed.includes(value)) {
         const pixels = /^(\d+)[x×](\d+)$/.exec(value);
         if (!pixels || !size.allowPixels) {
             result.errors.push({ param: size.param, problem: `must be one of ${size.allowed.join(', ')}${size.allowPixels ? ', or a valid WxH pixel size' : ''}.` });

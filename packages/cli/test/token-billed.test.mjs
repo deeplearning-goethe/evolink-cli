@@ -16,12 +16,16 @@ import { State } from '../src/state.mjs';
 import { calculateRulesEstimate } from '../src/platform/core/src/services/pricing-rules-estimate.js';
 import { findModelParams } from '../src/platform/core/src/data/model-params.js';
 
-// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video billed only by token counts.
+// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video billed only by token counts;
+// and of 2026-11-07: GPT Image 2.6.
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-token-billed-20261031.json', import.meta.url)));
-const kinds = { 'gpt-image-1.5': 'image', 'gpt-image-2': 'image', 'gpt-image-2.5-flare': 'image', 'gpt-image-2.5-sunburst': 'image', 'gemini-omni-flash-text-to-video': 'video' };
+const snapshot26 = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-gpt-image-26-20261107.json', import.meta.url)));
+const kinds = { 'gpt-image-1.5': 'image', 'gpt-image-2': 'image', 'gpt-image-2.5-flare': 'image', 'gpt-image-2.5-sunburst': 'image',
+  'gpt-image-2.6-flare': 'image', 'gpt-image-2.6-sunburst': 'image', 'gemini-omni-flash-text-to-video': 'video' };
 const GPT = Object.keys(kinds).filter(id => kinds[id] === 'image');
-const policy = id => ({ meta: { ...snapshot.meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
-  model: structuredClone(snapshot.models.find(row => row.model_id === id)) });
+const rulesOf = id => snapshot.models.some(row => row.model_id === id) ? snapshot : snapshot26;
+const policy = id => ({ meta: { ...rulesOf(id).meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
+  model: structuredClone(rulesOf(id).models.find(row => row.model_id === id)) });
 const reference = (id, input) => calculateRulesEstimate(policy(id), { id, kind: kinds[id], aliases: [], spec: findModelParams(id) }, input);
 const PROMPT = 'A red bicycle leaning against a brick wall at sunset, photorealistic.';
 
@@ -86,6 +90,22 @@ test('the real CLI saves a reference-price quote and submits only the generation
     assert.deepEqual(f.submissions.slice(before), [{ ...input, model }], model);
     assert.equal(generated.data.estimate.status, 'token_billed', model);
   }
+});
+
+test('the real CLI quotes a GPT Image 2.6 GIF by its sheet and saves no quote for what the gateway refuses', async t => {
+  const f = await fixture(t), model = 'gpt-image-2.6-flare', input = { prompt: PROMPT, output_format: 'gif', model_params: { frame_count: 4 } };
+  const quoted = await f.run(['estimate', '--model', model, '--input', JSON.stringify(input)]);
+  assert.equal(quoted.status, 0, JSON.stringify(quoted)); const view = quoted.data;
+  assert.equal(view.estimate.status, 'token_billed'); assert.deepEqual(view.amounts, reference(model, input).amounts);
+  assert.deepEqual(view.estimate.reference_usage.output.gif, { frames: 4, frame_width: 512, frame_height: 512, columns: 4, rows: 2 });
+  const generated = await f.run(['generate', 'image', '--quote', view.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.deepEqual(f.submissions, [{ ...input, model }]);
+  for (const refused of [{ prompt: PROMPT, output_format: 'svg' }, { prompt: PROMPT, output_format: 'gif', n: 2 }, { prompt: PROMPT, output_format: 'gif', size: '1:1' },
+    { prompt: PROMPT, markup_url: 'https://files.example/markup.png' }, { prompt: PROMPT, background: 'transparent', output_format: 'jpeg' }]) {
+    const result = await f.run(['estimate', '--model', model, '--input', JSON.stringify(refused)]);
+    assert.notEqual(result.status, 0, JSON.stringify(refused)); assert.equal(result.data.quote_id, undefined, JSON.stringify(refused));
+  }
+  assert.equal(f.submissions.length, 1);
 });
 
 test('a budget takes a reference price only when 1.5 times it fits, before and at submission', async t => {
