@@ -24,7 +24,7 @@ evolink tasks batch --ids TASK_A,TASK_B --json
 evolink tasks list --model MODEL --page 2 --limit 50 --json
 ```
 
-`tasks batch` deduplicates up to 50 task IDs and reports `missing`. Missing/foreign/expired IDs must not trigger automatic regeneration. Preserve `outputs` when a task returns a reusable `voice`, `voice_id`, `persona_id` or `result_id`. Verify the next model's actual input parameter before passing that resource onward. Returning an identifier does not establish a separate voice library, character training or resource-management product.
+`tasks batch` deduplicates up to 50 task IDs and reports `missing`; it also collects the tasks of a batch quote (`task_ids` of `generate --quote` with `--inputs-file`). Missing/foreign/expired IDs must not trigger automatic regeneration. Preserve `outputs` when a task returns a reusable `voice`, `voice_id`, `persona_id` or `result_id`. Verify the next model's actual input parameter before passing that resource onward. Returning an identifier does not establish a separate voice library, character training or resource-management product.
 
 ## All-result downloads
 

@@ -41,21 +41,24 @@ export function withModelConstraints(model) {
         if (properties)
             properties.duration = { type: 'integer', anyOf: model.params.duration.anyOf, description: model.params.duration.description, default: model.params.duration.default };
     }
-    // mintlify-docs kling-v4-video-edit.json: duration is 3-30 seconds or "auto" (as long as the input video);
-    // the generated index keeps the range but leaves any string open.
-    if (model.model === 'kling-v4-video-edit') {
-        const anyOf = [{ type: 'integer', minimum: 3, maximum: 30 }, { type: 'string', enum: ['auto'] }];
+    // mintlify-docs kling-v4-video-edit.json and kling-v4-flash-video-edit.json: duration is 3-30 (Flash 3-20) seconds
+    // or "auto" (as long as the input video); the generated index keeps the range but leaves any string open.
+    const klingEditMaximum = { 'kling-v4-video-edit': 30, 'kling-v4-flash-video-edit': 20 }[model.model];
+    if (klingEditMaximum) {
+        const anyOf = [{ type: 'integer', minimum: 3, maximum: klingEditMaximum }, { type: 'string', enum: ['auto'] }];
         model.params.duration = { ...model.params.duration, anyOf };
         const properties = model.inputSchema?.schema.properties;
         if (properties)
             properties.duration = { anyOf, description: model.params.duration.description, default: model.params.duration.default };
     }
-    if (['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2-beta'].includes(model.model)) {
+    if (['gpt-image-2', 'gpt-image-2.5-flare', 'gpt-image-2.5-sunburst', 'gpt-image-2.6-flare', 'gpt-image-2.6-sunburst', 'gpt-image-2-beta'].includes(model.model)) {
         model.constraints = { ...model.constraints, imageSize: {
                 param: 'size', allowed: ['auto', '1:1', '1:2', '2:1', '1:3', '3:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '9:21', '21:9'],
                 allowPixels: model.model !== 'gpt-image-2-beta', step: 16, minEdge: 16, maxEdge: 3840,
                 minPixels: 655360, maxPixels: 8294400, maxRatio: 3,
                 ...(model.model === 'gpt-image-2-beta' ? { ratioResolution: '1K' } : {}),
+                // GPT Image 2.6 GIF (unified_images_gpt_image26.go): size is each frame's, auto or pixels, never a ratio.
+                ...(model.model.startsWith('gpt-image-2.6') ? { frames: { outputFormat: 'gif', step: 16, minEdge: 16, maxEdge: 3840 } } : {}),
             } };
         const properties = model.inputSchema?.schema.properties;
         if (properties)

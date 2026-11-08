@@ -2,10 +2,21 @@ import http from 'node:http';
 import { randomUUID, createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { CliError } from '../src/errors.mjs';
+import { GENERATION_RULES_REUSE_MS } from '../src/platform/core/src/services/pricing-rules-estimate.js';
 import { restFixture } from './fixture-rest.mjs';
 
 // Test processes and the CLIs they spawn must not contact the npm registry for update notices.
 process.env.EVOLINK_CLI_UPDATE_CHECK = '0';
+
+/**
+ * Runs `work` as if the shared core's reuse window for a recent pricing-rules read had passed, so a generation reads
+ * the rules again, as a submission made well after its estimate does.
+ */
+export async function afterRulesReuse(work) {
+  const now = Date.now, shift = GENERATION_RULES_REUSE_MS + 1_000;
+  Date.now = () => now() + shift;
+  try { return await work(); } finally { Date.now = now; }
+}
 
 export class MemoryVault {
   async read() { return this.value; }

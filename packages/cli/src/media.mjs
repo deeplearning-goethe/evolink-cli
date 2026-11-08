@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
-import { APPROVAL_TTL_MS, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
+import { APPROVAL_TTL_MS, REFERENCE_BUDGET_FACTOR, referenceBudgetExceeded, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 import { DASHBOARD_URL } from './platform/core/src/services/http-policy.js';
 import { dashboardCheck } from './platform/core/src/tools/shared.js';
@@ -15,6 +15,39 @@ const MIN_ROUND_MS = 300;
 /** Drift ignored when the time left becomes whole seconds; the shared core still ends each round at the deadline. */
 const ROUND_DRIFT_MS = 50;
 const WAIT_STOPS_LOCAL = 'Stopping does not cancel the task.';
+/**
+ * EvoLink keeps a request ID's outcome for 24 hours (agent idempotency); after that the same ID could start a second
+ * paid task. Recovery with the original ID stays an hour inside that window, counted from the first submission.
+ */
+export const RECOVERY_WINDOW_MS = 23 * 60 * 60_000;
+/** Saved states that tasks resume replays with the original request ID. */
+const RECOVERABLE = ['submitting', 'outcome_unknown', 'partial'];
+
+/** A quote for several inputs of one model (estimate --inputs-file), submitted in one call. */
+const isBatch = quote => Array.isArray(quote.args?.inputs);
+
+/** A first submission of an expired quote whose input and price were unchanged says so in its result. */
+function withExpiry(view, quote) {
+  if (!quote) return view;
+  const at = new Date(quote.expires_at).toISOString();
+  const line = `The quote expired at ${at}, but its input and price are unchanged, so it was submitted under the original approval.`;
+  return { ...view, approval_expired: true, quote_expired_at: at, text: view.text ? `${view.text}\n${line}` : line };
+}
+
+/** The shared core's batch result names its own tool calls; for the CLI these lines name the CLI commands instead. */
+export function cliBatchText(text, id, taskIds) {
+  return (text ?? '').split('\n').map(line => {
+    if (line.startsWith('Collect the results with list_tasks')) return `Collect the results with evolink tasks batch --ids ${taskIds.join(',')}; it is free and read-only.`;
+    if (line.startsWith('To finish the batch, call ')) {
+      return line.replace(/^To finish the batch, call \S+ again with client_request_id "[^"]*" and exactly the same inputs/, `To finish the batch, run evolink tasks resume --quote ${id}`);
+    }
+    if (line.startsWith('The outcome of ')) {
+      return line.replace(/retry later with the same client_request_id and inputs, or check list_tasks\.$/, `run evolink tasks resume --quote ${id} later, or check evolink tasks list --since 30m.`);
+    }
+    if (line.startsWith('Never resubmit ')) return 'Never resubmit accepted, not-submitted or unknown-outcome inputs with a new estimate or generate command: that creates and charges new tasks.';
+    return line;
+  }).join('\n');
+}
 
 function interrupted(taskId) {
   return new CliError('interrupted', 'Stopped waiting locally. The EvoLink task continues.', { task_id: taskId }, 130);
@@ -56,6 +89,7 @@ function quoteError(error, cap) {
 export function priceFingerprint(quote) {
   return hash({ model: quote.model, type: quote.type, input_valid: quote.input_valid, estimate: quote.estimate,
     ...(quote.effective_input ? { effective_input: quote.effective_input } : {}),
+    ...(Array.isArray(quote.items) ? { items: quote.items.map(item => item.effective_input ?? null) } : {}),
     warnings: quote.warnings, pricing_warning: quote.pricing_warning, pricing_scope: quote.pricing_scope,
     rules: quote.pricing_quote && { fingerprint: quote.pricing_quote.fingerprint, request_hash: quote.pricing_quote.request_hash, total_uc: quote.pricing_quote.total_uc },
     account: quote.account_quote && { request_hash: quote.account_quote.request_hash, parameters: quote.account_quote.parameters,
@@ -67,7 +101,7 @@ export function checkEstimate(quote, cap) {
   requireThat(quote.enough_limit !== false, 'insufficient_limit', 'The EvoLink MCP or API key spending limit does not cover this estimate. Adjust that limit; this is not the account balance.', { limit_scope: quote.limit_scope });
   requireThat(quote.enough_daily_limit !== false, 'insufficient_daily_limit', 'The daily spending limit does not cover this estimate. Wait for its reset or adjust that limit; this is not the account balance.');
   requireThat(quote.enough_balance !== false, 'insufficient_balance', 'The EvoLink account balance does not cover this estimate.');
-  if (quote.estimate?.status === 'estimated') {
+  if (quote.estimate?.status === 'estimated' || quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined) {
     const { min_usd, max_usd } = quote.estimate;
     requireThat(Number.isFinite(max_usd) && max_usd >= 0 && (min_usd === undefined || Number.isFinite(min_usd) && min_usd >= 0 && min_usd <= max_usd),
       'estimate_unavailable', 'The service returned an invalid price range. Obtain a valid quote before submission.');
@@ -75,12 +109,17 @@ export function checkEstimate(quote, cap) {
   if (cap !== undefined) {
     requireThat(Number.isFinite(cap) && cap > 0 && cap <= 10_000, 'invalid_cap', 'max-cost-usd must be greater than 0 and at most 10000.');
     requireThat(quote.input_valid === true, 'uncheckable_input', 'The service could not validate the model input. The CLI cannot submit this request with a spending cap.', { problems: quote.problems });
-    requireThat(quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
+    // A token-billed reference price settles at actual usage: the budget must cover the core's allowance above it.
+    const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)
+      && quote.estimate.uncheckable_reason === undefined && quote.pricing_quote;
+    requireThat(reference || quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd),
       'uncheckable_cap', 'This request has no complete cost estimate. The CLI cannot submit it with a spending cap.', { estimate: quote.estimate });
-    const withinBudget = quote.pricing_quote ? !rulesBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.account_quote
+    const withinBudget = reference ? !referenceBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.pricing_quote ? !rulesBudgetExceeded(quote.pricing_quote.total_uc, cap) : quote.account_quote
       ? compareDecimal(quote.account_quote.quote.amount, String(cap)) <= 0
       : quote.estimate.max_usd <= cap;
-    requireThat(withinBudget, 'cost_exceeds_cap', 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
+    requireThat(withinBudget, 'cost_exceeds_cap', reference
+      ? `The reference price is billed by actual token usage, and ${REFERENCE_BUDGET_FACTOR} times it exceeds max-cost-usd.`
+      : 'The estimated cost exceeds max-cost-usd.', { estimate: quote.estimate, max_cost_usd: cap });
   }
   // The core names each missing usage in MCP terms; say once how they map to CLI options.
   requireThat(quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length, 'estimate_unavailable', [
@@ -121,7 +160,7 @@ export class Media {
       ...(quote.effective_input ? { effective_input: quote.effective_input, defaults_applied: quote.defaults_applied } : {}),
       created_at: this.now(), expires_at: expires, ...(quote.account_quote ? { backend_estimate_id: quote.account_quote.quote.estimate_id,
         server_expires_at: serverExpiry, account_quote: quote.account_quote } : {}), state: 'quoted', client_request_id: `cli-${randomUUID()}` };
-    const view = { ...quote, quote_id: id, input: input.input || {}, ...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {}), expires_at: new Date(stored.expires_at).toISOString(),
+    const view = { ...quote, quote_id: id, ...(input.inputs ? { inputs: input.inputs } : { input: input.input || {} }), ...(max_cost_usd !== undefined ? { max_cost_usd, cap_source: 'user' } : {}), expires_at: new Date(stored.expires_at).toISOString(),
       requires_confirmation: true, next_step: `After the user approves, run evolink generate ${quote.type} --quote ${id} --confirm.` };
     return { stored, view };
   }
@@ -137,7 +176,7 @@ export class Media {
     // Checked before and again after the estimate, under the lock that submission and recovery share: a submission
     // or another refresh while the estimate ran means no new submittable quote is saved.
     const before = await this.state.lock(lock, () => this.refreshable(intentId));
-    const { account_quote, pricing_quote, ...args } = before.args;
+    const { account_quote, pricing_quote, skip_estimate, ...args } = before.args;
     const { stored, view } = await this.prepareQuote(args);
     return this.state.lock(lock, async () => {
       const current = await this.refreshable(intentId);
@@ -163,7 +202,8 @@ export class Media {
       'This submission has started. Recover its original task instead of refreshing its quote.', {
         quote_id: active.id, client_request_id: active.client_request_id, submission_allowed: false,
         ...(active.task_id ? { task_id: active.task_id, recovery: `evolink tasks get ${active.task_id}` }
-          : ['submitting', 'outcome_unknown'].includes(active.state) ? { recovery: `evolink tasks resume --quote ${active.id}` } : {}) });
+          : active.task_ids?.length && active.state === 'submitted' ? { task_ids: active.task_ids, recovery: `evolink tasks batch --ids ${active.task_ids.join(',')}` }
+            : RECOVERABLE.includes(active.state) ? { recovery: `evolink tasks resume --quote ${active.id}` } : {}) });
     return active;
   }
   /** Only the generation's current quote may be submitted or recovered; any other names the current one or its task. */
@@ -179,7 +219,10 @@ export class Media {
     if (active?.task_id) throw new CliError('quote_superseded',
       `This quote was replaced by quote ${activeId}, which was already submitted as task ${active.task_id}. Do not generate again.`,
       { ...details, task_id: active.task_id, recovery: `evolink tasks get ${active.task_id}` });
-    if (['submitting', 'outcome_unknown'].includes(active?.state)) throw new CliError('quote_superseded',
+    if (active?.state === 'submitted' && active.task_ids?.length) throw new CliError('quote_superseded',
+      `This quote was replaced by quote ${activeId}, which was already submitted as ${active.task_ids.length} tasks. Do not generate again.`,
+      { ...details, task_ids: active.task_ids, recovery: `evolink tasks batch --ids ${active.task_ids.join(',')}` });
+    if (RECOVERABLE.includes(active?.state)) throw new CliError('quote_superseded',
       `This quote was replaced by quote ${activeId}, whose submission is unverified. Recover that quote; do not create a new request.`,
       { ...details, recovery: `evolink tasks resume --quote ${activeId}` });
     throw new CliError('quote_superseded', `This quote was replaced by quote ${activeId}. Show the user that quote and obtain approval for it.`,
@@ -193,6 +236,19 @@ export class Media {
     requireThat(quote.args_hash === hash(quote.args), 'quote_changed', 'The saved request changed. Estimate again.');
     return quote;
   }
+  /**
+   * Generation without a quote, only when the user explicitly opted out of estimates (skip_estimate). The saved record
+   * has its own request ID, so tasks resume recovers an uncertain submission and a retry never submits twice.
+   */
+  async direct(kind, args) {
+    requireThat(['image', 'video', 'audio'].includes(kind), 'invalid_type', 'Choose image, video or audio.');
+    const { binding } = await this.client.credentials.access();
+    const id = randomUUID(), submitArgs = { ...args, skip_estimate: true };
+    await this.state.write('quotes', id, { id, server: this.server, binding, args: submitArgs,
+      ...(this.client.apiUrl ? { backend: 'platform', api_origin: this.client.apiUrl.origin } : {}),
+      type: kind, args_hash: hash(submitArgs), skip_estimate: true, created_at: this.now(), state: 'quoted', client_request_id: `cli-${randomUUID()}` });
+    return this.generate(kind, id, { confirmed: true });
+  }
   async generate(kind, id, { confirmed = false, resume = false } = {}) {
     requireThat(['image', 'video', 'audio'].includes(kind), 'invalid_type', 'Choose image, video or audio.');
     requireThat(confirmed || resume, 'confirmation_required', 'Show the quote to the user and obtain approval before adding --confirm.');
@@ -201,7 +257,11 @@ export class Media {
     return this.state.lock(`quote-${intentId}`, async () => {
       const quote = await this.load(id);
       requireThat(quote.type === kind, 'quote_type_mismatch', 'Use the media type shown in the saved quote.');
+      const batch = isBatch(quote);
       if (quote.task_id) return { ...await this.client.call('get_task', { task_id: quote.task_id, wait_seconds: 0 }), quote_id: id, recovered: true };
+      // A batch whose every input was accepted is read back, never submitted again.
+      if (batch && quote.state === 'submitted') return { ...await this.client.call('list_tasks', { task_ids: quote.task_ids }), quote_id: id,
+        client_request_id: quote.client_request_id, task_ids: quote.task_ids, recovered: true };
       await this.requireActive(quote, kind);
       requireThat(quote.state !== 'refused', 'submission_refused',
         'EvoLink refused this submission and reported no charge. Resolve the original error, estimate again with the same budget, and obtain approval for the new quote.',
@@ -210,39 +270,51 @@ export class Media {
         'This quote has never been submitted. After user approval, use generate with this same quote; tasks resume only recovers an uncertain submission.',
         { quote_id: id, client_request_id: quote.client_request_id, submission_allowed: false,
           next_step: `After user approval, run evolink generate ${kind} --quote ${id} --confirm.` });
-      requireThat(resume ? ['submitting', 'outcome_unknown'].includes(quote.state) : quote.state === 'quoted',
-        'submission_already_started', 'A submission already started. Use tasks resume with this quote; do not create a new request ID.', { quote_id: id, client_request_id: quote.client_request_id });
-      requireThat(this.now() < quote.expires_at, 'quote_expired', 'The quote expired. Check recent tasks before preparing another submission.', { quote_id: id, client_request_id: quote.client_request_id });
-      const { max_cost_usd, account_quote, pricing_quote, ...checkArgs } = quote.args;
-      let fresh;
-      try {
-        // Preserve the original approved request during uncertain submission recovery.
-        fresh = resume && (account_quote || pricing_quote) ? { model: quote.args.model, type: quote.type, input_valid: true, estimate: quote.estimate, account_quote, pricing_quote }
-          : await this.client.call('estimate_cost', checkArgs);
-        requireThat(resume && (account_quote || pricing_quote) || priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
-        checkEstimate(fresh, max_cost_usd);
-      } catch (error) { throw quoteError(error, max_cost_usd); }
-      if (!resume && fresh.pricing_quote) {
-        const expires = Date.parse(fresh.pricing_quote.expires_at);
-        requireThat(Number.isFinite(expires) && expires > this.now(), 'quote_expired', 'The refreshed estimate expired before submission.');
-        quote.args.pricing_quote = fresh.pricing_quote;
-        quote.server_expires_at = expires;
-        quote.args_hash = hash(quote.args);
+      requireThat(resume ? RECOVERABLE.includes(quote.state) : quote.state === 'quoted',
+        'submission_already_started', 'A submission already started. Use tasks resume with this quote; do not create a new request ID.',
+        { quote_id: id, client_request_id: quote.client_request_id, recovery: `evolink tasks resume --quote ${id}` });
+      // Past the gateway's 24 hours the original request ID no longer prevents a second paid task.
+      if (resume) requireThat(this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS, 'recovery_window_passed',
+        'This request ID was first submitted more than 23 hours ago. EvoLink keeps a request ID for 24 hours, so replaying it now could create and charge a new task. Check recent tasks with evolink tasks list --since 2d instead.',
+        { quote_id: id, client_request_id: quote.client_request_id, submission_allowed: false, ...dashboardCheck() });
+      // An expired quote still holds for its unchanged input and price: the fresh estimate below refuses a changed one.
+      const expired = !resume && !quote.skip_estimate && this.now() >= quote.expires_at;
+      const { max_cost_usd, account_quote, pricing_quote, skip_estimate, ...checkArgs } = quote.args;
+      // skip_estimate: the user opted out of estimates; the shared core still refuses invalid input and an unpriceable budget.
+      if (!quote.skip_estimate) {
+        let fresh;
+        try {
+          // Preserve the original approved request during uncertain submission recovery.
+          fresh = resume && (account_quote || pricing_quote) ? { model: quote.args.model, type: quote.type, input_valid: true, estimate: quote.estimate, account_quote, pricing_quote }
+            : await this.client.call('estimate_cost', checkArgs);
+          requireThat(resume && (account_quote || pricing_quote) || priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
+          checkEstimate(fresh, max_cost_usd);
+        } catch (error) { throw quoteError(error, max_cost_usd); }
+        if (!resume && fresh.pricing_quote) {
+          const expires = Date.parse(fresh.pricing_quote.expires_at);
+          requireThat(Number.isFinite(expires) && expires > this.now(), 'quote_expired', 'The refreshed estimate expired before submission.');
+          quote.args.pricing_quote = fresh.pricing_quote;
+          quote.server_expires_at = expires;
+          quote.args_hash = hash(quote.args);
+        }
+        if (!resume && fresh.account_quote) {
+          const expires = Date.parse(fresh.account_quote.quote.expires_at);
+          requireThat(Number.isFinite(expires) && expires > this.now(), 'quote_expired', 'The refreshed account quote expired before submission.');
+          quote.args.account_quote = fresh.account_quote; quote.account_quote = fresh.account_quote;
+          quote.backend_estimate_id = fresh.account_quote.quote.estimate_id; quote.server_expires_at = expires;
+          quote.args_hash = hash(quote.args);
+        }
       }
-      if (!resume && fresh.account_quote) {
-        const expires = Date.parse(fresh.account_quote.quote.expires_at);
-        requireThat(Number.isFinite(expires) && expires > this.now(), 'quote_expired', 'The refreshed account quote expired before submission.');
-        quote.args.account_quote = fresh.account_quote; quote.account_quote = fresh.account_quote;
-        quote.backend_estimate_id = fresh.account_quote.quote.estimate_id; quote.server_expires_at = expires;
-        quote.args_hash = hash(quote.args);
-      }
+      const previous = quote.state;
       quote.state = 'submitting';
       quote.approved_at ??= this.now();
       await this.state.write('quotes', id, quote);
+      const { pricing_source, ...generationArgs } = quote.args;
+      const request = { ...generationArgs, client_request_id: quote.client_request_id };
+      if (batch) return this.submitBatch(kind, id, quote, request, { resume, previous, expired });
       let result;
       try {
-        const { pricing_source, ...generationArgs } = quote.args;
-        result = await this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: quote.client_request_id });
+        result = await this.client.call(`generate_${kind}`, request);
         requireThat(typeof result.task_id === 'string' && result.task_id.length > 0, 'outcome_unknown', 'The submission returned no task ID. Recover with the original quote.');
       } catch (e) {
         // Acceptance survives later read/format failures; recovery must query this ID, never POST again.
@@ -265,8 +337,41 @@ export class Media {
       quote.state = 'submitted';
       quote.task_id = result.task_id;
       await this.state.write('quotes', id, quote);
-      return { ...result, quote_id: id, client_request_id: quote.client_request_id };
+      return withExpiry({ ...result, quote_id: id, client_request_id: quote.client_request_id }, expired && quote);
     });
+  }
+  /**
+   * Submits a batch quote's inputs in one shared-core call and records each input's outcome. The same request ID and
+   * inputs (tasks resume) later return accepted inputs without a new charge and submit only those still to finish.
+   */
+  async submitBatch(kind, id, quote, request, { resume, previous, expired }) {
+    let result, failure;
+    try { result = await this.client.call(`generate_${kind}`, request); } catch (error) { failure = error; }
+    const outcome = result ?? failure?.details ?? {};
+    const items = Array.isArray(outcome.items) ? outcome.items : undefined;
+    // Refused before any input was sent, so this call charged nothing; inputs accepted earlier keep their tasks.
+    const refusedBefore = !items && failure?.details?.charged === 'no' && ['not_submitted', 'rejected'].includes(failure.details.submission_state);
+    if (items) {
+      quote.items = items.map(item => ({ index: item.index, client_request_id: item.client_request_id, submission_state: item.submission_state,
+        ...(typeof item.task_id === 'string' ? { task_id: item.task_id } : {}), ...(typeof item.finishable === 'boolean' ? { finishable: item.finishable } : {}) }));
+      quote.task_ids = items.flatMap(item => item.submission_state === 'accepted' && typeof item.task_id === 'string' ? [item.task_id] : []);
+      // partial: the same request ID can still finish or verify some input. Refusals it would only get again close
+      // the batch: submitted when some input was accepted, refused when none was.
+      quote.state = quote.task_ids.length === quote.args.inputs.length ? 'submitted'
+        : items.some(item => item.submission_state === 'outcome_unknown' || item.finishable) ? 'partial' : quote.task_ids.length ? 'submitted' : 'refused';
+    } else quote.state = refusedBefore ? (resume ? (previous === 'partial' ? 'partial' : 'outcome_unknown') : 'refused') : 'outcome_unknown';
+    await this.state.write('quotes', id, quote);
+    const taskIds = quote.task_ids ?? [];
+    const view = { ...outcome, quote_id: id, client_request_id: quote.client_request_id, task_ids: taskIds, text: cliBatchText(outcome.text, id, taskIds),
+      ...(taskIds.length ? { collect: `evolink tasks batch --ids ${taskIds.join(',')}` } : {}),
+      ...(RECOVERABLE.includes(quote.state) ? { recovery: `evolink tasks resume --quote ${id}` } : {}) };
+    if (result) return withExpiry(view, expired && quote);
+    if (items) throw new CliError(failure.code || 'batch_not_submitted', failure.message, view, failure.exitCode);
+    throw new CliError(resume && !refusedBefore ? 'outcome_unknown' : failure.code || 'outcome_unknown', resume && !refusedBefore
+      ? 'The batch submission remains unverified. The replay could not proceed; check recent tasks with the original request ID before preparing any new generation.' : failure.message, {
+      ...view, ...(quote.state === 'outcome_unknown' ? { charged: 'unknown', submission_state: 'outcome_unknown' } : {}),
+      ...(refusedBefore && quote.state === 'partial' ? { items: quote.items, next_step: 'This call submitted nothing. Accepted inputs keep their tasks (task_ids). Resolve the error; then finish the rest with tasks resume, or estimate them again as a new batch if their price or input changed.' } : {}),
+    }, failure.exitCode);
   }
   async resume(id) {
     const quote = await this.load(id);

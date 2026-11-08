@@ -12,7 +12,7 @@ import { Media } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 import { upload, getUpload } from '../src/files.mjs';
 import { serviceURL, SERVER, API, FILES } from '../src/network.mjs';
-import { fixture, MemoryVault } from './fixture.mjs';
+import { afterRulesReuse, fixture, MemoryVault } from './fixture.mjs';
 
 async function context(t, { token = 'fixture-direct-access' } = {}) {
   const f = await fixture(); t.after(f.close); f.mcpUnavailable = true;
@@ -66,7 +66,7 @@ test('a cached price cannot authorize a quote or capped submit after pricing fai
   await client.call('get_model', { model: 'fixture-image' });
   f.estimateFailure = true;
   await assert.rejects(media.estimate({ model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }), { code: 'estimate_unavailable' });
-  await assert.rejects(client.call('generate_image', { model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 }));
+  await assert.rejects(afterRulesReuse(() => client.call('generate_image', { model: 'fixture-image', input: { prompt: 'test' }, max_cost_usd: 1 })));
   assert.equal(f.paid.size, 0);
 });
 

@@ -5,13 +5,14 @@ import { modelParamsMeta } from '../data/model-params.js';
 import { resolveModel, suggestModels } from '../services/model-catalog.js';
 import { billedByMediaLength, formatPrice } from '../services/pricing-client.js';
 import { cachedPricingRules } from '../services/pricing-rules-client.js';
-import { billingUsageHelp } from '../services/pricing-rules-estimate.js';
+import { billingUsageHelp, tokenReferenceHelp } from '../services/pricing-rules-estimate.js';
 import { formatUsd } from '../services/error-handler.js';
 import { trackedLink } from '../services/utm.js';
 import { READ_ONLY, errorResult, failure, ok } from './shared.js';
 import { modelTitle } from './search-models.js';
 import { referenceInputs } from '../services/model-capabilities.js';
 import { seedanceInputRules } from '../services/seedance-input.js';
+import { conditionText, shapeText } from '../services/param-validator.js';
 function value(v) {
     return JSON.stringify(v);
 }
@@ -46,7 +47,8 @@ export function describeParam(name, spec, indent = '') {
 function billingUsage(entry) {
     const body = cachedPricingRules({ view: 'full' });
     const rule = body && 'models' in body ? body.models.find(model => model.model_id === entry.id.toLowerCase()) : undefined;
-    return rule?.policy_source === 'published' && rule.pricing_status === 'available' ? billingUsageHelp(rule, entry) : [];
+    return rule?.policy_source === 'published' && rule.pricing_status === 'available'
+        ? { usage: billingUsageHelp(rule, entry), reference: tokenReferenceHelp(rule, entry) } : { usage: [] };
 }
 function priceLine(price) {
     const minimum = price.min_charge_usd !== undefined ? ` (minimum $${formatUsd(price.min_charge_usd)} per task)` : '';
@@ -90,6 +92,10 @@ export function registerGetModel(server, config) {
                     lines.push('', `Example input: ${JSON.stringify(spec.example)}`);
                 if (spec.constraints?.mutuallyExclusive)
                     lines.push(...spec.constraints.mutuallyExclusive.map(group => `Input constraint: ${group.join(' and ')} are mutually exclusive.`));
+                if (spec.requestShapes?.length)
+                    lines.push(`Request shapes (pass exactly one): ${spec.requestShapes.map((shape, index) => `${index + 1}) ${shapeText(shape)}`).join('; ')}.`);
+                for (const condition of spec.conditions ?? [])
+                    lines.push(`Input condition: when ${conditionText(condition.if)}, then ${conditionText(condition.then)}.`);
                 const sizeRule = spec.constraints?.imageSize;
                 if (sizeRule)
                     lines.push(sizeRule.allowPixels
@@ -100,6 +106,8 @@ export function registerGetModel(server, config) {
                     docs,
                     required: spec.required,
                     parameters: spec.params,
+                    ...(spec.requestShapes ? { request_shapes: spec.requestShapes } : {}),
+                    ...(spec.conditions ? { input_conditions: spec.conditions } : {}),
                     constraints: spec.constraints,
                     example_input: spec.example,
                     parameters_source: modelParamsMeta(entry.id),
@@ -153,10 +161,14 @@ export function registerGetModel(server, config) {
             else {
                 lines.push(catalog.pricingWarning ?? 'Pricing data is unavailable in this catalog.');
             }
-            const usage = billingUsage(entry);
+            const { usage, reference } = billingUsage(entry);
             if (usage.length) {
                 lines.push('Billing usage (estimate_cost needs these for a total and names any that are missing):', ...usage.map(line => `- ${line}`));
                 structured.billing_usage = usage;
+            }
+            if (reference) {
+                lines.push(`Token billing: ${reference}`);
+                structured.token_billing = reference;
             }
             if (catalog.pricingWarning)
                 structured.pricing_warning = catalog.pricingWarning;

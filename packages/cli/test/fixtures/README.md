@@ -13,6 +13,25 @@ rules are configuration references, not account quotes or final budget caps.
 `pricing-rules-usage-20261023.json` is the same snapshot as in the MCP repository:
 nine anonymous full rules captured on 2026-10-23 at 12:47 UTC from
 `https://api.evolink.ai/v1/catalog/pricing-rules?view=full`. The CLI tests use
-`gpt-image-2` (billed by tokens) and `seedance-2.0-mini-reference-to-video`
-(billed by the input video length) to check that an estimate short of usage
-saves no quote and names the CLI option that gives it.
+`seedance-2.0-mini-reference-to-video` (billed by the input video length) to
+check that an estimate short of usage saves no quote and names the CLI option
+that gives it.
+
+# Token-billed media policies
+
+`pricing-rules-token-billed-20261031.json` holds five anonymous full rules from
+`https://api.evolink.ai/v1/catalog/pricing-rules?view=full`, read on 2026-10-31
+at 15:58 UTC: `gpt-image-1.5`, `gpt-image-2`, `gpt-image-2.5-flare` and
+`gpt-image-2.5-sunburst`, and `gemini-omni-flash-text-to-video`. All five get a
+reference price from the input (Gemini Omni Flash since evolink-mcp 01ed943). The
+GPT Image rules are the same as the MCP repository's
+`pricing-rules-gpt-image-20261031.json`.
+
+`pricing-rules-gpt-image-26-20261107.json` is the MCP repository's file of the
+same name: the anonymous full rules of `gpt-image-2.6-flare` and
+`gpt-image-2.6-sunburst`, read on 2026-11-07 at 07:03 UTC.
+
+`pricing-rules-tts-20261014.json` holds one rule of the MCP repository's
+`pricing-rules-public-20261014.json` (read on 2026-10-14, meta.updated_at 14:41:59
+UTC): `qwen-audio-3.1-tts-flash`, billed only by input and output token counts the
+request cannot give. The CLI tests use it for an estimate short of token usage.

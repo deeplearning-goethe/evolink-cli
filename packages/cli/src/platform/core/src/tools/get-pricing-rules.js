@@ -2,7 +2,7 @@
 // Generated from Evolink-AI/evolink-mcp; adapted for direct REST operations. See platform/LICENSE and platform/NOTICE.
 import { currentRequestCredentials } from '../request-context.js';
 import { RequestTimeoutError } from '../services/http-policy.js';
-import { getPricingRules, PricingRulesError, PricingRulesQuery } from '../services/pricing-rules-client.js';
+import { getPricingRules, PricingRulesError, PricingRulesQuery, reusablePricingRules } from '../services/pricing-rules-client.js';
 import { pricingCallLimitReached } from '../services/pricing-call-limit.js';
 import { failure, ok, READ_ONLY, retryText } from './shared.js';
 export function registerPricingRules(server, config) {
@@ -12,9 +12,10 @@ export function registerPricingRules(server, config) {
         inputSchema: PricingRulesQuery.shape,
         annotations: { title: 'Read public pricing rules', ...READ_ONLY },
     }, async (input) => {
-        const over = pricingCallLimitReached('get_pricing_rules');
+        // Only a lookup that reads the platform's rules counts; one answered from rules read moments ago does not.
+        const over = config.reusePricingRules && reusablePricingRules(input) ? undefined : pricingCallLimitReached('get_pricing_rules');
         if (over)
-            return failure(`This account already made ${over.limit} get_pricing_rules calls in the last minute, the most allowed. Wait ${retryText(over.retryAfterSeconds)}, then try again. No quote or spending limit was established.`, {
+            return failure(`This account already made ${over.limit} get_pricing_rules calls that read the pricing rules in the last minute, the most allowed. Wait ${retryText(over.retryAfterSeconds)}, then try again. No quote or spending limit was established.`, {
                 error: { category: 'rate_limited', code: 'pricing_calls_per_minute', retryable: true, retry_after: over.retryAfterSeconds },
                 charged: 'no', quote_established: false, final_budget_enforced: false
             });

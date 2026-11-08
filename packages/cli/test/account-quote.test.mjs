@@ -8,7 +8,8 @@ import { Credentials } from '../src/auth.mjs';
 import { Media, priceFingerprint, checkEstimate } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 import { dispatch, validateCommand } from '../src/cli.mjs';
-import { fixture, MemoryVault } from './fixture.mjs';
+import { APPROVAL_TTL_MS } from '../src/platform/core/src/services/pricing-rules-estimate.js';
+import { afterRulesReuse, fixture, MemoryVault } from './fixture.mjs';
 
 async function context(t) {
   const f = await fixture(); t.after(f.close); f.mcpUnavailable = true;
@@ -24,17 +25,18 @@ test('rules estimate saves approval and expiry, refreshes before submit, and kee
   assert.equal(q.pricing_scope, 'public_default'); assert.equal(q.final_budget_enforced, false);
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(saved.backend_estimate_id, undefined); assert.equal(q.estimate_id, undefined);
-  // The local quote shares the core's 30-minute window and never extends its approval.
+  // The local quote shares the core's 24-hour window and never extends its approval.
   const approval = Date.parse(q.pricing_quote.expires_at);
-  assert.ok(Math.abs(approval - saved.created_at - 30 * 60_000) < 5_000, `approval ${approval - saved.created_at} ms`);
-  assert.ok(Math.abs(saved.expires_at - saved.created_at - 30 * 60_000) < 5_000, `local ${saved.expires_at - saved.created_at} ms`);
+  assert.ok(Math.abs(approval - saved.created_at - APPROVAL_TTL_MS) < 5_000, `approval ${approval - saved.created_at} ms`);
+  assert.ok(Math.abs(saved.expires_at - saved.created_at - APPROVAL_TTL_MS) < 5_000, `local ${saved.expires_at - saved.created_at} ms`);
   assert.ok(saved.expires_at <= approval);
   assert.equal(saved.args.max_cost_usd, 0.05); assert.equal(saved.args.pricing_quote.total_uc, '27200');
   const result = await media.generate('image', q.quote_id, { confirmed: true });
   const submitted = await state.read('quotes', q.quote_id);
   assert.equal(submitted.args.pricing_quote.fingerprint, saved.args.pricing_quote.fingerprint);
   assert.equal(submitted.args.max_cost_usd, 0.05); assert.equal(result.final_budget_enforced, false);
-  assert.equal(f.quoteRequests?.length || 0, 0); assert.equal(f.ruleReads, 3); assert.equal(f.paid.size, 1);
+  // The submission reuses the rules that its pre-submit estimate read a moment earlier.
+  assert.equal(f.quoteRequests?.length || 0, 0); assert.equal(f.ruleReads, 2); assert.equal(f.paid.size, 1);
 });
 
 test('explicit refresh preserves input and budget, changes local identity, and needs new approval', async t => {
@@ -74,8 +76,11 @@ test('unknown outcomes retain the approved rules and original request ID; only f
   await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }));
   const unknown = await state.read('quotes', q.quote_id), quoteCount = f.ruleReads;
   assert.equal(unknown.state, 'outcome_unknown');
-  const recovered = await media.resume(q.quote_id);
+  const balanceReads = f.calls.filter(call => call.name === 'check_balance').length;
+  const recovered = await afterRulesReuse(() => media.resume(q.quote_id));
   const saved = await state.read('quotes', q.quote_id);
+  // The replay keeps the original approval: no new estimate, which would also read the balance.
+  assert.equal(f.calls.filter(call => call.name === 'check_balance').length, balanceReads);
   assert.equal(recovered.task_id, f.paid.get(unknown.client_request_id));
   assert.deepEqual(saved.args, unknown.args); assert.equal(saved.backend_estimate_id, unknown.backend_estimate_id);
   assert.equal(f.ruleReads, quoteCount + 1); assert.equal(f.paid.size, 1);
@@ -167,7 +172,7 @@ test('a preflight refusal while replaying cannot declare the original unknown su
   const original = await state.read('quotes', q.quote_id);
   // The fresh rules change before an idempotent replay; the first request was already accepted.
   f.multiplier = 2;
-  await assert.rejects(media.resume(q.quote_id), error => error.code === 'outcome_unknown' && error.details.charged === 'unknown');
+  await assert.rejects(afterRulesReuse(() => media.resume(q.quote_id)), error => error.code === 'outcome_unknown' && error.details.charged === 'unknown');
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(saved.state, 'outcome_unknown'); assert.equal(saved.client_request_id, original.client_request_id); assert.equal(f.paid.size, 1);
 });

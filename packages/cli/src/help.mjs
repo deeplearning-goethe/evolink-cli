@@ -24,8 +24,9 @@ const COMMANDS = {
   'models schema': ['MODEL', 'Read versioned input and generation-submission response schemas. The response schema may omit final task outputs; runtime constraints also apply.', {}],
   'models recommend': ['--type TYPE [options]', 'Compare documented available alternatives with selection reasons. Unit rates are not total quotes.', { type: media, query: string('Search keywords; every term must match'), references: string('Comma-separated image,video,audio'), limit: integer(1, 10, 3) }],
   'docs search': ['--query TEXT [options]', 'Search versioned official model reference excerpts, not the live full website.', { query: string('Required model reference keywords'), type: allMedia, limit: integer(1, 20, 5) }],
-  estimate: ['--model MODEL --input-file FILE [options] | --refresh-quote ID', 'Prepare an estimate valid until the returned approval expiry, at most 30 minutes. Show the estimated cost and material uncertainty, then obtain user approval. No spending cap is created from the estimate.', {
-    model: string('Required model ID'), input: string('JSON object; mutually exclusive with input-file'), 'input-file': string('Local JSON file; mutually exclusive with input'), prompt: string('Optional prompt'),
+  estimate: ['--model MODEL --input-file FILE|--inputs-file FILE [options] | --refresh-quote ID', 'Prepare an estimate valid until the returned approval expiry, at most 24 hours; generate estimates again and still submits an expired quote whose input and price are unchanged. Show the estimated cost and material uncertainty, then obtain user approval. No spending cap is created from the estimate. --inputs-file prepares one quote for a batch: one approval covers all its inputs.', {
+    model: string('Required model ID'), input: string('JSON object; mutually exclusive with input-file and inputs-file'), 'input-file': string('Local JSON file; mutually exclusive with input and inputs-file'),
+    'inputs-file': string('Local JSON array or JSONL file of 1-50 inputs for one model, estimated and later submitted together'), prompt: string('Optional prompt; not with inputs-file'),
     'pricing-source': choice(['account', 'public_reference']), 'pricing-parameters': string('JSON object containing declared billing usage'),
     'refresh-quote': string('Refresh an unsubmitted saved quote with its existing input and budget'),
     'max-cost-usd': { type: 'number', exclusive_minimum: 0, maximum: 10000, description: 'Compatibility option for an explicit user budget: compare the estimate only; it does not cap the final charge' }, 'media-seconds': { type: 'number', exclusive_minimum: 0, maximum: 3600 },
@@ -36,7 +37,7 @@ const COMMANDS = {
   'tasks list': ['[options]', 'Page through account tasks. since/until filter only the selected page; total is before time filtering. Empty results do not prove no task was submitted.', {
     status: choice(['processing', 'completed', 'failed', 'cancelled']), type: media, since: time, until: time, model: string('Exact model ID'), page: integer(1, 100000, 1), limit: integer(1, 50, 20),
   }],
-  'tasks resume': ['--quote ID', 'Recover an uncertain submission with the original request ID. Use generate for an approved quote that has never been submitted.', { quote: string('Original quote ID') }],
+  'tasks resume': ['--quote ID', 'Recover an uncertain submission, or finish a partly submitted batch, with the original request ID within 24 hours of its first submission. Accepted inputs return their tasks without a new charge. Use generate for an approved quote that has never been submitted.', { quote: string('Original quote ID') }],
   usage: ['[options]', 'Summarize reported completed-task credits by creation time. Account-wide retained tasks; bounded scan with coverage and missing-cost metadata. Excludes payments/refunds and pending reservations. Not a bill or final budget.', {
     since: { ...time, default: '30d' }, until: time, model: string('Exact model ID'), type: media, 'max-pages': integer(1, 20, 5),
   }],
@@ -51,8 +52,14 @@ const COMMANDS = {
   doctor: ['[options]', 'Check prerequisites, connection, model discovery, skill contents and CLI updates separately. An available update, and installed skill findings without --agent, are guidance only. Free.', { agent }],
 };
 for (const type of ['image', 'video', 'audio']) COMMANDS[`generate ${type}`] = [
-  '--quote ID --confirm [options]', 'Submit the saved quote after explicit user approval. Changes require a new quote. Never call generate to poll progress.',
-  { quote: string('Approved quote ID'), confirm: flag, wait: flag, timeout: integer(1, 86400, 1800) },
+  '--quote ID --confirm [options] | --model MODEL --input-file FILE|--inputs-file FILE --skip-estimate [options]',
+  'Submit the saved quote after explicit user approval. Changes require a new quote. --skip-estimate submits without a quote, only when the user explicitly said not to estimate or confirm; invalid input and an explicit budget are still refused, and the task is charged by actual usage. A batch returns its task IDs at once. Never call generate to poll progress.',
+  { quote: string('Approved quote ID'), confirm: flag, wait: { ...flag, description: 'Wait for one task; not for a batch' }, timeout: integer(1, 86400, 1800),
+    'skip-estimate': { ...flag, description: 'Submit without a quote: only when the user explicitly opted out of estimates' },
+    model: string('Model ID, with skip-estimate'), input: string('JSON object, with skip-estimate'), 'input-file': string('Local JSON file, with skip-estimate'),
+    'inputs-file': string('Local JSON array or JSONL file of 1-50 inputs for one model, with skip-estimate'), prompt: string('Optional prompt, with skip-estimate and one input'),
+    'media-seconds': { type: 'number', exclusive_minimum: 0, maximum: 3600, description: 'With skip-estimate' }, 'pricing-parameters': string('JSON object of declared billing usage, with skip-estimate'),
+    'max-cost-usd': { type: 'number', exclusive_minimum: 0, maximum: 10000, description: 'An explicit user budget, with skip-estimate; still checked before submitting' } },
 ];
 
 export function commandHelp(positionals) {

@@ -31,7 +31,7 @@ test('generation requires approval and preserves the quoted model and input', as
   assert.equal(data.calls.filter(c => c.name === 'generate_image').length, 1);
 });
 
-test('quote changes, expiry, type and login changes prevent paid submission', async t => {
+test('quote changes, type and login changes prevent paid submission, expired or not', async t => {
   const { state, data, mcp, media } = await context(t);
   const q = await media.estimate({ model: 'image', input: { prompt: 'test' } });
   data.cost = 0.025;
@@ -40,9 +40,8 @@ test('quote changes, expiry, type and login changes prevent paid submission', as
   await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }), { code: 'price_changed' });
   data.cost = undefined;
   await assert.rejects(media.generate('video', q.quote_id, { confirmed: true }), { code: 'quote_type_mismatch' });
-  let saved = await state.read('quotes', q.quote_id); saved.expires_at = 0; await state.write('quotes', q.quote_id, saved);
-  await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }), { code: 'quote_expired' });
-  saved.expires_at = Date.now() + 10_000; saved.args.input.prompt = 'different'; await state.write('quotes', q.quote_id, saved);
+  // An expired quote still binds its saved input: a changed one is refused before any estimate.
+  let saved = await state.read('quotes', q.quote_id); saved.expires_at = 0; saved.args.input.prompt = 'different'; await state.write('quotes', q.quote_id, saved);
   await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }), { code: 'quote_changed' });
   saved.args.input.prompt = 'test'; await state.write('quotes', q.quote_id, saved);
   saved.args.max_cost_usd = 1; await state.write('quotes', q.quote_id, saved);

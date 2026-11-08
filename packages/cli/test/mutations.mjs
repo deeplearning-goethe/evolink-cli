@@ -40,15 +40,40 @@ const mutants = [
   ['daily-limit', 'src/media.mjs', 'quote.enough_daily_limit !== false', 'true'],
   ['input-validation-cap', 'src/media.mjs', 'quote.input_valid === true', 'true'],
   ['estimated-price-range', 'src/media.mjs', 'Number.isFinite(max_usd) && max_usd >= 0', 'true'],
-  ['request-id', 'src/media.mjs', 'this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: quote.client_request_id })', 'this.client.call(`generate_${kind}`, { ...generationArgs, client_request_id: randomUUID() })'],
+  ['request-id', 'src/media.mjs', 'const request = { ...generationArgs, client_request_id: quote.client_request_id };', 'const request = { ...generationArgs, client_request_id: randomUUID() };'],
   ['journal', 'src/media.mjs', "quote.state = 'submitting';", "quote.state = 'quoted';"],
   ['never-submitted-recovery', 'src/media.mjs', "'submission_not_started'", "'submission_already_started'"],
   ['refused-recovery', 'src/media.mjs', "quote.state !== 'refused'", 'true'],
   ['login-binding', 'src/media.mjs', 'quote.binding === (await this.client.credentials.access()).binding', 'true'],
-  ['expiry', 'src/media.mjs', 'this.now() < quote.expires_at', 'true'],
   ['quote-ttl-15-minutes', 'src/media.mjs', 'this.now() + APPROVAL_TTL_MS', 'this.now() + 15 * 60_000'],
   ['quote-ttl-server-expiry', 'src/media.mjs', 'Math.min(this.now() + APPROVAL_TTL_MS, serverExpiry ?? Infinity)', 'this.now() + APPROVAL_TTL_MS'],
-  ['quote-ttl-expiry-boundary', 'src/media.mjs', 'this.now() < quote.expires_at', 'this.now() <= quote.expires_at'],
+  ['quote-ttl-expired-boundary', 'src/media.mjs', 'this.now() >= quote.expires_at;', 'this.now() > quote.expires_at;'],
+  // Generation without a quote, expired quotes, the recovery window and batches (direct-batch.test.mjs).
+  ['expired-refused', 'src/media.mjs', 'const expired = !resume && !quote.skip_estimate && this.now() >= quote.expires_at;',
+    "requireThat(resume || quote.skip_estimate || this.now() < quote.expires_at, 'quote_expired', 'expired'); const expired = false;"],
+  ['expired-note', 'src/media.mjs', 'if (!quote) return view;', 'return view;'],
+  ['recovery-window', 'src/media.mjs', 'this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'true'],
+  ['recovery-window-boundary', 'src/media.mjs', 'this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'this.now() <= (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS'],
+  ['recovery-window-origin', 'src/media.mjs', '(quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'quote.created_at + RECOVERY_WINDOW_MS'],
+  ['direct-skip-flag', 'src/media.mjs', 'submitArgs = { ...args, skip_estimate: true }', 'submitArgs = { ...args }'],
+  ['direct-estimates', 'src/media.mjs', 'if (!quote.skip_estimate) {', 'if (true) {'],
+  ['direct-forbids-quote', 'src/cli.mjs', 'requireThat(options.quote === undefined && !options.confirm,', 'requireThat(true,'],
+  ['batch-closed-state', 'src/media.mjs', "quote.state = quote.task_ids.length === quote.args.inputs.length ? 'submitted'", "quote.state = quote.task_ids.length >= 0 ? 'submitted'"],
+  ['batch-partial-recoverable', 'src/media.mjs', "const RECOVERABLE = ['submitting', 'outcome_unknown', 'partial'];", "const RECOVERABLE = ['submitting', 'outcome_unknown'];"],
+  ['batch-repeat-refusal-closes', 'src/media.mjs', ": quote.task_ids.length ? 'submitted' : 'refused';", ": 'partial';"],
+  ['batch-submitted-readback', 'src/media.mjs', "if (batch && quote.state === 'submitted') return", 'if (false) return'],
+  ['batch-refused-before-keeps-partial', 'src/media.mjs', "(previous === 'partial' ? 'partial' : 'outcome_unknown')", "'outcome_unknown'"],
+  ['batch-finish-command', 'src/media.mjs', "if (line.startsWith('To finish the batch, call ')) {", 'if (false) {'],
+  ['batch-collect-command', 'src/media.mjs', "if (line.startsWith('Collect the results with list_tasks'))", 'if (false)'],
+  ['batch-unknown-command', 'src/media.mjs', "if (line.startsWith('The outcome of ')) {", 'if (false) {'],
+  ['batch-never-resubmit', 'src/media.mjs', "if (line.startsWith('Never resubmit '))", 'if (false)'],
+  ['batch-wait-refused', 'src/cli.mjs', "requireThat(!(options.wait && options['inputs-file']), 'invalid_option', BATCH_WAIT);", ''],
+  ['batch-quote-wait-refused', 'src/cli.mjs', "if (options.wait) requireThat(!Array.isArray((await state.read('quotes', options.quote))?.args?.inputs), 'invalid_option', BATCH_WAIT);", ''],
+  ['direct-options-need-skip', 'src/cli.mjs', "requireThat(!DIRECT_OPTIONS.some(key => options[key] !== undefined), 'invalid_option',", 'requireThat(true,'],
+  ['batch-file-limit', 'src/cli.mjs', 'items.length >= 1 && items.length <= MAX_BATCH_ITEMS', 'items.length >= 1'],
+  ['batch-jsonl', 'src/cli.mjs', 'raw.split(/\\r?\\n/).filter(line => line.trim())', '[raw]'],
+  ['batch-one-line', 'src/cli.mjs', "if (items && typeof items === 'object' && !Array.isArray(items)) items = [items];", ''],
+  ['batch-view-inputs', 'src/media.mjs', '...(input.inputs ? { inputs: input.inputs } : { input: input.input || {} })', 'input: input.input || {}'],
   ['input-binding', 'src/media.mjs', 'quote.args_hash === hash(quote.args)', 'true'],
   ['callback-state', 'src/auth.mjs', "url.searchParams.get('state') !== state", 'false'],
   ['logout-retention', 'src/auth.mjs', "requireThat(response.ok, 'logout_failed'", "requireThat(true, 'logout_failed'"],
@@ -155,8 +180,8 @@ const mutants = [
   ['quote-intent-incomplete', 'src/media.mjs', "if (!intent) throw new CliError('quote_refresh_incomplete',", "if (false) throw new CliError('quote_refresh_incomplete',"],
   ['quote-intent-supersede-mark', 'src/media.mjs', "await this.state.write('quotes', current.id, { ...current, state: 'superseded', superseded_by: next.id });", ''],
   ['quote-intent-active-task', 'src/media.mjs', "if (active?.task_id) throw new CliError('quote_superseded',", "if (false) throw new CliError('quote_superseded',"],
-  ['quote-intent-active-recovery', 'src/media.mjs', "if (['submitting', 'outcome_unknown'].includes(active?.state)) throw new CliError('quote_superseded',", "if (false) throw new CliError('quote_superseded',"],
-  ['quote-intent-refresh-recovery', 'src/media.mjs', ": ['submitting', 'outcome_unknown'].includes(active.state) ? { recovery:", ': false ? { recovery:'],
+  ['quote-intent-active-recovery', 'src/media.mjs', "if (RECOVERABLE.includes(active?.state)) throw new CliError('quote_superseded',", "if (false) throw new CliError('quote_superseded',"],
+  ['quote-intent-refresh-recovery', 'src/media.mjs', ": RECOVERABLE.includes(active.state) ? { recovery:", ': false ? { recovery:'],
   // The vendored core prices Midjourney settings from model_params and promptless V7 edits as fast.
   ['mj-quote-nested-read', 'src/platform/core/src/services/pricing-quote-client.js', ': nestedSpec[key] ? nestedInput[key] : undefined', ': undefined'],
   ['mj-quote-prompt-present', 'src/platform/core/src/services/pricing-quote-client.js', "typeof input.prompt === 'string' && effectiveMjV7EditPrompt(input.prompt) !== ''", 'true'],
@@ -164,6 +189,15 @@ const mutants = [
   ['unknown-total-help', 'src/media.mjs', "quote.estimate?.status !== 'needs_input' || !quote.estimate.usage_help?.length", 'true'],
   ['unknown-total-mapping', 'src/media.mjs', "'In the CLI, media_seconds is --media-seconds and pricing_parameters is --pricing-parameters (a JSON object).'].join('\\n')", "].join('\\n')"],
   ['unknown-total-zero-amounts', 'src/platform/core/src/services/pricing-rules-estimate.js', "...(status === 'needs_input' ? {} : {", '...(false ? {} : {'],
+  // GPT Image token models: a reference price, ignored token counts, 1.5 times the reference against a budget, no quote at 0.
+  ['reference-cap-allowance', 'src/media.mjs', '!referenceBudgetExceeded(quote.pricing_quote.total_uc, cap)', '!rulesBudgetExceeded(quote.pricing_quote.total_uc, cap)'],
+  ['reference-cap-refused', 'src/media.mjs', "const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)", 'const reference = false && Number.isFinite(quote.estimate.max_usd)'],
+  ['reference-range-unchecked', 'src/media.mjs', "quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined", 'false'],
+  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved?.gpt || reserved?.omni ? 'token_billed' : 'estimated'", "reserved?.gpt || reserved?.omni ? 'estimated' : 'estimated'"],
+  ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];', '.filter(() => false) : [];'],
+  ['reference-zero-total', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (total === 0n) {', 'if (false) {'],
+  ['reference-balance', 'src/platform/core/src/tools/estimate-cost.js', "(estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined", "estimate.status === 'estimated' && estimate.max_credits !== undefined"],
+  ['reference-omni', 'src/platform/core/src/services/pricing-rules-estimate.js', "if (isOmniTokenModel(id)) {\n        const usage = omniReservation(", "if (false) {\n        const usage = omniReservation("],
 ];
 
 // Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.
@@ -214,6 +248,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('search-') ? ['search-pricing.test.mjs']
       : name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
       : name.startsWith('quote-ttl-') ? ['quote-expiry.test.mjs']
+      : ['direct-', 'batch-', 'expired-', 'recovery-'].some(prefix => name.startsWith(prefix)) ? ['direct-batch.test.mjs']
       : ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']
       : name === 'error-refusal-evidence' ? ['media.test.mjs']
@@ -229,6 +264,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('quote-intent-') ? ['quote-intent.test.mjs']
       : name.startsWith('mj-quote-') ? ['mj-pricing.test.mjs']
       : name.startsWith('unknown-total-') ? ['unknown-total.test.mjs']
+      : name.startsWith('reference-') ? ['token-billed.test.mjs']
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];

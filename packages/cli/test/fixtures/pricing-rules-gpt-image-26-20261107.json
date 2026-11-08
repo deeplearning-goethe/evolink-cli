@@ -1,0 +1,2196 @@
+{
+ "meta": {
+  "schema_version": "2",
+  "catalog_version": "cat_cc7d44e33212070013389ca1",
+  "pricing_version": "prc_ef9161efbe3989635f05251f",
+  "price_scope": "public_default",
+  "currency": "USD",
+  "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+  "updated_at": "2026-11-05T12:14:48.903Z",
+  "fresh_until": "2026-11-07T07:08:00Z"
+ },
+ "models": [
+  {
+   "model_id": "gpt-image-2.6-flare",
+   "product_id": "gpt-image-2-6",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "72f1d69a1147eafd6dc1621579d1465bd892849c2513cdcf86adc36a40c02d57",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "image_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "svg_model",
+     "type": "enum",
+     "values": [
+      "none",
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-6.1-sol",
+      "gpt-6.1-terra"
+     ],
+     "default": "none"
+    },
+    {
+     "name": "svg_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "svg_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "image_input",
+     "role": "image_input",
+     "label_key": "image_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4170",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5440",
+      "credits": "0.544",
+      "cny": "0.0544",
+      "usd": "0.008"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_cached_input",
+     "role": "image_cached_input",
+     "label_key": "image_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4171",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_output",
+     "role": "image_output",
+     "label_key": "image_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4172",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "20400",
+      "credits": "2.04",
+      "cny": "0.204",
+      "usd": "0.03"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_input",
+     "role": "text_input",
+     "label_key": "text_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4173",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "3400",
+      "credits": "0.34",
+      "cny": "0.034",
+      "usd": "0.005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_cached_input",
+     "role": "text_cached_input",
+     "label_key": "text_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4174",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "850",
+      "credits": "0.085",
+      "cny": "0.0085",
+      "usd": "0.00125"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_astra",
+     "role": "svg_input:gpt-6-astra",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4190",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-astra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_astra",
+     "role": "svg_output:gpt-6-astra",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4191",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "34000",
+      "credits": "3.4",
+      "cny": "0.34",
+      "usd": "0.05"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-astra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_sol",
+     "role": "svg_input:gpt-6-sol",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4192",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_sol",
+     "role": "svg_output:gpt-6-sol",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4193",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_luna",
+     "role": "svg_input:gpt-6-luna",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4194",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "68",
+      "credits": "0.0068",
+      "cny": "0.00068",
+      "usd": "0.0001"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-luna"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_luna",
+     "role": "svg_output:gpt-6-luna",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4195",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "340",
+      "credits": "0.034",
+      "cny": "0.0034",
+      "usd": "0.0005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-luna"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_1_sol",
+     "role": "svg_input:gpt-6.1-sol",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4196",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_1_sol",
+     "role": "svg_output:gpt-6.1-sol",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4197",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_1_terra",
+     "role": "svg_input:gpt-6.1-terra",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4198",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "680",
+      "credits": "0.068",
+      "cny": "0.0068",
+      "usd": "0.001"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-terra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_1_terra",
+     "role": "svg_output:gpt-6.1-terra",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4199",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "3400",
+      "credits": "0.34",
+      "cny": "0.034",
+      "usd": "0.005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-terra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gpt-image-2.6-sunburst",
+   "product_id": "gpt-image-2-6",
+   "operation": "image_generation",
+   "modality": "image",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "b1306043ce42de7de80bb0a93e72cdaf37c3df71a90696dbf1442a4773815797",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "image_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "image_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "text_cached_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "svg_model",
+     "type": "enum",
+     "values": [
+      "none",
+      "gpt-6-astra",
+      "gpt-6-sol",
+      "gpt-6-luna",
+      "gpt-6.1-sol",
+      "gpt-6.1-terra"
+     ],
+     "default": "none"
+    },
+    {
+     "name": "svg_input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "svg_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "image_input",
+     "role": "image_input",
+     "label_key": "image_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4160",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5440",
+      "credits": "0.544",
+      "cny": "0.0544",
+      "usd": "0.008"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_cached_input",
+     "role": "image_cached_input",
+     "label_key": "image_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4161",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "image_output",
+     "role": "image_output",
+     "label_key": "image_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4162",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "20400",
+      "credits": "2.04",
+      "cny": "0.204",
+      "usd": "0.03"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "image_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_input",
+     "role": "text_input",
+     "label_key": "text_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4163",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "3400",
+      "credits": "0.34",
+      "cny": "0.034",
+      "usd": "0.005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "text_cached_input",
+     "role": "text_cached_input",
+     "label_key": "text_cached_input_tokens",
+     "dimension": "cache_read_token",
+     "sku_id": "4164",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "850",
+      "credits": "0.085",
+      "cny": "0.0085",
+      "usd": "0.00125"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "text_cached_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_astra",
+     "role": "svg_input:gpt-6-astra",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4180",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-astra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_astra",
+     "role": "svg_output:gpt-6-astra",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4181",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "34000",
+      "credits": "3.4",
+      "cny": "0.34",
+      "usd": "0.05"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-astra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_sol",
+     "role": "svg_input:gpt-6-sol",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4182",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_sol",
+     "role": "svg_output:gpt-6-sol",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4183",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_luna",
+     "role": "svg_input:gpt-6-luna",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4184",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "68",
+      "credits": "0.0068",
+      "cny": "0.00068",
+      "usd": "0.0001"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-luna"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_luna",
+     "role": "svg_output:gpt-6-luna",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4185",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "340",
+      "credits": "0.034",
+      "cny": "0.0034",
+      "usd": "0.0005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6-luna"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_1_sol",
+     "role": "svg_input:gpt-6.1-sol",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4186",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "1360",
+      "credits": "0.136",
+      "cny": "0.0136",
+      "usd": "0.002"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_1_sol",
+     "role": "svg_output:gpt-6.1-sol",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4187",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "6800",
+      "credits": "0.68",
+      "cny": "0.068",
+      "usd": "0.01"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-sol"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_input_gpt_6_1_terra",
+     "role": "svg_input:gpt-6.1-terra",
+     "label_key": "svg_input_tokens",
+     "dimension": "input_token",
+     "sku_id": "4188",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "680",
+      "credits": "0.068",
+      "cny": "0.0068",
+      "usd": "0.001"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-terra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_input_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "svg_output_gpt_6_1_terra",
+     "role": "svg_output:gpt-6.1-terra",
+     "label_key": "svg_output_tokens",
+     "dimension": "output_token",
+     "sku_id": "4189",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "3400",
+      "credits": "0.34",
+      "cny": "0.034",
+      "usd": "0.005"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k_tokens",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T12:14:48.903Z",
+     "condition": {
+      "op": "and",
+      "args": [
+       {
+        "op": "eq",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_model"
+         },
+         {
+          "op": "constant",
+          "value": "gpt-6.1-terra"
+         }
+        ]
+       },
+       {
+        "op": "gt",
+        "args": [
+         {
+          "op": "variable",
+          "name": "svg_output_tokens"
+         },
+         {
+          "op": "constant",
+          "value": "0"
+         }
+        ]
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "svg_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  }
+ ]
+}

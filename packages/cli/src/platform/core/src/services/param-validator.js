@@ -174,9 +174,44 @@ export function validateInput(spec, input) {
         if (present.length > 1)
             result.errors.push({ param: present.join(', '), problem: 'are mutually exclusive; pass only one reference type.' });
     }
+    // A documented condition: an input that matches its `if` must also meet its `then`.
+    for (const condition of spec.conditions ?? []) {
+        const meets = (name, limits) => {
+            const check = { errors: [], warnings: [] };
+            checkValue(name, limits, rest[name], check);
+            return check.errors.length === 0;
+        };
+        const matches = (condition.if.required ?? []).every(name => rest[name] !== undefined)
+            && Object.entries(condition.if.properties ?? {}).every(([name, limits]) => rest[name] === undefined || meets(name, limits));
+        if (!matches)
+            continue;
+        const then = { errors: [], warnings: [] };
+        for (const name of condition.then.required ?? [])
+            if (rest[name] === undefined)
+                then.errors.push({ param: name, problem: 'is required.' });
+        for (const [name, limits] of Object.entries(condition.then.properties ?? {}))
+            checkValue(name, limits, rest[name], then);
+        for (const issue of then.errors)
+            result.errors.push({ param: issue.param, problem: `${issue.problem.replace(/\.$/, '')} (documented condition: when ${conditionText(condition.if)}).` });
+    }
+    // A body documented as one of several shapes: the given parameters must fit one, with everything it requires.
+    if (spec.requestShapes?.length) {
+        const given = Object.keys(rest).filter(name => spec.params[name] && rest[name] !== undefined && rest[name] !== null && rest[name] !== '');
+        const fits = spec.requestShapes.some(shape => shape.required.every(name => given.includes(name)) && given.every(name => shape.params.includes(name)));
+        if (!fits)
+            result.errors.push({ param: given.join(', ') || 'input', problem: `must fit one of the documented request shapes: ${spec.requestShapes.map(shapeText).join('; or ')}.` });
+    }
     const size = spec.constraints?.imageSize;
     const value = size ? rest[size.param] : undefined;
-    if (size && typeof value === 'string' && !size.allowed.includes(value)) {
+    const frames = size?.frames && rest.output_format === size.frames.outputFormat ? size.frames : undefined;
+    if (frames && typeof value === 'string' && value !== 'auto') {
+        const pixels = /^(\d+)[x×](\d+)$/.exec(value), width = Number(pixels?.[1]), height = Number(pixels?.[2]);
+        if (!pixels || width < frames.minEdge || height < frames.minEdge || width > frames.maxEdge || height > frames.maxEdge
+            || width % frames.step !== 0 || height % frames.step !== 0) {
+            result.errors.push({ param: size.param, problem: `with output_format ${frames.outputFormat} is each frame's size: auto, or WxH with edges ${frames.minEdge}–${frames.maxEdge} in multiples of ${frames.step}.` });
+        }
+    }
+    else if (size && typeof value === 'string' && !size.allowed.includes(value)) {
         const pixels = /^(\d+)[x×](\d+)$/.exec(value);
         if (!pixels || !size.allowPixels) {
             result.errors.push({ param: size.param, problem: `must be one of ${size.allowed.join(', ')}${size.allowPixels ? ', or a valid WxH pixel size' : ''}.` });
@@ -195,6 +230,18 @@ export function validateInput(spec, input) {
         result.errors.push({ param: 'resolution', problem: `must be ${size.ratioResolution} when size is a ratio.` });
     }
     return result;
+}
+/** One side of a documented condition in words, e.g. "image_urls minItems 2" or "duration minimum 11". */
+export function conditionText(part) {
+    const limits = Object.entries(part.properties ?? {}).map(([name, limit]) => `${name} ${Object.entries(limit)
+        .filter(([key]) => key !== 'type' && key !== 'description').map(([key, value]) => `${key} ${show(value)}`).join(', ')}`.trim());
+    const present = (part.required ?? []).filter(name => !(part.properties ?? {})[name]).map(name => `${name} is given`);
+    return [...limits, ...present].join(' and ');
+}
+/** One request shape in words: what it requires, then what else it accepts. */
+export function shapeText(shape) {
+    const optional = shape.params.filter(name => !shape.required.includes(name));
+    return `${shape.required.join(', ')}${optional.length ? ` (optional: ${optional.join(', ')})` : ''}`;
 }
 export function formatIssues(issues) {
     return issues.map(issue => `- ${issue.param} ${issue.problem}`);
