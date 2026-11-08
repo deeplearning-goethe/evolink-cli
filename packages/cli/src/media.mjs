@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { hash } from './state.mjs';
 import { CliError, requireThat, fileError } from './errors.mjs';
-import { APPROVAL_TTL_MS, REFERENCE_BUDGET_FACTOR, referenceBudgetExceeded, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
+import { APPROVAL_TTL_MS, REFERENCE_BUDGET_FACTOR, priceRose, referenceBudgetExceeded, rulesBudgetExceeded } from './platform/core/src/services/pricing-rules-estimate.js';
 import { compareDecimal } from './platform/core/src/services/pricing-quote-client.js';
 import { DASHBOARD_URL } from './platform/core/src/services/http-policy.js';
 import { dashboardCheck } from './platform/core/src/tools/shared.js';
@@ -26,12 +26,34 @@ const RECOVERABLE = ['submitting', 'outcome_unknown', 'partial'];
 /** A quote for several inputs of one model (estimate --inputs-file), submitted in one call. */
 const isBatch = quote => Array.isArray(quote.args?.inputs);
 
-/** A first submission of an expired quote whose input and price were unchanged says so in its result. */
-function withExpiry(view, quote) {
-  if (!quote) return view;
-  const at = new Date(quote.expires_at).toISOString();
-  const line = `The quote expired at ${at}, but its input and price are unchanged, so it was submitted under the original approval.`;
-  return { ...view, approval_expired: true, quote_expired_at: at, text: view.text ? `${view.text}\n${line}` : line };
+/**
+ * A quote holds until its expires_at, 24 hours after the estimate at most. Past it a first submission needs a new
+ * estimate and approval; recovery cannot replay it either, so the user checks what already went through first.
+ */
+function expiredQuote(quote, id, resume) {
+  const at = new Date(quote.expires_at).toISOString(), batch = isBatch(quote), ids = quote.task_ids ?? [];
+  const list = 'evolink tasks list --since 2d', collect = ids.length ? `evolink tasks batch --ids ${ids.join(',')}` : undefined;
+  const message = !resume ? `This quote expired at ${at}. Refresh it with evolink estimate --refresh-quote ${id} and obtain the user's approval again. Nothing was submitted.`
+    : batch ? `This quote expired at ${at}, so its batch cannot be finished with it. Check ${collect ? `${collect} and ${list}` : list} first to see which inputs went through; then estimate only the inputs that did not and, after the user approves, submit them as a new batch. Nothing was submitted.`
+      : `This quote expired at ${at}, so its submission cannot be recovered with it. Check ${list} first to see whether it went through; only if it did not, estimate it again and, after the user approves, submit it as a new generation. Nothing was submitted.`;
+  return new CliError('quote_expired', message, { quote_id: id, client_request_id: quote.client_request_id, expired_at: at, submission_allowed: false,
+    ...(ids.length ? { task_ids: ids } : {}), next_step: resume ? collect ?? list : `evolink estimate --refresh-quote ${id}`, ...(resume ? dashboardCheck() : {}) });
+}
+
+/**
+ * Whether a fresh estimate still matches the approved quote: the same input at the approved price or lower. With the
+ * core's approval record that is its request hash and total, whatever else changed in the rules. Without one on both
+ * sides (an older service, or rules that cannot be read now), any change to the estimate needs a new approval.
+ */
+export function approvalHolds(fresh, quote) {
+  const approved = quote.args?.pricing_quote, now = fresh.pricing_quote;
+  if (approved && now) {
+    return { input: approved.request_hash === now.request_hash && approved.model_id === now.model_id && approved.batch_items === now.batch_items,
+      rose: priceRose(approved, now) };
+  }
+  const account = quote.account_quote, current = fresh.account_quote;
+  if (account && current) return { input: account.request_hash === current.request_hash, rose: compareDecimal(current.quote.amount, account.quote.amount) > 0 };
+  return { input: true, rose: priceFingerprint(fresh) !== quote.fingerprint, byFingerprint: true };
 }
 
 /** The shared core's batch result names its own tool calls; for the CLI these lines name the CLI commands instead. */
@@ -39,7 +61,9 @@ export function cliBatchText(text, id, taskIds) {
   return (text ?? '').split('\n').map(line => {
     if (line.startsWith('Collect the results with list_tasks')) return `Collect the results with evolink tasks batch --ids ${taskIds.join(',')}; it is free and read-only.`;
     if (line.startsWith('To finish the batch, call ')) {
-      return line.replace(/^To finish the batch, call \S+ again with client_request_id "[^"]*" and exactly the same inputs/, `To finish the batch, run evolink tasks resume --quote ${id}`);
+      // tasks resume replays the request ID for 23 of the gateway's 24 hours (RECOVERY_WINDOW_MS).
+      return line.replace(/^To finish the batch, call \S+ again with client_request_id "[^"]*" and exactly the same inputs/, `To finish the batch, run evolink tasks resume --quote ${id}`)
+        .replace(' within 24 hours of its first submission', ' within 23 hours of its first submission');
     }
     if (line.startsWith('The outcome of ')) {
       return line.replace(/retry later with the same client_request_id and inputs, or check list_tasks\.$/, `run evolink tasks resume --quote ${id} later, or check evolink tasks list --since 30m.`);
@@ -47,6 +71,12 @@ export function cliBatchText(text, id, taskIds) {
     if (line.startsWith('Never resubmit ')) return 'Never resubmit accepted, not-submitted or unknown-outcome inputs with a new estimate or generate command: that creates and charges new tasks.';
     return line;
   }).join('\n');
+}
+
+/** The shared core's refusal of a replayed approval, before anything is sent: its price rose, or it expired. */
+function replayRefusal(error) {
+  const code = error?.details?.error?.code;
+  return ['price_changed', 'quote_expired'].includes(code) && error.details.charged === 'no' ? code : undefined;
 }
 
 function interrupted(taskId) {
@@ -277,17 +307,22 @@ export class Media {
       if (resume) requireThat(this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS, 'recovery_window_passed',
         'This request ID was first submitted more than 23 hours ago. EvoLink keeps a request ID for 24 hours, so replaying it now could create and charge a new task. Check recent tasks with evolink tasks list --since 2d instead.',
         { quote_id: id, client_request_id: quote.client_request_id, submission_allowed: false, ...dashboardCheck() });
-      // An expired quote still holds for its unchanged input and price: the fresh estimate below refuses a changed one.
-      const expired = !resume && !quote.skip_estimate && this.now() >= quote.expires_at;
+      if (!quote.skip_estimate && this.now() >= quote.expires_at) throw expiredQuote(quote, id, resume);
       const { max_cost_usd, account_quote, pricing_quote, skip_estimate, ...checkArgs } = quote.args;
       // skip_estimate: the user opted out of estimates; the shared core still refuses invalid input and an unpriceable budget.
       if (!quote.skip_estimate) {
         let fresh;
         try {
-          // Preserve the original approved request during uncertain submission recovery.
-          fresh = resume && (account_quote || pricing_quote) ? { model: quote.args.model, type: quote.type, input_valid: true, estimate: quote.estimate, account_quote, pricing_quote }
+          // Recovery sends the original approved request, which the shared core checks against the current price itself.
+          const replay = resume && (account_quote || pricing_quote);
+          fresh = replay ? { model: quote.args.model, type: quote.type, input_valid: true, estimate: quote.estimate, account_quote, pricing_quote }
             : await this.client.call('estimate_cost', checkArgs);
-          requireThat(resume && (account_quote || pricing_quote) || priceFingerprint(fresh) === quote.fingerprint, 'price_changed', 'The quote changed. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
+          if (!replay) {
+            const held = approvalHolds(fresh, quote);
+            requireThat(held.input, 'quote_input_changed', 'The input as EvoLink reads it changed since the quote. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
+            requireThat(!held.rose, 'price_changed', held.byFingerprint ? 'The quote changed. Estimate again and obtain approval for the new quote.'
+              : 'The price rose since the quote was approved. Estimate again and obtain approval for the new quote.', { estimate: fresh.estimate });
+          }
           checkEstimate(fresh, max_cost_usd);
         } catch (error) { throw quoteError(error, max_cost_usd); }
         if (!resume && fresh.pricing_quote) {
@@ -311,7 +346,7 @@ export class Media {
       await this.state.write('quotes', id, quote);
       const { pricing_source, ...generationArgs } = quote.args;
       const request = { ...generationArgs, client_request_id: quote.client_request_id };
-      if (batch) return this.submitBatch(kind, id, quote, request, { resume, previous, expired });
+      if (batch) return this.submitBatch(kind, id, quote, request, { resume, previous });
       let result;
       try {
         result = await this.client.call(`generate_${kind}`, request);
@@ -331,20 +366,25 @@ export class Media {
         }
         quote.state = !resume && e.details?.charged === 'no' && ['not_submitted', 'rejected'].includes(e.details?.submission_state) ? 'refused' : 'outcome_unknown';
         await this.state.write('quotes', id, quote);
+        // The shared core refused the replay before sending it: the approval no longer holds (price or age).
+        const approval = resume && replayRefusal(e);
+        if (approval) throw new CliError(approval, `${approval === 'price_changed' ? 'The price rose since the quote was approved' : 'The quote expired'}, so the replay was not sent, and the original submission remains unverified. Check evolink tasks list --since 2d first to see whether it went through; only if it did not, estimate it again and, after the user approves, submit it as a new generation.`,
+          { ...(e.details || {}), charged: 'unknown', submission_state: 'outcome_unknown', quote_id: id, client_request_id: quote.client_request_id, submission_allowed: false,
+            next_step: 'evolink tasks list --since 2d', ...dashboardCheck() }, e.exitCode);
         throw new CliError(resume ? 'outcome_unknown' : e.code || 'outcome_unknown', resume ? 'The original submission remains unverified. The replay could not proceed; check recent tasks with the original request ID before preparing any new generation.' : e.message, { ...(e.details || {}), ...(quote.state === 'outcome_unknown' ? { charged: 'unknown', submission_state: 'outcome_unknown' } : {}), quote_id: id, client_request_id: quote.client_request_id,
           recovery: `evolink tasks resume --quote ${id}` }, e.exitCode);
       }
       quote.state = 'submitted';
       quote.task_id = result.task_id;
       await this.state.write('quotes', id, quote);
-      return withExpiry({ ...result, quote_id: id, client_request_id: quote.client_request_id }, expired && quote);
+      return { ...result, quote_id: id, client_request_id: quote.client_request_id };
     });
   }
   /**
    * Submits a batch quote's inputs in one shared-core call and records each input's outcome. The same request ID and
    * inputs (tasks resume) later return accepted inputs without a new charge and submit only those still to finish.
    */
-  async submitBatch(kind, id, quote, request, { resume, previous, expired }) {
+  async submitBatch(kind, id, quote, request, { resume, previous }) {
     let result, failure;
     try { result = await this.client.call(`generate_${kind}`, request); } catch (error) { failure = error; }
     const outcome = result ?? failure?.details ?? {};
@@ -365,10 +405,14 @@ export class Media {
     const view = { ...outcome, quote_id: id, client_request_id: quote.client_request_id, task_ids: taskIds, text: cliBatchText(outcome.text, id, taskIds),
       ...(taskIds.length ? { collect: `evolink tasks batch --ids ${taskIds.join(',')}` } : {}),
       ...(RECOVERABLE.includes(quote.state) ? { recovery: `evolink tasks resume --quote ${id}` } : {}) };
-    if (result) return withExpiry(view, expired && quote);
+    if (result) return view;
     if (items) throw new CliError(failure.code || 'batch_not_submitted', failure.message, view, failure.exitCode);
-    throw new CliError(resume && !refusedBefore ? 'outcome_unknown' : failure.code || 'outcome_unknown', resume && !refusedBefore
-      ? 'The batch submission remains unverified. The replay could not proceed; check recent tasks with the original request ID before preparing any new generation.' : failure.message, {
+    // The shared core refused the replay before sending anything because the approval no longer holds (price or age).
+    const approval = resume && refusedBefore && replayRefusal(failure);
+    const check = `${taskIds.length ? `evolink tasks batch --ids ${taskIds.join(',')} and ` : ''}evolink tasks list --since 2d`;
+    throw new CliError(approval || (resume && !refusedBefore ? 'outcome_unknown' : failure.code || 'outcome_unknown'), approval
+      ? `${approval === 'price_changed' ? 'The total price rose since the quote was approved' : 'The quote expired'}, so nothing was sent. Check ${check} first to see which inputs went through; then estimate only the inputs that did not and, after the user approves, submit them as a new batch.`
+      : resume && !refusedBefore ? 'The batch submission remains unverified. The replay could not proceed; check recent tasks with the original request ID before preparing any new generation.' : failure.message, {
       ...view, ...(quote.state === 'outcome_unknown' ? { charged: 'unknown', submission_state: 'outcome_unknown' } : {}),
       ...(refusedBefore && quote.state === 'partial' ? { items: quote.items, next_step: 'This call submitted nothing. Accepted inputs keep their tasks (task_ids). Resolve the error; then finish the rest with tasks resume, or estimate them again as a new batch if their price or input changed.' } : {}),
     }, failure.exitCode);

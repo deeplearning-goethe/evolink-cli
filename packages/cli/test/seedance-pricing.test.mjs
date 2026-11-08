@@ -83,7 +83,8 @@ test('Seedance saved quote exposes effective defaults, rejects old wrong-price a
   const oldView = { ...q, effective_input: undefined, estimate: legacy.estimate, pricing_quote: legacy.approval };
   saved.args.pricing_quote = legacy.approval; saved.args_hash = hash(saved.args); saved.estimate = legacy.estimate;
   saved.fingerprint = priceFingerprint(oldView); await f.state.write('quotes', q.quote_id, saved);
-  await assert.rejects(f.media.generate('video', q.quote_id, { confirmed: true }), { code: 'price_changed' });
+  // The old approval priced the input without the 480p default: EvoLink now reads a different input.
+  await assert.rejects(f.media.generate('video', q.quote_id, { confirmed: true }), { code: 'quote_input_changed' });
   assert.equal(f.calls.length, 0); assert.equal(f.paid.size, 0);
 });
 

@@ -5,7 +5,7 @@ const mutations = [
   ['rules-save', 'pricing_quote: quote.pricing_quote', 'pricing_quote: undefined'],
   ['rules-fingerprint', 'rules: quote.pricing_quote &&', 'rules: false &&'],
   ['rules-exact-budget', '!rulesBudgetExceeded(quote.pricing_quote.total_uc, cap)', 'quote.estimate.max_usd <= cap'],
-  ['recovery-original-approval', 'resume && (account_quote || pricing_quote) ?', 'false ?'],
+  ['recovery-original-approval', 'const replay = resume && (account_quote || pricing_quote);', 'const replay = false;'],
   ['recovery-refusal-evidence', "!resume && e.details?.charged === 'no'", "e.details?.charged === 'no'"],
   ['refresh-budget-retained', 'const { account_quote, pricing_quote, skip_estimate, ...args } = before.args;', 'const { account_quote, pricing_quote, skip_estimate, max_cost_usd, ...args } = before.args;'],
   ['refresh-started-refusal', "active.state === 'quoted' && !active.task_id", 'true'],
