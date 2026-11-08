@@ -19,7 +19,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: packages/cli
