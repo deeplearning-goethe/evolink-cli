@@ -234,6 +234,19 @@ function reservation10(id, route, input, mediaSeconds, tokensOf) {
         ...(input_videos ? { input_videos } : {}),
         tokens: { input_tokens: inputTokens, video_output_tokens: seconds * V10.output, other_output_tokens: OMNI_OTHER_OUTPUT_TOKENS } };
 }
+/**
+ * The input resolutions a reference price is also given at, lowest first, when the gateway reads the input's own at
+ * submission: every tier for an input or reference video, or for an upscale each source it accepts for the target.
+ */
+export function omniInputTiers(reservation) {
+    if (reservation.upscale) {
+        const target = reservation.upscale.target;
+        return reservation.upscale.source_assumed ? TIERS.filter(tier => UPSCALE[`${tier}>${target}`] !== undefined) : [];
+    }
+    return reservation.input_videos?.resolution_assumed ? [...TIERS] : [];
+}
+/** The resolution the reference price itself counts the input at: the highest, or the upscale source that costs most. */
+export const omniQuotedTier = (reservation) => reservation.upscale?.source ?? reservation.input_videos?.resolution;
 /** The lower-resolution input a reference price can also be given for: 720p, or for an upscale the cheaper source. */
 export function omniLowerInputTier(reservation) {
     if (reservation.upscale) {

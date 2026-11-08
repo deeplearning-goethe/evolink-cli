@@ -1,0 +1,150 @@
+{
+ "meta": {
+  "schema_version": "2",
+  "catalog_version": "cat_3f9c36e4b1534b7212a1c1b4",
+  "pricing_version": "prc_819ee94fd93c4c7eb869e547",
+  "price_scope": "public_default",
+  "currency": "USD",
+  "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+  "updated_at": "2026-10-12T09:56:49.042Z",
+  "fresh_until": "2026-11-08T16:09:00Z"
+ },
+ "model": {
+  "model_id": "qwen-audio-3.1-tts-flash",
+  "product_id": "qwen-audio-3.1-tts-flash",
+  "operation": "speech_generation",
+  "modality": "audio",
+  "lifecycle": "active",
+  "pricing_status": "available",
+  "settlement_basis": "actual_usage",
+  "policy_version": 1,
+  "policy_checksum": "0cd3c2583371f44de9d382e75530ee62b97b2c08f630f572ddb6e77264039175",
+  "policy_source": "published",
+  "parameters": [
+   {
+    "name": "input_tokens",
+    "type": "integer",
+    "minimum": "0",
+    "default": "0"
+   },
+   {
+    "name": "output_tokens",
+    "type": "integer",
+    "minimum": "0",
+    "default": "0"
+   }
+  ],
+  "components": [
+   {
+    "id": "input",
+    "role": "input",
+    "dimension": "input_token",
+    "sku_id": "3215",
+    "unit": "1k_tokens",
+    "billing_unit_size": 1000,
+    "display_unit_size": 1000000,
+    "rate": {
+     "uc": "150",
+     "credits": "0.015",
+     "cny": "0.0015",
+     "usd": "0.00022059"
+    },
+    "minimum_charge": {
+     "uc": "0",
+     "credits": "0",
+     "cny": "0",
+     "usd": "0"
+    },
+    "billing_rule": "per_1k",
+    "pricing_status": "available",
+    "effective_at": "2026-10-09T21:36:46Z",
+    "condition": {
+     "op": "gt",
+     "args": [
+      {
+       "op": "variable",
+       "name": "input_tokens"
+      },
+      {
+       "op": "constant",
+       "value": "0"
+      }
+     ]
+    },
+    "quantity_rule": {
+     "op": "divide",
+     "args": [
+      {
+       "op": "variable",
+       "name": "input_tokens"
+      },
+      {
+       "op": "constant",
+       "value": "1000"
+      }
+     ]
+    },
+    "rounding": {
+     "point": "per_component_subtotal",
+     "mode": "ceil"
+    },
+    "tiers": []
+   },
+   {
+    "id": "output",
+    "role": "output",
+    "dimension": "output_token",
+    "sku_id": "3214",
+    "unit": "1k_tokens",
+    "billing_unit_size": 1000,
+    "display_unit_size": 1000000,
+    "rate": {
+     "uc": "1200",
+     "credits": "0.12",
+     "cny": "0.012",
+     "usd": "0.00176471"
+    },
+    "minimum_charge": {
+     "uc": "0",
+     "credits": "0",
+     "cny": "0",
+     "usd": "0"
+    },
+    "billing_rule": "per_1k",
+    "pricing_status": "available",
+    "effective_at": "2026-10-09T21:36:46Z",
+    "condition": {
+     "op": "gt",
+     "args": [
+      {
+       "op": "variable",
+       "name": "output_tokens"
+      },
+      {
+       "op": "constant",
+       "value": "0"
+      }
+     ]
+    },
+    "quantity_rule": {
+     "op": "divide",
+     "args": [
+      {
+       "op": "variable",
+       "name": "output_tokens"
+      },
+      {
+       "op": "constant",
+       "value": "1000"
+      }
+     ]
+    },
+    "rounding": {
+     "point": "per_component_subtotal",
+     "mode": "ceil"
+    },
+    "tiers": []
+   }
+  ]
+ }
+}

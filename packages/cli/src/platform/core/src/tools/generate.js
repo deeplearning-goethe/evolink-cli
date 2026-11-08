@@ -10,6 +10,7 @@ import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/p
 import { ApprovedRulesEstimate, REFERENCE_BUDGET_FACTOR, amountsForUC, calculateRulesEstimate, createRulesEstimate, checkRulesApproval, readPricingRulesFor, referenceAllowance, referenceBudgetExceeded, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { isOmniTokenModel } from '../services/omni-tokens.js';
+import { isQwenTTSModel } from '../services/qwen-tts-tokens.js';
 import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { DASHBOARD_CHECK_GUIDANCE, MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, dashboardCheck, errorResult, failure, money, ok, progressReporter, retryText, usdOf } from './shared.js';
@@ -58,26 +59,29 @@ function inputSchema(kind) {
             .describe('Model parameters exactly as listed by get_model, e.g. {"prompt":"…","quality":"1080p"}. Do not put model or callback_url here.'),
         // The leading max() lets zod stop at an oversized array instead of checking every element.
         inputs: z.array(z.record(z.string(), z.unknown())).max(MAX_BATCH_ITEMS).min(1).optional()
-            .describe(`Several tasks of this model at once (1–${MAX_BATCH_ITEMS}), each item like input. One pricing_quote from estimate_cost with the same inputs, in the same order, approves the whole batch; every item is submitted right away (up to ${BATCH_SUBMIT_CONCURRENCY} at a time) and the result lists each item's task_id or error. Collect the results with list_tasks (task_ids). To finish a batch, call again with the same client_request_id and exactly the same inputs within 24 hours: the items the result lists to finish (not submitted, or refused and since fixed) are then submitted, and accepted items return their original tasks without a new charge. Never resubmit accepted, not-submitted or unknown-outcome items under a new client_request_id: that creates and charges new tasks. media_seconds and pricing_parameters apply to every item. Pass input or inputs, not both.`),
+            .describe(`Several tasks of this model at once (1–${MAX_BATCH_ITEMS}), each item like input. One pricing_quote from estimate_cost with the same inputs, in the same order, approves the whole batch; every item is submitted right away (up to ${BATCH_SUBMIT_CONCURRENCY} at a time) and the result lists each item's task_id or error. Collect the results with list_tasks (task_ids). To finish a batch, call again with the same client_request_id and exactly the same inputs within 24 hours of its first submission: the items the result lists to finish (not submitted, or refused and since fixed) are then submitted, and accepted items return their original tasks without a new charge. Within those 24 hours, never resubmit accepted, not-submitted or unknown-outcome items under a new client_request_id: that creates and charges new tasks. Past them, check list_tasks and submit only the items that did not go through, as a new batch with a new client_request_id. media_seconds and pricing_parameters apply to every item. Pass input or inputs, not both.`),
         client_request_id: z.string().regex(CLIENT_REQUEST_ID_PATTERN).optional()
-            .describe(`Optional idempotency key (16–96 characters: letters, digits, . _ -; with inputs at most ${BATCH_REQUEST_ID_MAX}, since each item adds .NN). Reuse the same value only to retry the same request after a network error or timeout, or to finish a batch with exactly the same inputs.`),
+            .describe(`Optional idempotency key (16–96 characters: letters, digits, . _ -; with inputs at most ${BATCH_REQUEST_ID_MAX}, since each item adds .NN). Reuse the same value only to retry the same request after a network error or timeout, or to finish a batch with exactly the same inputs, within 24 hours of the first submission.`),
         max_cost_usd: z.number().positive().max(10_000).optional()
             .describe(`Compatibility option for a budget explicitly specified by the user. Compare the submission estimate against that budget; never derive this value from the estimate. This does not limit the final charge. Refuses when the estimate is incomplete or exceeds the budget; a token-billed reference price must fit ${REFERENCE_BUDGET_FACTOR} times over. With inputs it applies to the batch total.`),
         account_quote: ApprovedAccountQuote.optional().describe('Legacy approval. Refresh with estimate_cost and obtain user approval before using the new pricing rules.'),
-        pricing_quote: ApprovedRulesEstimate.optional().describe('Client approval record from estimate_cost, for exactly this input (or these inputs). Rechecked against fresh pricing rules before submission; past its expires_at it still applies while the input and price are unchanged. Does not bind final settlement.'),
+        pricing_quote: ApprovedRulesEstimate.optional().describe('Client approval record from estimate_cost, for exactly this input (or these inputs), valid until its expires_at (24 hours from the estimate). Rechecked against fresh pricing rules before submission: refused if the input changed, the price rose or it expired; an unchanged or lower price submits. Does not bind final settlement.'),
         pricing_parameters: QuoteParameters.optional().describe('The same explicit billing usage passed to estimate_cost.'),
         media_seconds: z.number().positive().max(MEDIA_SECONDS_MAX).optional().describe(MEDIA_SECONDS_DESCRIPTION),
         wait_seconds: z.number().int().min(0).max(MAX_WAIT_SECONDS).optional()
             .describe(`Seconds to wait for the result after submitting, 0–${MAX_WAIT_SECONDS} (default ${WAIT_MS[kind] / 1000}; with inputs only 0). 0 returns the task_id right after submission: use it when submitting several tasks, then collect them with list_tasks.`),
-        skip_estimate: z.boolean().optional().describe('Only when the user has explicitly said not to estimate or not to confirm (for example "generate directly", "no need to estimate", "from now on just generate"); never on your own initiative. Submits without an approved estimate, also when the price cannot be computed or a pricing_quote changed, and says so in the result; the task is charged by actual usage. Invalid input and an explicit max_cost_usd are still checked.'),
+        skip_estimate: z.boolean().optional().describe('Only when the user has explicitly said not to estimate or not to confirm (for example "generate directly", "no need to estimate", "from now on just generate"); never on your own initiative. Submits without an approved estimate, also when the price cannot be computed or a pricing_quote changed or expired, and says so in the result; the task is charged by actual usage. Invalid input and an explicit max_cost_usd are still checked.'),
     };
 }
 const argsSchema = (kind) => z.object(inputSchema(kind));
-/** What lowers a reference price: GPT Image's output settings, or a Gemini Omni video's resolution, length and media. */
-const lowerReference = (model) => isOmniTokenModel(model) ? 'quality, duration, images or input videos' : 'size, quality, count or reference images';
+/** What lowers a reference price: GPT Image's output settings, a Gemini Omni video's resolution, length and media, or a Qwen TTS text. */
+const lowerReference = (model) => isOmniTokenModel(model) ? 'quality, duration, images or input videos'
+    : isQwenTTSModel(model) ? 'length of the text' : 'size, quality, count or reference images';
 function rangeText(estimate) {
     return formatEstimateRange(estimate) ?? 'unknown';
 }
+/** A pricing_quote refused for its input, its price or its age: skip_estimate submits anyway and says why. */
+const QUOTE_REFUSALS = new Set(['quote_input_changed', 'price_changed', 'quote_expired']);
 /**
  * Why the price could not be computed, when skip_estimate may set that aside: rules that are missing, unreadable or
  * limited, or usage known only once the task runs. Input problems and a cancelled call are never set aside.
@@ -105,7 +109,7 @@ function unpriced(error) {
     return undefined;
 }
 /**
- * A pricing_quote that no longer matches, set aside by skip_estimate: the result names the approved and the current
+ * A pricing_quote that no longer applies, set aside by skip_estimate: the result names the approved and the current
  * price (`now`, undefined when no total can be computed before the task runs).
  */
 function changedApproval(error, approval, now, batch = false) {
@@ -113,7 +117,12 @@ function changedApproval(error, approval, now, batch = false) {
         return { reason: 'quote_input_changed', why: batch ? `the pricing_quote was for different inputs${now ? `; the estimate of these inputs is ${now}` : ''}`
                 : `the pricing_quote was for a different input${now ? `; this input's estimate is ${now}` : ''}` };
     }
-    return { reason: 'price_changed', why: `the price changed after it was approved (approved ${money(Number(amountsForUC(approval.total_uc).credits))}, now ${now ?? 'not computable before the task runs'})`,
+    const approved = money(Number(amountsForUC(approval.total_uc).credits));
+    if (error.code === 'quote_expired') {
+        return { reason: 'quote_expired', why: `the pricing_quote expired at ${approval.expires_at} (approved ${approved}, now ${now ?? 'not computable before the task runs'})`,
+            approved: approval.total_uc };
+    }
+    return { reason: 'price_changed', why: `the price rose after it was approved (approved ${approved}, now ${now ?? 'not computable before the task runs'})`,
         approved: approval.total_uc };
 }
 /** Why max_cost_usd could not be checked, and what the assistant can do next. */
@@ -245,10 +254,9 @@ function registerGenerate(server, config, kind) {
                 if (!skipped)
                     throw error;
             }
-            let approvalExpired = false;
             if (args.pricing_quote && rulesEstimate) {
                 try {
-                    approvalExpired = checkRulesApproval(args.pricing_quote, rulesEstimate).expired;
+                    checkRulesApproval(args.pricing_quote, rulesEstimate);
                 }
                 catch (error) {
                     if (!skip || !(error instanceof QuoteError))
@@ -349,15 +357,13 @@ function registerGenerate(server, config, kind) {
             if (estimateSkipped) {
                 if (!skipped)
                     lines.push('Submitted at the user\'s request without an approved estimate (skip_estimate).');
-                else if (skipped.reason === 'price_changed' || skipped.reason === 'quote_input_changed')
+                else if (QUOTE_REFUSALS.has(skipped.reason))
                     lines.push(`Submitted at the user's request (skip_estimate) although ${skipped.why}.`);
                 else
                     lines.push(`Price check skipped at the user's request (skip_estimate): ${skipped.why}. The task is charged by actual usage.`);
                 if (!(typeof reserved === 'number' && reserved > 0) && task.status !== 'completed')
                     lines.push('get_task shows the charge when the task finishes.');
             }
-            if (approvalExpired)
-                lines.push(`The approved estimate expired at ${args.pricing_quote.expires_at}, but the input and price are unchanged, so it was submitted under that approval.`);
             if (estimate?.status === 'estimated')
                 lines.push(`Estimate before submitting: ${rangeText(estimate)}`);
             if (reference && estimate)
@@ -394,7 +400,6 @@ function registerGenerate(server, config, kind) {
                 client_request_id: clientRequestId,
                 submission_state: 'accepted',
                 replayed: submitted.idempotency_replayed === true,
-                ...(approvalExpired ? { approval_expired: true } : {}),
                 ...(estimateSkipped ? { estimate_skipped: true, estimate_skip_reason: skipped?.reason ?? 'none' } : {}),
                 ...(skipped?.approved ? { approved_amounts: amountsForUC(skipped.approved) } : {}),
                 ...(typeof reserved === 'number' ? { reserved_credits: reserved, reserved_usd: usdOf(reserved) } : {}),
@@ -528,10 +533,9 @@ async function generateBatch(config, kind, args, extra, startedMono) {
         }) : [];
         const estimates = rules && priced.every(item => item !== undefined) ? priced : undefined;
         const total = estimates ? batchTotal(entry.id, estimates) : undefined;
-        let expiredApproval = false;
         if (args.pricing_quote && total) {
             try {
-                expiredApproval = checkBatchApproval(args.pricing_quote, total.approval).expired;
+                checkBatchApproval(args.pricing_quote, total.approval);
             }
             catch (error) {
                 if (!skipEstimate || !(error instanceof QuoteError))
@@ -615,7 +619,7 @@ async function generateBatch(config, kind, args, extra, startedMono) {
         if (skippedBatch) {
             if (!batchSkipped && !someItemsSkipped)
                 lines.push('Submitted at the user\'s request without an approved estimate (skip_estimate).');
-            else if (batchSkipped?.reason === 'price_changed' || batchSkipped?.reason === 'quote_input_changed')
+            else if (batchSkipped && QUOTE_REFUSALS.has(batchSkipped.reason))
                 lines.push(`Submitted at the user's request (skip_estimate) although ${batchSkipped.why}.`);
             else if (batchSkipped)
                 lines.push(`Price check skipped at the user's request (skip_estimate): ${batchSkipped.why}. The tasks are charged by actual usage.`);
@@ -625,8 +629,6 @@ async function generateBatch(config, kind, args, extra, startedMono) {
             if (accepted.some(report => !report.reserved))
                 lines.push('list_tasks or get_task shows each charge when its task finishes.');
         }
-        if (expiredApproval)
-            lines.push(`The approved estimate expired at ${args.pricing_quote.expires_at}, but the inputs and price are unchanged, so the batch was submitted under that approval.`);
         if (total?.status === 'estimated')
             lines.push(`Estimate before submitting: ${rangeText(total.estimate)} for ${count} input${count === 1 ? '' : 's'}.`);
         if (tokenBilled && total)
@@ -649,7 +651,7 @@ async function generateBatch(config, kind, args, extra, startedMono) {
             lines.push(`Collect the results with list_tasks (task_ids: ${taskIds.join(', ')}); it is free and read-only.`);
         if (finishing.length) {
             const fixFirst = reports.some(report => report.finishable && report.state === 'rejected');
-            lines.push(`To finish the batch, call ${name} again with client_request_id "${batchId}" and exactly the same inputs within 24 hours${fixFirst ? ', after fixing what the refused inputs need' : ''}: ${itemList(finishing)} will then be submitted, and accepted items return their original tasks without a new charge.`);
+            lines.push(`To finish the batch, call ${name} again with client_request_id "${batchId}" and exactly the same inputs within 24 hours of its first submission${fixFirst ? ', after fixing what the refused inputs need' : ''}: ${itemList(finishing)} will then be submitted, and accepted items return their original tasks without a new charge.`);
         }
         if (unknown.length)
             lines.push(`The outcome of ${itemList(unknown)} is unknown: retry later with the same client_request_id and inputs, or check list_tasks.`);
@@ -679,7 +681,6 @@ async function generateBatch(config, kind, args, extra, startedMono) {
             client_request_id: batchId,
             submission_state: accepted.length === count ? 'accepted' : accepted.length ? 'partial'
                 : counts.outcome_unknown ? 'outcome_unknown' : counts.rejected ? 'rejected' : 'not_submitted',
-            ...(expiredApproval ? { approval_expired: true } : {}),
             ...(skippedBatch ? { estimate_skipped: true, estimate_skip_reason: skipReasons } : {}),
             ...(batchSkipped?.approved ? { approved_amounts: amountsForUC(batchSkipped.approved) } : {}),
             ...(heldCredits > 0 ? { reserved_credits: heldCredits, reserved_usd: usdOf(heldCredits) } : {}),
