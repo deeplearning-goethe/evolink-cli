@@ -1,5 +1,5 @@
-// GPT Image token models and Gemini Omni Flash videos get a reference price from the shared core: the CLI saves the
-// quote, submits only the generation input after approval, and compares an explicit budget with 1.5 times the reference.
+// GPT Image token models, Gemini Omni Flash videos and Qwen TTS get a reference price from the shared core: the CLI saves
+// the quote, submits only the generation input after approval, and compares an explicit budget with 1.5 times the reference.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -16,20 +16,27 @@ import { State } from '../src/state.mjs';
 import { calculateRulesEstimate } from '../src/platform/core/src/services/pricing-rules-estimate.js';
 import { findModelParams } from '../src/platform/core/src/data/model-params.js';
 
-// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video; of 2026-11-07: GPT Image 2.6;
-// and of 2026-10-14: a speech model billed only by token counts the request cannot give.
+// Published rules of 2026-10-31: the four GPT Image token models and a Gemini Omni video; of 2026-11-07: GPT Image 2.6
+// and the Gemini Omni 1.2 edit and upscale; of 2026-11-08: Qwen TTS. A speech rule billed only by token counts the request
+// cannot give (2026-10-14, the Qwen TTS rule) stands in for any model without a reference price, published for qwen3-tts-vd.
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-token-billed-20261031.json', import.meta.url)));
 const snapshot26 = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-gpt-image-26-20261107.json', import.meta.url)));
-const snapshotTts = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-tts-20261014.json', import.meta.url)));
+const omni12 = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-omni-20261107.json', import.meta.url)));
+const qwen = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-qwen-tts-20261108.json', import.meta.url)));
+const tts = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-tts-20261014.json', import.meta.url)));
+const OMNI = 'gemini-omni-flash-text-to-video', OMNI_EDIT = 'gemini-omni-1.2-flash-video-edit', OMNI_UP = 'gemini-omni-1.2-flash-video-upscale';
+const QWEN = 'qwen-audio-3.1-tts-flash', TTS = 'qwen3-tts-vd';
+const snapshotOmni = { meta: omni12.meta, models: omni12.models.filter(row => [OMNI_EDIT, OMNI_UP].includes(row.model_id)) };
+const snapshotQwen = { meta: qwen.meta, models: [qwen.model] };
+const snapshotTts = { meta: tts.meta, models: tts.models.map(row => ({ ...row, model_id: TTS, product_id: TTS })) };
 const kinds = { 'gpt-image-1.5': 'image', 'gpt-image-2': 'image', 'gpt-image-2.5-flare': 'image', 'gpt-image-2.5-sunburst': 'image',
-  'gpt-image-2.6-flare': 'image', 'gpt-image-2.6-sunburst': 'image', 'gemini-omni-flash-text-to-video': 'video',
-  'qwen-audio-3.1-tts-flash': 'audio' };
-const OMNI = 'gemini-omni-flash-text-to-video', TTS = 'qwen-audio-3.1-tts-flash';
+  'gpt-image-2.6-flare': 'image', 'gpt-image-2.6-sunburst': 'image', [OMNI]: 'video', [OMNI_EDIT]: 'video', [OMNI_UP]: 'video',
+  [QWEN]: 'audio', [TTS]: 'audio' };
 const GPT = Object.keys(kinds).filter(id => kinds[id] === 'image');
-const rulesOf = id => [snapshot, snapshot26, snapshotTts].find(rules => rules.models.some(row => row.model_id === id));
+const rulesOf = id => [snapshot, snapshot26, snapshotOmni, snapshotQwen, snapshotTts].find(rules => rules.models.some(row => row.model_id === id));
 const policy = id => ({ meta: { ...rulesOf(id).meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
   model: structuredClone(rulesOf(id).models.find(row => row.model_id === id)) });
-const reference = (id, input) => calculateRulesEstimate(policy(id), { id, kind: kinds[id], aliases: [], spec: findModelParams(id) }, input);
+const reference = (id, input, options = {}) => calculateRulesEstimate(policy(id), { id, kind: kinds[id], aliases: [], spec: findModelParams(id) }, input, options);
 const PROMPT = 'A red bicycle leaning against a brick wall at sunset, photorealistic.';
 
 async function fixture(t, { balance = 10000 } = {}) {
@@ -62,15 +69,15 @@ async function fixture(t, { balance = 10000 } = {}) {
   f.server = new URL(`${f.origin}/mcp`); f.state = new State(home);
   f.client = new Api(new Credentials({ state: f.state, server: f.server, token: 'fixture-cli-token' }));
   f.media = new Media({ client: f.client, state: f.state, server: f.server });
-  f.run = async args => {
+  f.run = async (args, json = true) => {
     const bin = process.env.EVOLINK_CLI_TEST_BIN ?? fileURLToPath(new URL('../bin/evolink.mjs', import.meta.url));
-    const child = spawn(process.execPath, [bin, ...args, '--server', f.server.href, '--token-stdin', '--json'], {
+    const child = spawn(process.execPath, [bin, ...args, '--server', f.server.href, '--token-stdin', ...(json ? ['--json'] : [])], {
       env: { ...process.env, EVOLINK_CLI_HOME: home, EVOLINK_CLI_UPDATE_CHECK: '0', EVOLINK_API_KEY: '' }, stdio: ['pipe', 'pipe', 'pipe'],
     });
     child.stdin.end('fixture-cli-token\n');
     let output = '', stderr = ''; child.stdout.on('data', data => output += data); child.stderr.on('data', data => stderr += data);
     const status = await new Promise((resolve, reject) => { child.once('error', reject); child.once('close', resolve); });
-    assert.ok(output.trim(), stderr); return { status, data: JSON.parse(output) };
+    assert.ok(output.trim(), stderr); return { status, data: json ? JSON.parse(output) : output };
   };
   t.after(async () => { await new Promise(resolve => server.close(resolve)); await fs.rm(home, { recursive: true, force: true }); });
   return f;
@@ -167,7 +174,7 @@ test('token counts in --pricing-parameters do not change a GPT Image reference p
 test('token counts given as 0 for a model that needs them save no quote', async t => {
   const f = await fixture(t);
   const zeros = { input_tokens: 0, output_tokens: 0 };
-  const refused = await f.run(['estimate', '--model', TTS, '--input', JSON.stringify({ input: 'a fox' }), '--pricing-parameters', JSON.stringify(zeros)]);
+  const refused = await f.run(['estimate', '--model', TTS, '--input', JSON.stringify({ prompt: 'a fox', voice: 'narrator' }), '--pricing-parameters', JSON.stringify(zeros)]);
   assert.notEqual(refused.status, 0); assert.equal(refused.data.error.code, 'estimate_unavailable');
   assert.deepEqual(refused.data.error.details.missing_usage, ['input_tokens', 'output_tokens']);
   assert.match(refused.data.error.message, /^The total cannot be estimated yet, so no quote was saved\./);
@@ -188,6 +195,78 @@ test('the real CLI quotes a Gemini Omni Flash video by its reference price; toke
   const generated = await f.run(['generate', 'video', '--quote', view.quote_id, '--confirm']);
   assert.equal(generated.status, 0, JSON.stringify(generated)); assert.ok(generated.data.task_id);
   assert.deepEqual(f.submissions, [{ ...input, model: OMNI }]);
+});
+
+test('the real CLI quotes Qwen TTS by what EvoLink reserves for the text; token counts are not used; a budget must cover 1.5 times it', async t => {
+  const f = await fixture(t), input = { input: 'hello' };
+  const quoted = await f.run(['estimate', '--model', QWEN, '--input', JSON.stringify(input)]);
+  assert.equal(quoted.status, 0, JSON.stringify(quoted)); const view = quoted.data;
+  assert.equal(view.estimate.status, 'token_billed'); assert.equal(view.total_known, false);
+  // Five lowercase letters: 2 + 5 input tokens and ceil((20 + 5 x 9) / 2) = 33 output tokens, at 150 and 1200 UC per 1,000.
+  assert.deepEqual(view.estimate.reference_usage.tokens, { input_tokens: 7, output_tokens: 33 });
+  assert.equal(view.amounts.uc, String(Math.ceil(7 * 150 / 1000) + Math.ceil(33 * 1200 / 1000)));
+  assert.deepEqual(view.amounts, reference(QWEN, input).amounts);
+  assert.equal(view.estimate.basis[0], 'Reference price: published token rates applied to what EvoLink reserves at submission for this input: 7 input tokens and 33 output tokens for 5 characters of text, each part rounded up.');
+  const zeros = { input_tokens: 0, output_tokens: 0 };
+  const counted = await f.run(['estimate', '--model', QWEN, '--input', JSON.stringify(input), '--pricing-parameters', JSON.stringify(zeros)]);
+  assert.equal(counted.status, 0, JSON.stringify(counted)); assert.deepEqual(counted.data.amounts, view.amounts);
+  assert.equal(counted.data.pricing_quote.request_hash, view.pricing_quote.request_hash);
+  assert.ok(counted.data.estimate.notes.some(note => note.startsWith('pricing_parameters input_tokens, output_tokens are not used')));
+  const generated = await f.run(['generate', 'audio', '--quote', view.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.ok(generated.data.task_id);
+  assert.deepEqual(f.submissions, [{ ...input, model: QWEN }]);
+  const text = { input: 'A calm voice reads the evening news, 第一条：天气晴朗。'.repeat(20) }, usd = Number(reference(QWEN, text).amounts.usd);
+  for (const [factor, allowed] of [[1.49, false], [1.51, true]]) {
+    const cap = Number((usd * factor).toFixed(8));
+    if (allowed) assert.equal((await f.media.estimate({ model: QWEN, input: text, max_cost_usd: cap })).max_cost_usd, cap);
+    else await assert.rejects(f.media.estimate({ model: QWEN, input: text, max_cost_usd: cap }), { code: 'cost_exceeds_cap' });
+  }
+  // Text the gateway refuses before reserving gets no quote.
+  const long = await f.run(['estimate', '--model', QWEN, '--input', JSON.stringify({ input: 'a'.repeat(5001) })]);
+  assert.notEqual(long.status, 0); assert.equal(long.data.quote_id, undefined);
+  assert.equal(f.submissions.length, 1);
+});
+
+test('the real CLI reads Qwen TTS hot_fix null as no hot_fix, as EvoLink does: the same quote, and it is not submitted', async t => {
+  const f = await fixture(t), plain = { input: 'hello' }, nulled = { ...plain, hot_fix: null }, want = reference(QWEN, plain);
+  const quoted = await f.run(['estimate', '--model', QWEN, '--input', JSON.stringify(nulled)]);
+  assert.equal(quoted.status, 0, JSON.stringify(quoted)); const view = quoted.data;
+  assert.equal(view.estimate.status, 'token_billed'); assert.deepEqual(view.amounts, want.amounts);
+  assert.equal(view.pricing_quote.request_hash, want.approval.request_hash);
+  const generated = await f.run(['generate', 'audio', '--quote', view.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.ok(generated.data.task_id);
+  assert.deepEqual(f.submissions, [{ ...plain, model: QWEN }]);
+});
+
+test('the real CLI shows a Gemini Omni reference price at each input resolution, the quoted one at 4k', async t => {
+  const f = await fixture(t), video = 'https://files.example/source.mp4';
+  const editInput = { prompt: 'Turn the street into a snowy evening.', video_urls: [video] };
+  const edit = await f.run(['estimate', '--model', OMNI_EDIT, '--input', JSON.stringify(editInput), '--media-seconds', '5']);
+  assert.equal(edit.status, 0, JSON.stringify(edit));
+  const prices = edit.data.estimate.reference_usage.input_resolution_prices;
+  assert.deepEqual(prices.map(price => [price.resolution, price.quoted]), [['360p', undefined], ['720p', undefined], ['1080p', undefined], ['4k', true]]);
+  assert.deepEqual(prices[3].amounts, edit.data.amounts); assert.deepEqual(edit.data.amounts, reference(OMNI_EDIT, editInput, { mediaSeconds: 5 }).amounts);
+  assert.ok(prices.every((price, i) => i === 0 || BigInt(price.amounts.uc) >= BigInt(prices[i - 1].amounts.uc)));
+  // The one lower price of earlier releases stays: 720p.
+  assert.deepEqual(edit.data.estimate.reference_usage.lower_input, { resolution: '720p', amounts: prices[1].amounts });
+  const listed = prices.map(price => `${price.resolution}${price.quoted ? ' (quoted)' : ''}: ${price.amounts.credits} credits (about $${price.amounts.usd})`).join('; ');
+  assert.ok(edit.data.estimate.notes.some(note => note.endsWith(`If the input video is ${listed}.`)), JSON.stringify(edit.data.estimate.notes));
+  // The terminal shows the same prices.
+  const terminal = await f.run(['estimate', '--model', OMNI_EDIT, '--input', JSON.stringify(editInput), '--media-seconds', '5'], false);
+  assert.equal(terminal.status, 0, terminal.data);
+  assert.ok(terminal.data.includes(`If the input video is ${listed}.`), terminal.data);
+  // An upscale lists the source resolutions EvoLink upscales to the target; the quoted one costs most.
+  const upInput = { video_urls: [video], quality: '1080p' };
+  const up = await f.run(['estimate', '--model', OMNI_UP, '--input', JSON.stringify(upInput), '--media-seconds', '4']);
+  assert.equal(up.status, 0, JSON.stringify(up));
+  const sources = up.data.estimate.reference_usage.input_resolution_prices;
+  assert.ok(sources.length >= 1 && sources.filter(price => price.quoted).length === 1);
+  assert.deepEqual(sources.find(price => price.quoted).amounts, up.data.amounts);
+  assert.ok(sources.every(price => BigInt(price.amounts.uc) <= BigInt(up.data.amounts.uc)));
+  assert.ok(up.data.estimate.notes.some(note => note.includes('If the source video is ')));
+  // Approval submits only the generation input.
+  const generated = await f.run(['generate', 'video', '--quote', edit.data.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.deepEqual(f.submissions, [{ ...editInput, model: OMNI_EDIT }]);
 });
 
 test('the balance is checked against the reference price', async t => {

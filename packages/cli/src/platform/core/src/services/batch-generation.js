@@ -3,7 +3,7 @@
 import { ApiHttpError, submitTask } from './api-client.js';
 import { remainingMs } from './http-policy.js';
 import { QuoteError, quoteRequestHash } from './pricing-quote-client.js';
-import { APPROVAL_TTL_MS, MAX_BATCH_ITEMS, amountsForUC } from './pricing-rules-estimate.js';
+import { APPROVAL_TTL_MS, MAX_BATCH_ITEMS, amountsForUC, approvalExpired, priceRose } from './pricing-rules-estimate.js';
 export { MAX_BATCH_ITEMS };
 /** Submissions of one batch in flight at once. */
 export const BATCH_SUBMIT_CONCURRENCY = 10;
@@ -53,21 +53,21 @@ export function batchTotal(model, items) {
 }
 function fail(code, message) { throw new QuoteError(code, message); }
 /**
- * A batch approval holds for the same inputs, in the same order, at the same total; past its expires_at it still holds
- * when neither changed. An approval of one input never approves a batch.
+ * A batch approval holds for the same inputs, in the same order, until its expires_at, at the approved total or lower:
+ * the total counts, not any one input's price. An approval of one input never approves a batch.
  */
 export function checkBatchApproval(approval, fresh) {
-    const expired = Date.parse(approval.expires_at) <= Date.now();
     if (approval.batch_items === undefined) {
         fail('quote_input_changed', 'This pricing_quote approves one input; estimate these inputs together (inputs) and obtain approval.');
     }
     if (approval.batch_items !== fresh.batch_items || approval.request_hash !== fresh.request_hash || approval.model_id !== fresh.model_id) {
         fail('quote_input_changed', 'The inputs differ from the approved batch estimate (the same inputs, in the same order).');
     }
-    if (approval.fingerprint !== fresh.fingerprint || approval.total_uc !== fresh.total_uc) {
-        fail('price_changed', 'The pricing rules or estimated price changed. Estimate again and obtain approval.');
+    if (approvalExpired(approval)) {
+        fail('quote_expired', `The approved batch estimate expired at ${approval.expires_at}. Estimate these inputs again and obtain approval. If this call finishes a batch submitted earlier, check list_tasks first: within 24 hours of its first submission, finish it with the new pricing_quote, the same client_request_id and the same inputs; past that, submit only the inputs that did not go through, as a new batch with a new client_request_id.`);
     }
-    return { expired };
+    if (priceRose(approval, fresh))
+        fail('price_changed', 'The estimated total of the batch rose after it was approved. Estimate again and obtain approval.');
 }
 /**
  * The gateway answered every attempt without running it: a rate limit (it releases the key, so the same key can be

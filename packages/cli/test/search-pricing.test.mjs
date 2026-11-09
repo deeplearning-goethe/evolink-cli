@@ -85,16 +85,22 @@ test('actual CLI: seven routes show enabled-only search fees in JSON and termina
 test('actual CLI: expected zero is disclosed, rates are refreshed and an approval never changes search settings', async t => {
   const f = await fixture(t), model = snapshot.models.find(m => m.model_id === 'gemini-3.1-flash-image-preview');
   const input = { ...inputFor(model), model_params: enabled(model) };
-  const args = ['estimate', '--model', model.model_id, '--input', JSON.stringify(input), '--pricing-parameters',
-    JSON.stringify({ ...usageFor(model), search_count: 0, image_search_count: 2 })];
-  const quote = await f.run(args);
+  const estimate = counts => ['estimate', '--model', model.model_id, '--input', JSON.stringify(input), '--pricing-parameters',
+    JSON.stringify({ ...usageFor(model), ...counts })];
+  const quote = await f.run(estimate({ search_count: 0, image_search_count: 2 }));
   assert.equal(quote.status, 0); assert.match(quote.data.text, /expected usage, not a limit/);
   assert.equal(quote.data.pricing_parameters.search_count, 0); assert.equal(quote.data.pricing_parameters.image_search_count, 2);
+  const searching = await f.run(estimate({ search_count: 2, image_search_count: 0 }));
+  assert.equal(searching.status, 0); assert.equal(searching.data.pricing_parameters.search_count, 2);
   f.changed = true;
-  const rejected = await f.run(['generate', 'image', '--quote', quote.data.quote_id, '--confirm']);
+  // Two expected web searches: the dearer rate raises the approved price, so the approval no longer holds.
+  const rejected = await f.run(['generate', 'image', '--quote', searching.data.quote_id, '--confirm']);
   assert.equal(rejected.status, 1); assert.equal(rejected.data.error.code, 'price_changed', JSON.stringify(rejected.data)); assert.equal(f.calls.length, 0);
-  const refreshed = await f.run(['estimate', '--refresh-quote', quote.data.quote_id]);
+  const refreshed = await f.run(['estimate', '--refresh-quote', searching.data.quote_id]);
   assert.equal(refreshed.status, 0); assert.equal(refreshed.data.search_charges[0].unit_price_amounts.credits, '1.2345');
   const done = await f.run(['generate', 'image', '--quote', refreshed.data.quote_id, '--confirm']);
   assert.equal(done.status, 0); assert.deepEqual(f.calls[0], { ...input, model: model.model_id });
+  // No expected web search: the dearer rate leaves the approved price as it was, so the approval holds.
+  const held = await f.run(['generate', 'image', '--quote', quote.data.quote_id, '--confirm']);
+  assert.equal(held.status, 0, JSON.stringify(held.data)); assert.equal(f.calls.length, 2); assert.deepEqual(f.calls[1], { ...input, model: model.model_id });
 });

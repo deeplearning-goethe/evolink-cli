@@ -109,12 +109,12 @@ newer release exists. EVOLINK_CLI_UPDATE_CHECK=0 turns these npm registry checks
 Login timeout: 30-900 seconds, default 180. On SSH, forward the callback port.
 The CLI verifies skill files; your assistant must confirm it loads evolink-cli.
 Quotes are current for at most 24 hours, never beyond the returned approval expiry.
-generate estimates again before submitting: an expired quote whose input and price
-are unchanged is submitted under its approval; a changed price needs a new approval.
+generate estimates again before submitting: the same input at the approved price or
+lower submits; a higher price, a changed input or an expired quote needs a new approval.
 --confirm is only for an already approved quote. --skip-estimate is only for a user
 who explicitly said not to estimate or confirm.
 A batch quote submits all its inputs in one call; tasks resume finishes the rest
-with the same request ID within 24 hours.
+with the same request ID within 23 hours, while the quote holds.
 Spending caps protect the estimate at submission, not final settlement.
 Ctrl-C stops local waiting; submitted tasks continue on EvoLink.
 `;

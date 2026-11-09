@@ -31,7 +31,6 @@ const mutants = [
   ['oauth-token-scope', 'src/oauth.mjs', "(!value.scope || value.scope.split(' ').includes('mcp'))", 'true'],
   ['oauth-new-grant-refresh', 'src/oauth.mjs', "parameters.grant_type === 'refresh_token' ? prior?.refresh_token : undefined", 'prior?.refresh_token'],
   ['approval', 'src/media.mjs', 'requireThat(confirmed || resume,', 'requireThat(true,'],
-  ['fresh-price', 'src/media.mjs', 'resume && (account_quote || pricing_quote) || priceFingerprint(fresh) === quote.fingerprint', 'true'],
   ['cap-direction', 'src/media.mjs', 'quote.estimate.max_usd <= cap', 'quote.estimate.max_usd >= cap'],
   ['partial-cap', 'src/media.mjs', "quote.estimate?.status === 'estimated' && Number.isFinite(quote.estimate.max_usd)", 'Number.isFinite(quote.estimate.max_usd)'],
   ['invalid-input', 'src/media.mjs', 'quote.input_valid !== false', 'true'],
@@ -47,11 +46,22 @@ const mutants = [
   ['login-binding', 'src/media.mjs', 'quote.binding === (await this.client.credentials.access()).binding', 'true'],
   ['quote-ttl-15-minutes', 'src/media.mjs', 'this.now() + APPROVAL_TTL_MS', 'this.now() + 15 * 60_000'],
   ['quote-ttl-server-expiry', 'src/media.mjs', 'Math.min(this.now() + APPROVAL_TTL_MS, serverExpiry ?? Infinity)', 'this.now() + APPROVAL_TTL_MS'],
-  ['quote-ttl-expired-boundary', 'src/media.mjs', 'this.now() >= quote.expires_at;', 'this.now() > quote.expires_at;'],
-  // Generation without a quote, expired quotes, the recovery window and batches (direct-batch.test.mjs).
-  ['expired-refused', 'src/media.mjs', 'const expired = !resume && !quote.skip_estimate && this.now() >= quote.expires_at;',
-    "requireThat(resume || quote.skip_estimate || this.now() < quote.expires_at, 'quote_expired', 'expired'); const expired = false;"],
-  ['expired-note', 'src/media.mjs', 'if (!quote) return view;', 'return view;'],
+  ['quote-ttl-expired-boundary', 'src/media.mjs', 'this.now() >= quote.expires_at) throw expiredQuote', 'this.now() > quote.expires_at) throw expiredQuote'],
+  // A quote holds for the same input until its expiry at the approved price or lower; tasks resume follows the same
+  // rule through the shared core (quote-expiry.test.mjs, direct-batch.test.mjs).
+  ['approval-price-rise', 'src/media.mjs', "requireThat(!held.rose, 'price_changed',", "requireThat(true, 'price_changed',"],
+  ['approval-input-change', 'src/media.mjs', "requireThat(held.input, 'quote_input_changed',", "requireThat(true, 'quote_input_changed',"],
+  ['approval-same-price-refused', 'src/media.mjs', 'rose: priceRose(approved, now) };', 'rose: BigInt(now.total_uc) >= BigInt(approved.total_uc) };'],
+  ['approval-lower-price-refused', 'src/media.mjs', 'rose: priceRose(approved, now) };', 'rose: approved.total_uc !== now.total_uc };'],
+  ['approval-rules-version-refused', 'src/media.mjs', 'rose: priceRose(approved, now) };', 'rose: priceRose(approved, now) || approved.fingerprint !== now.fingerprint };'],
+  ['approval-account-same-price-refused', 'src/media.mjs', 'compareDecimal(current.quote.amount, account.quote.amount) > 0', 'compareDecimal(current.quote.amount, account.quote.amount) >= 0'],
+  ['approval-fingerprint-unchecked', 'src/media.mjs', 'rose: priceFingerprint(fresh) !== quote.fingerprint, byFingerprint: true', 'rose: false, byFingerprint: true'],
+  ['approval-generate-allows-expired', 'src/media.mjs', 'if (!quote.skip_estimate && this.now() >= quote.expires_at) throw expiredQuote', 'if (resume && !quote.skip_estimate && this.now() >= quote.expires_at) throw expiredQuote'],
+  ['approval-resume-allows-expired', 'src/media.mjs', 'if (!quote.skip_estimate && this.now() >= quote.expires_at) throw expiredQuote', 'if (!resume && !quote.skip_estimate && this.now() >= quote.expires_at) throw expiredQuote'],
+  ['approval-resume-allows-price-rise', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (priceRose(approval, fresh.approval))', 'if (false)'],
+  ['approval-resume-batch-allows-price-rise', 'src/platform/core/src/services/batch-generation.js', 'if (priceRose(approval, fresh))', 'if (false)'],
+  ['approval-resume-refusal-code', 'src/media.mjs', "return ['price_changed', 'quote_expired'].includes(code) && error.details.charged === 'no' ? code : undefined;", 'return undefined;'],
+  // Generation without a quote, the recovery window and batches (direct-batch.test.mjs).
   ['recovery-window', 'src/media.mjs', 'this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'true'],
   ['recovery-window-boundary', 'src/media.mjs', 'this.now() < (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'this.now() <= (quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS'],
   ['recovery-window-origin', 'src/media.mjs', '(quote.approved_at ?? quote.created_at) + RECOVERY_WINDOW_MS', 'quote.created_at + RECOVERY_WINDOW_MS'],
@@ -193,11 +203,13 @@ const mutants = [
   ['reference-cap-allowance', 'src/media.mjs', '!referenceBudgetExceeded(quote.pricing_quote.total_uc, cap)', '!rulesBudgetExceeded(quote.pricing_quote.total_uc, cap)'],
   ['reference-cap-refused', 'src/media.mjs', "const reference = quote.estimate?.status === 'token_billed' && Number.isFinite(quote.estimate.max_usd)", 'const reference = false && Number.isFinite(quote.estimate.max_usd)'],
   ['reference-range-unchecked', 'src/media.mjs', "quote.estimate?.status === 'token_billed' && quote.estimate.max_usd !== undefined", 'false'],
-  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved?.gpt || reserved?.omni ? 'token_billed' : 'estimated'", "reserved?.gpt || reserved?.omni ? 'estimated' : 'estimated'"],
+  ['reference-status', 'src/platform/core/src/services/pricing-rules-estimate.js', "reserved?.gpt || reserved?.omni || reserved?.qwen ? 'token_billed' : 'estimated'", "reserved?.gpt || reserved?.omni || reserved?.qwen ? 'estimated' : 'estimated'"],
   ['reference-counts-hashed', 'src/platform/core/src/services/pricing-rules-estimate.js', '.filter(name => declared.has(name) && (/tokens$/.test(name) || svgAuthor(name))).sort() : [];', '.filter(() => false) : [];'],
   ['reference-zero-total', 'src/platform/core/src/services/pricing-rules-estimate.js', 'if (total === 0n) {', 'if (false) {'],
   ['reference-balance', 'src/platform/core/src/tools/estimate-cost.js', "(estimate.status === 'estimated' || estimate.status === 'token_billed') && estimate.max_credits !== undefined", "estimate.status === 'estimated' && estimate.max_credits !== undefined"],
   ['reference-omni', 'src/platform/core/src/services/pricing-rules-estimate.js', "if (isOmniTokenModel(id)) {\n        const usage = omniReservation(", "if (false) {\n        const usage = omniReservation("],
+  ['reference-qwen', 'src/platform/core/src/services/pricing-rules-estimate.js', "if (isQwenTTSModel(id)) {\n        const usage = qwenTTSReservation(", "if (false) {\n        const usage = qwenTTSReservation("],
+  ['reference-omni-tiers', 'src/platform/core/src/services/omni-tokens.js', 'return reservation.input_videos?.resolution_assumed ? [...TIERS] : [];', 'return [];'],
 ];
 
 // Mutants of the update, login, local-wait and quote-refresh changes run only the test that covers them, which keeps the CI matrix fast.
@@ -248,6 +260,7 @@ for (const [name, file, before, after] of selected) {
       : name.startsWith('search-') ? ['search-pricing.test.mjs']
       : name.startsWith('seedance-') ? ['seedance-pricing.test.mjs']
       : name.startsWith('quote-ttl-') ? ['quote-expiry.test.mjs']
+      : name.startsWith('approval-') ? ['quote-expiry.test.mjs', 'direct-batch.test.mjs']
       : ['direct-', 'batch-', 'expired-', 'recovery-'].some(prefix => name.startsWith(prefix)) ? ['direct-batch.test.mjs']
       : ['rest-capability', 'rest-strict-input', 'rest-origin', 'file-credential-isolation', 'shared-estimate-fresh', 'shared-submit-fresh', 'quote-api-origin', 'oauth-metadata-origin', 'oauth-token-scope', 'oauth-new-grant-refresh', 'utm-cli-campaign'].includes(name) ? ['api.test.mjs']
       : name.startsWith('delivery-') || ['page-forwarding', 'capability-before-call'].includes(name) ? ['capabilities.test.mjs']

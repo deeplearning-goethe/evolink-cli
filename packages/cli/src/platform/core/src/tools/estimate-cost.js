@@ -9,6 +9,7 @@ import { formatEstimateRange } from '../services/pricing-client.js';
 import { PricingRulesError, reusablePricingRules } from '../services/pricing-rules-client.js';
 import { QuoteError, QuoteParameters } from '../services/pricing-quote-client.js';
 import { calculateRulesEstimate, createRulesEstimate, readPricingRulesFor, recentRulesNote } from '../services/pricing-rules-estimate.js';
+import { qwenTTSInput } from '../services/qwen-tts-tokens.js';
 import { prepareSeedanceInput } from '../services/seedance-input.js';
 import { API_KEYS_URL, MCP_CONSOLE_URL, MCP_KEY_NAME, TOP_UP_URL } from '../services/http-policy.js';
 import { trackedLink } from '../services/utm.js';
@@ -49,7 +50,7 @@ export function registerEstimateCost(server, config) {
             }
             if (inputs !== undefined)
                 return await estimateBatch(config, entry, inputs, { mediaSeconds, pricingParameters, pricingSource });
-            const prepared = prepareSeedanceInput(entry, input ?? {});
+            const prepared = prepareSeedanceInput(entry, qwenTTSInput(entry.id, input ?? {}));
             const values = prepared.input;
             const validation = entry.spec ? validateInput(entry.spec, values) : undefined;
             validation?.errors.push(...prepared.errors);
@@ -228,7 +229,7 @@ function itemPrice(estimate) {
  */
 async function estimateBatch(config, entry, inputs, options) {
     const batch = { items: inputs.length };
-    const prepared = inputs.map(item => prepareSeedanceInput(entry, item));
+    const prepared = inputs.map(item => prepareSeedanceInput(entry, qwenTTSInput(entry.id, item)));
     const checks = prepared.map(item => {
         if (!entry.spec)
             return undefined;

@@ -1,0 +1,2878 @@
+{
+ "source": "GET https://api.evolink.ai/v1/catalog/pricing-rules?view=full, 2026-11-07T14:26Z; Gemini Omni Flash models only",
+ "meta": {
+  "schema_version": "2",
+  "catalog_version": "cat_cc7d44e33212070013389ca1",
+  "pricing_version": "prc_9f3a3a03d40315d99ea0ab67",
+  "price_scope": "public_default",
+  "currency": "USD",
+  "exchange_rate_version": "pricing-fx/v1:USD-CNY=6.8",
+  "updated_at": "2026-11-07T14:26:06.571349619Z",
+  "fresh_until": "2026-11-07T14:31:00Z"
+ },
+ "models": [
+  {
+   "model_id": "gemini-omni-1.1-flash-image-to-video",
+   "product_id": "gemini-omni-1-1-flash",
+   "operation": "image_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "5d84a734d1f2bc70f1a85266c02be48235243d0b01cebb9d63b9c5f556f4fb2a",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4451",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4450",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4452",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.1-flash-reference-to-video",
+   "product_id": "gemini-omni-1-1-flash",
+   "operation": "reference_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "51640d8d1697ad75e093f50202e4ffd9577bf18ae20bdf99addccbdaab8cff6f",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4461",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4460",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4462",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.1-flash-text-to-video",
+   "product_id": "gemini-omni-1-1-flash",
+   "operation": "text_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "1c9f63f38929eb26445ea459f2853e998eea86bedb24fbd39cc2b4cabde97c0d",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4441",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4440",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4442",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.1-flash-video-edit",
+   "product_id": "gemini-omni-1-1-flash",
+   "operation": "video_edit",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "edbae47950c0f6dc412a74be762da317380b3bd13e50e01614430f9efb7ef15c",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4471",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4470",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4472",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.1-flash-video-extend",
+   "product_id": "gemini-omni-1-1-flash",
+   "operation": "video_extend",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "4dccb8a28bce39066f01bd8059b151530af4b15c11a9d772fba75d11b187fd64",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4481",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4480",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4482",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-28T16:56:50.895Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-image-to-video",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "image_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "5f151392931f7cd6d6e085f9863e8aa8e6b40dadbf3490b9a1133bec4cfaa638",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4541",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "918",
+      "credits": "0.0918",
+      "cny": "0.00918",
+      "usd": "0.00135"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4540",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4542",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5508",
+      "credits": "0.5508",
+      "cny": "0.05508",
+      "usd": "0.0081"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-reference-to-video",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "reference_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "ef5aab5c8a2c876f05b1e7133393b397bdca7c08a58aa5d6c63fbec4bad61867",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4551",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "918",
+      "credits": "0.0918",
+      "cny": "0.00918",
+      "usd": "0.00135"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4550",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4552",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5508",
+      "credits": "0.5508",
+      "cny": "0.05508",
+      "usd": "0.0081"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-text-to-video",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "text_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "7fe0c17c1b8c2e5af1edb805a278214e1cdaf7635d2f8618be70d73cb1c16ca0",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4531",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "918",
+      "credits": "0.0918",
+      "cny": "0.00918",
+      "usd": "0.00135"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4530",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4532",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5508",
+      "credits": "0.5508",
+      "cny": "0.05508",
+      "usd": "0.0081"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-video-edit",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "video_edit",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "337c0a67d3ceb4f862fede5ceb2f531cc436976d22d6c60683dd22d43f479724",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4561",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "918",
+      "credits": "0.0918",
+      "cny": "0.00918",
+      "usd": "0.00135"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4560",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4562",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5508",
+      "credits": "0.5508",
+      "cny": "0.05508",
+      "usd": "0.0081"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-video-extend",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "video_extend",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "be6a6419b560777d8a998d86315f8323121d864615f1ae7d238d56b54070c8e5",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4571",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "918",
+      "credits": "0.0918",
+      "cny": "0.00918",
+      "usd": "0.00135"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4570",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4572",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5508",
+      "credits": "0.5508",
+      "cny": "0.05508",
+      "usd": "0.0081"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-1.2-flash-video-upscale",
+   "product_id": "gemini-omni-1-2-flash",
+   "operation": "video_upscale",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "43920cdb361669e300475da503b01193c8827027f85162d9e67d76948095465d",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4580",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "7344",
+      "credits": "0.7344",
+      "cny": "0.07344",
+      "usd": "0.0108"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-11-05T23:42:55.242Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-flash-image-to-video",
+   "product_id": "gemini-omni-flash",
+   "operation": "image_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "eafd44eb6195e17c52253d37ed6575d2fc557964720c16f14e4d37420fd19cf8",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4411",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4410",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4412",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-flash-reference-to-video",
+   "product_id": "gemini-omni-flash",
+   "operation": "reference_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "5f49a23655e17c2d50d68dcffce99a118868ad474a6b18f7122d406e265df20b",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4421",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4420",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4422",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-flash-text-to-video",
+   "product_id": "gemini-omni-flash",
+   "operation": "text_to_video",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "93762feef2e727efa64bb7742636d4a920c8d00fd9bfc3275c5d4c40d24e2912",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4401",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4400",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4402",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  },
+  {
+   "model_id": "gemini-omni-flash-video-edit",
+   "product_id": "gemini-omni-flash",
+   "operation": "video_edit",
+   "modality": "video",
+   "lifecycle": "active",
+   "pricing_status": "available",
+   "settlement_basis": "actual_usage",
+   "policy_version": 1,
+   "policy_checksum": "25ce4daef4e1d52e360fc6d0869ab2421eab230ec6715dff3db5887aa5269615",
+   "policy_source": "published",
+   "parameters": [
+    {
+     "name": "input_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "video_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    },
+    {
+     "name": "other_output_tokens",
+     "type": "integer",
+     "minimum": "0",
+     "default": "0"
+    }
+   ],
+   "components": [
+    {
+     "id": "input",
+     "role": "input",
+     "dimension": "input_token",
+     "sku_id": "4431",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "867",
+      "credits": "0.0867",
+      "cny": "0.00867",
+      "usd": "0.001275"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "input_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "video_output",
+     "role": "video_output",
+     "dimension": "output_token",
+     "sku_id": "4430",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "10115",
+      "credits": "1.0115",
+      "cny": "0.10115",
+      "usd": "0.014875"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "video_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    },
+    {
+     "id": "other_output",
+     "role": "other_output",
+     "dimension": "output_token",
+     "sku_id": "4432",
+     "unit": "1k_tokens",
+     "billing_unit_size": 1000,
+     "display_unit_size": 1000000,
+     "rate": {
+      "uc": "5202",
+      "credits": "0.5202",
+      "cny": "0.05202",
+      "usd": "0.00765"
+     },
+     "minimum_charge": {
+      "uc": "0",
+      "credits": "0",
+      "cny": "0",
+      "usd": "0"
+     },
+     "billing_rule": "per_1k",
+     "pricing_status": "available",
+     "effective_at": "2026-08-21T11:13:28.1Z",
+     "condition": {
+      "op": "gt",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "0"
+       }
+      ]
+     },
+     "quantity_rule": {
+      "op": "divide",
+      "args": [
+       {
+        "op": "variable",
+        "name": "other_output_tokens"
+       },
+       {
+        "op": "constant",
+        "value": "1000"
+       }
+      ]
+     },
+     "rounding": {
+      "point": "per_component_subtotal",
+      "mode": "ceil"
+     },
+     "tiers": []
+    }
+   ]
+  }
+ ]
+}

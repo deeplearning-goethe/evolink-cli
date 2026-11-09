@@ -170,9 +170,11 @@ test('a preflight refusal while replaying cannot declare the original unknown su
   f.loseRestSubmissions = 2;
   await assert.rejects(media.generate('image', q.quote_id, { confirmed: true }));
   const original = await state.read('quotes', q.quote_id);
-  // The fresh rules change before an idempotent replay; the first request was already accepted.
+  // The price rises before an idempotent replay; the first request was already accepted. The replay is refused for the
+  // price, and the original submission stays unverified, never free.
   f.multiplier = 2;
-  await assert.rejects(afterRulesReuse(() => media.resume(q.quote_id)), error => error.code === 'outcome_unknown' && error.details.charged === 'unknown');
+  await assert.rejects(afterRulesReuse(() => media.resume(q.quote_id)), error => error.code === 'price_changed' && error.details.charged === 'unknown'
+    && error.details.submission_state === 'outcome_unknown' && error.details.next_step === 'evolink tasks list --since 2d');
   const saved = await state.read('quotes', q.quote_id);
   assert.equal(saved.state, 'outcome_unknown'); assert.equal(saved.client_request_id, original.client_request_id); assert.equal(f.paid.size, 1);
 });

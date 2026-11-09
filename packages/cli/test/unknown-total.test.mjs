@@ -12,12 +12,13 @@ import { Credentials } from '../src/auth.mjs';
 import { Media } from '../src/media.mjs';
 import { State } from '../src/state.mjs';
 
-// Published usage-billed rules of 2026-10-23, the snapshot the MCP repository tests with, and a speech model of
-// 2026-10-14 that is billed only by token counts (GPT Image and Gemini Omni models get a reference price:
-// token-billed.test.mjs).
+// Published usage-billed rules of 2026-10-23, the snapshot the MCP repository tests with, and a speech rule of
+// 2026-10-14 billed only by token counts the request cannot give (GPT Image, Gemini Omni and Qwen TTS get a reference
+// price: token-billed.test.mjs), published here for qwen3-tts-vd, which has none.
 const snapshot = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-usage-20261023.json', import.meta.url)));
-const tokenBilled = JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-tts-20261014.json', import.meta.url)));
-const TTS = 'qwen-audio-3.1-tts-flash';
+const TTS = 'qwen3-tts-vd';
+const tokenBilled = { models: JSON.parse(readFileSync(new URL('./fixtures/pricing-rules-tts-20261014.json', import.meta.url))).models
+  .map(row => ({ ...row, model_id: TTS, product_id: TTS })) };
 const models = { [TTS]: ['audio', 'openai-audio'], 'seedance-2.0-mini-reference-to-video': ['video', 'evolink-video-generations'] };
 const policy = id => ({ meta: { ...snapshot.meta, fresh_until: new Date(Date.now() + 300000).toISOString() },
   model: structuredClone([...snapshot.models, ...tokenBilled.models].find(row => row.model_id === id)) });
@@ -64,7 +65,7 @@ async function fixture(t) {
 
 test('an estimate without its billing usage saves no quote and says which usage to give, in CLI options', async t => {
   const f = await fixture(t);
-  await assert.rejects(f.media.estimate({ model: TTS, input: { input: 'a red bicycle' } }), error => {
+  await assert.rejects(f.media.estimate({ model: TTS, input: { prompt: 'a red bicycle', voice: 'narrator' } }), error => {
     assert.equal(error.code, 'estimate_unavailable');
     assert.deepEqual(error.details.missing_usage, TOKENS);
     assert.equal(error.details.estimate.status, 'needs_input'); assert.equal(error.details.estimate.max_usd, undefined);

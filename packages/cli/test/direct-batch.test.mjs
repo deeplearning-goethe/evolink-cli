@@ -1,4 +1,4 @@
-// Generation without a quote (--skip-estimate), expired quotes and batches (--inputs-file), through the shared core
+// Generation without a quote (--skip-estimate), quote expiry and price changes, and batches (--inputs-file), through the shared core
 // against a fake gateway that keeps request IDs the way EvoLink does: the same ID and body replay the first answer, a
 // different body under that ID is refused (409 idempotency_conflict), and rate limits (429) and balance refusals (402)
 // release the ID. Expected values come from rule functions and the published rules of 2026-10-23, not from the code.
@@ -35,14 +35,17 @@ const MODELS = {
 const BY_STATUS = Object.fromEntries(Object.entries(MODELS).map(([id, model]) => [model.status, id]));
 const meta = () => ({ ...snapshot.meta, fresh_until: new Date(Date.now() + 300_000).toISOString() });
 
-/** A model's rule with every component rate (and tier) moved by `delta` UC. */
-function rule(id, delta = 0) {
+/** A model's rule with every component rate, tier and minimum charge moved by `delta` UC; `version` publishes it again. */
+function rule(id, delta = 0, version = false) {
   const copy = structuredClone(snapshot.models.find(row => row.model_id === id));
+  if (version) { copy.policy_version += 1; copy.policy_checksum = createHash('sha256').update(copy.policy_checksum).digest('hex'); }
   if (!delta) return copy;
   const move = rate => amountsForUC(String(BigInt(rate.uc.split('.')[0]) + BigInt(delta)));
   for (const component of copy.components) {
     component.rate = move(component.rate);
     for (const tier of component.tiers) tier.rate = move(tier.rate);
+    // A minimum equal to the rate would hold a lower rate up.
+    if (component.minimum_charge && component.minimum_charge.uc !== '0') component.minimum_charge = move(component.minimum_charge);
   }
   return copy;
 }
@@ -59,6 +62,11 @@ const CAPS = { absent: undefined, generous: 1000, tiny: 0.000001 };
 async function later(ms, work) {
   const now = Date.now; Date.now = () => now() + ms;
   try { return await work(); } finally { Date.now = now; }
+}
+/** Runs `work` with the CLI's clock stopped at `time`, for exact expiry boundaries, and the shared core's moved there. */
+async function at(f, time, work) {
+  const cli = f.media.now; f.media.now = () => time;
+  try { return await later(time - Date.now(), work); } finally { f.media.now = cli; }
 }
 
 function rng(seed) {
@@ -77,7 +85,7 @@ function shuffle(list, random) {
  */
 async function gateway(t) {
   const home = await fs.mkdtemp(path.join(os.tmpdir(), 'evolink-direct-batch-'));
-  const f = { delta: 0, rulesFailure: undefined, ledger: new Map(), tasks: new Map(), keyTasks: new Map(), posts: [], recovered: false, inFlight: 0, maxInFlight: 0 };
+  const f = { delta: 0, version: false, rulesFailure: undefined, ledger: new Map(), tasks: new Map(), keyTasks: new Map(), posts: [], recovered: false, inFlight: 0, maxInFlight: 0 };
   const rows = Object.entries(MODELS).map(([id, model]) => ({ model_id: id, aliases: [], display_name: id, capabilities: [model.kind],
     protocols: [model.kind === 'image' ? 'openai-images' : 'evolink-video-generations'], lifecycle: 'active' }));
   async function submit(req, res, url, body, send) {
@@ -122,7 +130,7 @@ async function gateway(t) {
       f.ruleReads = (f.ruleReads ?? 0) + 1;
       const id = decodeURIComponent(url.pathname.split('/')[4] ?? '');
       if (f.rulesFailure) { const [status, value, headers] = f.rulesFailure.answer(id); return send(status, value, headers); }
-      return send(200, id ? { meta: meta(), model: rule(id, f.delta) } : { meta: meta(), models: Object.keys(MODELS).map(model => rule(model, f.delta)) });
+      return send(200, id ? { meta: meta(), model: rule(id, f.delta, f.version) } : { meta: meta(), models: Object.keys(MODELS).map(model => rule(model, f.delta, f.version)) });
     }
     if (url.pathname === '/v1/credits') return send(200, { success: true, data: { user: { remaining_credits: 1_000_000 }, token: { unlimited_credits: true } } });
     if (url.pathname === '/v1/tasks/batch') return send(200, { data: JSON.parse(body).task_ids.flatMap(id => f.tasks.has(id) ? [f.tasks.get(id)] : []) });
@@ -215,30 +223,41 @@ test('a direct submission whose reply is lost recovers with its own request ID a
   assert.equal((await f.state.read('quotes', quoteId)).state, 'submitted');
 });
 
-test('an expired quote with an unchanged input and price submits under its approval; a changed price does not', async t => {
+test('a quote holds for 24 hours from the estimate at the approved price or lower, also under later rules; from its expiry on it needs a new estimate', async t => {
   const f = await gateway(t);
-  const quote = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'expired but unchanged' } });
-  const saved = await f.state.read('quotes', quote.quote_id);
+  const quote = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'held for a day' } });
+  const saved = await f.state.read('quotes', quote.quote_id), expiry = new Date(saved.expires_at).toISOString();
   assert.ok(Math.abs(saved.expires_at - saved.created_at - APPROVAL_TTL_MS) < 5_000);
-  f.reset();
-  const expired = await later(saved.expires_at - Date.now(), () => f.media.generate('image', quote.quote_id, { confirmed: true }));
-  assert.equal(expired.approval_expired, true); assert.equal(expired.quote_expired_at, new Date(saved.expires_at).toISOString());
-  assert.match(expired.text, /The quote expired at \S+, but its input and price are unchanged, so it was submitted under the original approval\./);
-  assert.equal(f.posts.length, 1);
-  const days = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'three days later' } });
-  f.reset();
-  assert.equal((await later(APPROVAL_TTL_MS + 3 * 86_400_000, () => f.media.generate('image', days.quote_id, { confirmed: true }))).approval_expired, true);
+  // At expires_at and later nothing is submitted, whatever the price, and the quote stays unsubmitted.
+  for (const [offset, delta] of [[0, 0], [1, 0], [3 * 86_400_000, 0], [1, -1000], [1, 1000]]) {
+    f.delta = delta; f.reset();
+    await assert.rejects(at(f, saved.expires_at + offset, () => f.media.generate('image', quote.quote_id, { confirmed: true })), error => {
+      assert.equal(error.code, 'quote_expired', `${offset} ${delta}`);
+      assert.equal(error.message, `This quote expired at ${expiry}. Refresh it with evolink estimate --refresh-quote ${quote.quote_id} and obtain the user's approval again. Nothing was submitted.`);
+      assert.equal(error.details.next_step, `evolink estimate --refresh-quote ${quote.quote_id}`); assert.equal(error.details.submission_allowed, false);
+      return true;
+    });
+  }
+  assert.equal(f.posts.length, 0); assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'quoted');
+  // A millisecond before, a lower price under a later policy version submits, and the result says nothing about expiry.
+  f.delta = -1000; f.version = true; f.reset();
+  const lower = await at(f, saved.expires_at - 1, () => f.media.generate('image', quote.quote_id, { confirmed: true }));
+  assert.ok(lower.task_id); assert.equal(f.posts.length, 1);
+  assert.equal(lower.approval_expired, undefined); assert.doesNotMatch(lower.text ?? '', /expired/);
+  const sent = await f.state.read('quotes', quote.quote_id);
+  assert.equal(sent.state, 'submitted'); assert.ok(BigInt(sent.args.pricing_quote.total_uc) < BigInt(saved.args.pricing_quote.total_uc));
+  // Before expiry a higher price needs a new approval; the same price under a later policy version does not.
+  f.delta = 0; f.version = false; f.reset();
+  const dearer = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'one credit dearer' } });
+  const same = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'same price, new rules' } });
+  f.delta = 1; f.reset();
+  await assert.rejects(f.media.generate('image', dearer.quote_id, { confirmed: true }),
+    error => error.code === 'price_changed' && error.message === 'The price rose since the quote was approved. Estimate again and obtain approval for the new quote.');
+  assert.equal((await f.state.read('quotes', dearer.quote_id)).state, 'quoted');
+  f.delta = 0; f.version = true; f.reset();
+  assert.ok((await f.media.generate('image', same.quote_id, { confirmed: true })).task_id);
   assert.equal(f.posts.length, 2);
-  // A changed price needs a new approval, expired or not.
-  const changed = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'expired and changed' } });
-  f.delta = 1000; f.reset();
-  await assert.rejects(later(APPROVAL_TTL_MS + 1_000, () => f.media.generate('image', changed.quote_id, { confirmed: true })), { code: 'price_changed' });
-  assert.equal(f.posts.length, 2); assert.equal((await f.state.read('quotes', changed.quote_id)).state, 'quoted');
-  // A current quote says nothing about expiry.
-  f.delta = 0; f.reset();
-  const current = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'current' } });
-  const result = await f.media.generate('image', current.quote_id, { confirmed: true });
-  assert.equal(result.approval_expired, undefined); assert.doesNotMatch(result.text, /expired/);
+  f.version = false;
 });
 
 test('tasks resume replays the original request ID only within 23 hours of its first submission', async t => {
@@ -263,6 +282,73 @@ test('tasks resume replays the original request ID only within 23 hours of its f
       assert.equal(f.posts.length, posts); assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'outcome_unknown');
     }
   }
+});
+
+test('tasks resume follows the same rule: at a higher price or past the expiry nothing is sent, and the user checks what went through first', async t => {
+  const f = await gateway(t);
+  const quote = await f.media.estimate({ model: SEEDREAM, input: { prompt: 'resume under the quote [lost]' } });
+  const saved = await f.state.read('quotes', quote.quote_id), expiry = new Date(saved.expires_at).toISOString();
+  // Submitted two hours after the estimate, so its recovery window (23 hours from then) outlasts the quote.
+  await assert.rejects(at(f, saved.created_at + 2 * 3_600_000, () => f.media.generate('image', quote.quote_id, { confirmed: true })),
+    error => error.details.submission_state === 'outcome_unknown');
+  const unknown = await f.state.read('quotes', quote.quote_id);
+  assert.equal(unknown.state, 'outcome_unknown'); assert.ok(saved.expires_at < unknown.approved_at + RECOVERY_WINDOW_MS);
+  const tasks = f.tasks.size, posts = f.posts.length;
+  // A higher price: the shared core refuses to replay the approval, before anything is sent.
+  f.delta = 1000; f.reset();
+  await assert.rejects(at(f, saved.created_at + 3 * 3_600_000, () => f.media.resume(quote.quote_id)), error => {
+    assert.equal(error.code, 'price_changed'); assert.equal(error.details.charged, 'unknown'); assert.equal(error.details.submission_state, 'outcome_unknown');
+    assert.equal(error.details.next_step, 'evolink tasks list --since 2d'); assert.equal(error.details.submission_allowed, false); assert.ok(error.details.dashboard_url);
+    assert.equal(error.message, 'The price rose since the quote was approved, so the replay was not sent, and the original submission remains unverified. Check evolink tasks list --since 2d first to see whether it went through; only if it did not, estimate it again and, after the user approves, submit it as a new generation.');
+    return true;
+  });
+  // From the quote's expiry on, 22 hours after the submission and so inside the recovery window, whatever the price.
+  for (const [offset, delta] of [[0, 0], [1, -1000], [1_800_000, 0]]) {
+    f.delta = delta; f.reset();
+    await assert.rejects(at(f, saved.expires_at + offset, () => f.media.resume(quote.quote_id)), error => {
+      assert.equal(error.code, 'quote_expired', `${offset} ${delta}`);
+      assert.equal(error.message, `This quote expired at ${expiry}, so its submission cannot be recovered with it. Check evolink tasks list --since 2d first to see whether it went through; only if it did not, estimate it again and, after the user approves, submit it as a new generation. Nothing was submitted.`);
+      assert.equal(error.details.next_step, 'evolink tasks list --since 2d'); assert.equal(error.details.submission_allowed, false); assert.ok(error.details.dashboard_url);
+      return true;
+    });
+  }
+  // Past the recovery window the window's own refusal comes first, as before.
+  await assert.rejects(at(f, unknown.approved_at + RECOVERY_WINDOW_MS, () => f.media.resume(quote.quote_id)), { code: 'recovery_window_passed' });
+  assert.equal(f.posts.length, posts); assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'outcome_unknown');
+  // A millisecond before the expiry, at a lower price, the replay finds the original task.
+  f.delta = -1000; f.reset();
+  const recovered = await at(f, saved.expires_at - 1, () => f.media.resume(quote.quote_id));
+  assert.ok(recovered.task_id); assert.equal(f.tasks.size, tasks, 'the original task, not a new one');
+  assert.equal(f.keyTasks.get(unknown.client_request_id), 1); assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'submitted');
+  f.delta = 0;
+});
+
+test('finishing a batch with tasks resume follows the same rule: past the expiry nothing is sent; before it a lower total finishes the batch', async t => {
+  const f = await gateway(t);
+  const quote = await f.media.estimate({ model: SEEDREAM, inputs: [{ prompt: 'kept [accept]' }, { prompt: 'later [ratelimit]' }] });
+  const saved = await f.state.read('quotes', quote.quote_id), expiry = new Date(saved.expires_at).toISOString();
+  await at(f, saved.created_at + 2 * 3_600_000, () => f.media.generate('image', quote.quote_id, { confirmed: true }));
+  const partial = await f.state.read('quotes', quote.quote_id), [kept] = partial.task_ids;
+  assert.equal(partial.state, 'partial'); assert.equal(partial.task_ids.length, 1);
+  f.recovered = true;
+  const posts = f.posts.length;
+  for (const [offset, delta] of [[0, 0], [1, -1000]]) {
+    f.delta = delta; f.reset();
+    await assert.rejects(at(f, saved.expires_at + offset, () => f.media.resume(quote.quote_id)), error => {
+      assert.equal(error.code, 'quote_expired', `${offset} ${delta}`);
+      assert.equal(error.message, `This quote expired at ${expiry}, so its batch cannot be finished with it. Check evolink tasks batch --ids ${kept} and evolink tasks list --since 2d first to see which inputs went through; then estimate only the inputs that did not and, after the user approves, submit them as a new batch. Nothing was submitted.`);
+      assert.deepEqual(error.details.task_ids, [kept]); assert.equal(error.details.next_step, `evolink tasks batch --ids ${kept}`);
+      return true;
+    });
+  }
+  assert.equal(f.posts.length, posts); assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'partial');
+  // A millisecond before, at a lower total, the same request ID finishes it; the accepted input is not charged again.
+  f.delta = -1000; f.reset();
+  const finished = await at(f, saved.expires_at - 1, () => f.media.resume(quote.quote_id));
+  assert.deepEqual(finished.items.map(item => item.submission_state), ['accepted', 'accepted']); assert.equal(finished.items[0].replayed, true);
+  assert.equal((await f.state.read('quotes', quote.quote_id)).state, 'submitted');
+  assert.ok([...f.keyTasks.values()].every(n => n === 1)); assert.equal(f.tasks.size, 2);
+  f.delta = 0;
 });
 
 test(`seed ${SEED}: one batch quote prices each of 1-50 inputs and the total exactly, and approves only those inputs`, async t => {
@@ -326,7 +412,7 @@ test(`seed ${SEED}: a batch submits its inputs together, reports each one, and t
       // The CLI names its own commands for collecting and finishing a batch, never the shared core's tool calls.
       assert.doesNotMatch(view.text, /call generate_|list_tasks \(task_ids|client_request_id and inputs|under a new client_request_id/, label);
       if (accepted) assert.match(view.text, new RegExp(`Collect the results with evolink tasks batch --ids ${saved.task_ids.join(',')};`), label);
-      if (want.some(item => item.finishable)) assert.match(view.text, new RegExp(`To finish the batch, run evolink tasks resume --quote ${quote.quote_id} within 24 hours`), label);
+      if (want.some(item => item.finishable)) assert.match(view.text, new RegExp(`To finish the batch, run evolink tasks resume --quote ${quote.quote_id} within 23 hours of its first submission`), label);
       if (want.some(item => item.state === 'outcome_unknown')) assert.match(view.text, new RegExp(`run evolink tasks resume --quote ${quote.quote_id} later`), label);
       assert.equal(view.recovery, saved.state === 'partial' ? `evolink tasks resume --quote ${quote.quote_id}` : undefined, label);
       return saved;
@@ -387,7 +473,8 @@ test('a partly submitted batch keeps its accepted tasks when finishing it is ref
   f.delta = 1000; f.reset(); f.recovered = true;
   const posts = f.posts.length;
   await assert.rejects(f.media.resume(quote.quote_id), error => {
-    assert.equal(error.details.error.code, 'price_changed'); assert.equal(error.details.charged, 'no');
+    assert.equal(error.code, 'price_changed'); assert.equal(error.details.error.code, 'price_changed'); assert.equal(error.details.charged, 'no');
+    assert.match(error.message, /^The total price rose since the quote was approved, so nothing was sent\. Check evolink tasks batch --ids \S+ and evolink tasks list --since 2d first/);
     assert.deepEqual(error.details.items.map(item => item.submission_state), ['accepted', 'not_submitted']);
     assert.match(error.details.next_step, /Accepted inputs keep their tasks/);
     return true;

@@ -31,7 +31,17 @@ GPT Image rules are the same as the MCP repository's
 same name: the anonymous full rules of `gpt-image-2.6-flare` and
 `gpt-image-2.6-sunburst`, read on 2026-11-07 at 07:03 UTC.
 
+`pricing-rules-omni-20261107.json` is the MCP repository's file of the same name:
+the anonymous full rules of the fifteen Gemini Omni Flash video models, read on
+2026-11-07 at 14:26 UTC. The CLI tests use the Gemini Omni 1.2 edit and upscale
+rules for the price at each input resolution.
+
+`pricing-rules-qwen-tts-20261108.json` is the MCP repository's file of the same
+name: the anonymous full rule of `qwen-audio-3.1-tts-flash`, read on 2026-11-08 at
+15:55 UTC, which gets a reference price from its text since evolink-mcp 9e31094.
+
 `pricing-rules-tts-20261014.json` holds one rule of the MCP repository's
 `pricing-rules-public-20261014.json` (read on 2026-10-14, meta.updated_at 14:41:59
 UTC): `qwen-audio-3.1-tts-flash`, billed only by input and output token counts the
-request cannot give. The CLI tests use it for an estimate short of token usage.
+request cannot give. Since that model gets a reference price, the CLI tests publish
+this rule for `qwen3-tts-vd`, which has none, for an estimate short of token usage.
