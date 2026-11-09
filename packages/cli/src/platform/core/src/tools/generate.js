@@ -10,7 +10,7 @@ import { ApprovedAccountQuote, QuoteParameters, QuoteError } from '../services/p
 import { ApprovedRulesEstimate, REFERENCE_BUDGET_FACTOR, amountsForUC, calculateRulesEstimate, createRulesEstimate, checkRulesApproval, readPricingRulesFor, referenceAllowance, referenceBudgetExceeded, rulesBudgetExceeded } from '../services/pricing-rules-estimate.js';
 import { PricingRulesError } from '../services/pricing-rules-client.js';
 import { isOmniTokenModel } from '../services/omni-tokens.js';
-import { isQwenTTSModel } from '../services/qwen-tts-tokens.js';
+import { isQwenTTSModel, qwenTTSInput } from '../services/qwen-tts-tokens.js';
 import { CLIENT_REQUEST_ID_PATTERN, monotonicNow, newRunId, remainingMs } from '../services/http-policy.js';
 import { formatUsd } from '../services/error-handler.js';
 import { DASHBOARD_CHECK_GUIDANCE, MEDIA_SECONDS_DESCRIPTION, MEDIA_SECONDS_MAX, PAID, dashboardCheck, errorResult, failure, money, ok, progressReporter, retryText, usdOf } from './shared.js';
@@ -172,7 +172,7 @@ async function generationModel(config, kind, model) {
 }
 /** An input as generate_* submits it, with the problems that stop it and the warnings it carries. */
 function checkGenerationInput(entry, input) {
-    const prepared = prepareSeedanceInput(entry, input);
+    const prepared = prepareSeedanceInput(entry, qwenTTSInput(entry.id, input));
     const errors = [], warnings = [];
     if (entry.spec) {
         const validation = validateInput(entry.spec, prepared.input);

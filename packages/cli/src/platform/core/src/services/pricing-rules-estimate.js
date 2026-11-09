@@ -8,7 +8,7 @@ import { searchUsage } from './search-usage.js';
 import { CONSERVATIVE_QUOTE_PARAMETERS } from './pricing-derived.js';
 import { INPUT_IMAGE_TOKENS, isTokenImageModel, tokenImageReservation } from './gpt-image-tokens.js';
 import { OMNI_IMAGE_TOKENS, OMNI_UNREAD_TIER, isOmniTokenModel, omniInputTiers, omniLowerInputTier, omniQuotedTier, omniReservation } from './omni-tokens.js';
-import { isQwenTTSModel, qwenTTSReservation } from './qwen-tts-tokens.js';
+import { isQwenTTSModel, qwenTTSInput, qwenTTSReservation } from './qwen-tts-tokens.js';
 /**
  * How long an approval from estimate_cost holds: 24 hours from the estimate. The rules' own `fresh_until`
  * is a short refresh window (minutes); people confirming a price in a chat may come back much
@@ -427,7 +427,7 @@ export function calculateRulesEstimate(body, entry, input, options = {}) {
     if (!rule || rule.model_id !== entry.id.toLowerCase() || rule.modality !== entry.kind || rule.policy_source !== 'published' || rule.pricing_status !== 'available') {
         fail('pricing_rules_unavailable', 'This model has no available published media pricing policy.');
     }
-    const prepared = prepareSeedanceInput(entry, input);
+    const prepared = prepareSeedanceInput(entry, qwenTTSInput(entry.id, input));
     if (prepared.errors.length)
         throw new QuoteError('invalid_quote_parameter', `${prepared.errors[0].param} ${prepared.errors[0].problem}`, prepared.errors[0].param);
     const effectiveInput = prepared.input;

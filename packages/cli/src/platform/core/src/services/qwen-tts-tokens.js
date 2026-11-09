@@ -9,6 +9,17 @@ import { QuoteError } from './pricing-quote-client.js';
 const MODELS = new Set(['qwen-audio-3.1-tts-flash']);
 /** Qwen Audio TTS models, which the gateway reserves and bills by input and output token counts. */
 export const isQwenTTSModel = (model) => MODELS.has(model.trim().toLowerCase());
+/**
+ * The input as the gateway reads it: hot_fix null is no hot_fix there (it neither checks it nor sends it on), so it is
+ * left out before the documented parameters are checked, the input is priced and it is submitted.
+ */
+export function qwenTTSInput(model, input) {
+    if (input.hot_fix !== null || !isQwenTTSModel(model))
+        return input;
+    const rest = { ...input };
+    delete rest.hot_fix;
+    return rest;
+}
 /** The longest text one task synthesizes, in characters, also after hot_fix.replace. */
 export const QWEN_TTS_MAX_TEXT = 5000;
 /** instruction holds at most this many billing characters, a Han character counting two. */

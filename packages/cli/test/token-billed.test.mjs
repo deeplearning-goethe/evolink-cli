@@ -227,6 +227,17 @@ test('the real CLI quotes Qwen TTS by what EvoLink reserves for the text; token 
   assert.equal(f.submissions.length, 1);
 });
 
+test('the real CLI reads Qwen TTS hot_fix null as no hot_fix, as EvoLink does: the same quote, and it is not submitted', async t => {
+  const f = await fixture(t), plain = { input: 'hello' }, nulled = { ...plain, hot_fix: null }, want = reference(QWEN, plain);
+  const quoted = await f.run(['estimate', '--model', QWEN, '--input', JSON.stringify(nulled)]);
+  assert.equal(quoted.status, 0, JSON.stringify(quoted)); const view = quoted.data;
+  assert.equal(view.estimate.status, 'token_billed'); assert.deepEqual(view.amounts, want.amounts);
+  assert.equal(view.pricing_quote.request_hash, want.approval.request_hash);
+  const generated = await f.run(['generate', 'audio', '--quote', view.quote_id, '--confirm']);
+  assert.equal(generated.status, 0, JSON.stringify(generated)); assert.ok(generated.data.task_id);
+  assert.deepEqual(f.submissions, [{ ...plain, model: QWEN }]);
+});
+
 test('the real CLI shows a Gemini Omni reference price at each input resolution, the quoted one at 4k', async t => {
   const f = await fixture(t), video = 'https://files.example/source.mp4';
   const editInput = { prompt: 'Turn the street into a snowy evening.', video_urls: [video] };
