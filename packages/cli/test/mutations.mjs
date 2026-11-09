@@ -281,7 +281,7 @@ for (const [name, file, before, after] of selected) {
       : ['media.test.mjs', 'auth.test.mjs', 'acceptance.test.mjs', 'readiness.test.mjs', 'setup.test.mjs', 'skills.test.mjs'];
     const tests = files.map(n => path.join(home, 'test', n));
     const selection = PATTERNS[name] ? [`--test-name-pattern=${PATTERNS[name]}`] : [];
-    const run = spawnSync(process.execPath, ['--test', ...selection, ...tests], { cwd: home, encoding: 'utf8', timeout: 60_000 });
+    const run = spawnSync(process.execPath, ['--test', ...selection, ...tests], { cwd: home, encoding: 'utf8', timeout: process.platform === 'win32' ? 120_000 : 60_000 });
     const output = `${run.stdout || ''}\n${run.stderr || ''}`;
     if (run.status > 0 && !run.error && /not ok \d+|✖ /.test(output) && !output.includes('SyntaxError:')) { killed++; console.log(`DETECTED ${name}`); }
     else { console.error(`${run.error || run.signal ? 'INCONCLUSIVE' : 'SURVIVED'} ${name} (status=${run.status}, signal=${run.signal}, error=${run.error?.code || 'none'})\n${output.slice(-2000)}`); process.exitCode = 1; }
