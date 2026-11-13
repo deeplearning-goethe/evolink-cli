@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Drive `evolink setup` through a real pseudo-terminal (macOS / Linux).
+"""Drive `evolink-config setup` through a real pseudo-terminal (macOS / Linux).
 
 Checks what the node:test suite cannot: hidden key input in raw mode, the numbered
 model picker, yes/no prompts and the trust question, all in a throwaway HOME.
 
     python3 test/interactive_pty.py [--via-bootstrap] [--codex [--vscode]]
 
---codex drives `evolink setup codex` instead (key, GPT model picker, the evolink profile);
+--codex drives `evolink-config setup codex` instead (key, GPT model picker, the evolink profile);
 with --vscode, `setup codex --vscode` (config.toml, whose confirmation defaults to No).
 """
 import json
@@ -95,7 +95,7 @@ def main():
         if codex:
             os.write(fd, b"1\r")  # gpt-6-luna, the only GPT model of the mock's default list
         else:
-            os.write(fd, b"2\r")  # claude-sonnet-5
+            os.write(fd, b"2\r")  # the newest Sonnet of the mock's list: claude-sonnet-5-5
             read_until(fd, r"已信任", buf)
             os.write(fd, b"y\r")
         if vscode:
@@ -165,10 +165,19 @@ def main():
     settings = json.load(open(os.path.join(home, ".claude", "settings.json")))
     claude_json = json.load(open(os.path.join(home, ".claude.json")))
     real_project = os.path.realpath(project)
+    newest = ["claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-2", "claude-haiku-5-5"]
+    older = ["claude-sonnet-5", "claude-opus-5", "claude-fable-5-1", "claude-haiku-4-5-20251001"]
+    launcher = os.path.join(home, ".evolink", "bin", "evolink-config")
     checks = {
         "exit code 0": os.waitstatus_to_exitcode(status) == 0,
         "key hidden in terminal": KEY[3:] not in out,
-        "model chosen from picker": settings["env"].get("ANTHROPIC_MODEL") == "claude-sonnet-5",
+        # The mock lists an older model of every family first: the picker must show the newest one, and only that.
+        "picker offers the newest model of each family": all(re.search(rf"{n}\) {re.escape(m)}\s", out) for n, m in zip("2345", newest)),
+        "picker does not offer the older ones": not any(re.search(rf"\d\) {re.escape(m)}\s", out) for m in older),
+        "auto mode: switched off, with the reason and how to turn it on": settings.get("disableAutoMode") == "disable" and "auto mode 已关闭" in out and "setup --auto-mode" in out,
+        "commands shown never use the bare evolink name": not re.search(r"(^|[\s\"'/])evolink (reset|doctor|setup)", out, re.M),
+        "via setup.sh: launcher is evolink-config and the commands shown use it": ("--via-bootstrap" not in sys.argv) or (os.path.exists(launcher) and f"{launcher} reset" in out and not os.path.exists(os.path.join(home, ".evolink", "bin", "evolink"))),
+        "model chosen from picker": settings["env"].get("ANTHROPIC_MODEL") == "claude-sonnet-5-5",
         "key written": settings["env"].get("ANTHROPIC_AUTH_TOKEN") == KEY,
         "onboarding skipped": claude_json.get("hasCompletedOnboarding") is True,
         "project trusted": claude_json.get("projects", {}).get(real_project, {}).get("hasTrustDialogAccepted") is True,

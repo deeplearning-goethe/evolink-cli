@@ -2,15 +2,15 @@
 
 图片、视频和音频生成 CLI 的统一入口为 `@evolinkai/cli` 和 `evolink`，通过 `evolink auth login` 浏览器登录。安装和用法见 [packages/cli](packages/cli/README.md)，需要 Node.js 22+。已发布的旧名称 [@evolinkai/media-cli 0.1.0](https://www.npmjs.com/package/@evolinkai/media-cli) 仍可用。
 
-## 历史文本配置工具（v0.4.0）
+## 一键配置 API：`evolink-config`（v0.5.0）
 
-下方保留旧工具的说明。根包是私有开发工作区，根目录脚本保留原行为，开发用命令名为 `evolink-config`。正式的 `evolink` 命令由 `packages/cli` 提供；现有 CDN 安装脚本仍是旧工具。
+这是另一个工具，和上面的 `evolink` 不是一回事：它把 Claude Code、Codex 的模型接口配到 EvoLink 上，命令名是 `evolink-config`。它不发布到 npm，用下面的一行命令从 CDN 运行；源码在本仓库根目录（`bin/evolink.mjs`）。0.4.0 及以前这个工具的启动器也叫 `evolink`，0.5.0 起改名，避免和 npm 上的 `evolink` 混淆。
 
 [![CI](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/deeplearning-goethe/evolink-cli/actions/workflows/ci.yml)
 
 一条命令把 Claude Code 或 Codex 接到 [EvoLink](https://evolink.ai)：检查环境 → 校验 Key 和余额 → 安全地写配置（先备份、只改自己负责的项）→ 发一条测试请求 → 告诉用户下一步。另有 `doctor`（自检，输出可以直接发给客服）和 `reset`（撤销）。
 
-> **历史版本**：v0.4.0。下方 CDN 安装脚本用于旧文本配置工具；统一 npm 生成 CLI 的接入说明见上方 `packages/cli`。
+> **当前版本**：v0.5.0。图片、视频、音频生成用的 npm CLI 见上方 `packages/cli`。
 
 ## 用法
 
@@ -19,8 +19,8 @@
 | macOS / Linux | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash` |
 | Windows PowerShell | `irm https://cdn.evolink.ai/cli/setup.ps1 \| iex` |
 | 只预览改动，不写文件、不安装任何东西（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --dry-run` |
-| 带参数（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --model claude-sonnet-5` |
-| 带参数（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5` |
+| 带参数（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --model claude-sonnet-5-5` |
+| 带参数（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5-5` |
 | Codex（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- codex` |
 | Codex（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex` |
 | VS Code 里的 Codex 扩展（macOS / Linux） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- codex --vscode` |
@@ -28,16 +28,16 @@
 | VS Code 内置的 Chat（macOS / Linux，在装了 VS Code 的电脑上运行） | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- copilot` |
 | VS Code 内置的 Chat（Windows） | `& ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) copilot` |
 | 顺便给 VS Code / Cursor 装上 Claude Code 扩展 | `curl -fsSL https://cdn.evolink.ai/cli/setup.sh \| bash -s -- --install-extension` |
-| 事后自检 / 撤销 | `~/.evolink/bin/evolink doctor`、`~/.evolink/bin/evolink reset`（Windows：`& "$env:USERPROFILE\.evolink\bin\evolink.cmd" doctor`）；Codex 加 `codex`：`evolink doctor codex`、`evolink reset codex`；不带 `codex` 的 `reset` 会把两边都撤销 |
+| 事后自检 / 撤销 | `~/.evolink/bin/evolink-config doctor`、`~/.evolink/bin/evolink-config reset`（Windows：`& "$env:USERPROFILE\.evolink\bin\evolink-config.cmd" doctor`）；Codex 加 `codex`：`evolink-config doctor codex`、`evolink-config reset codex`；不带 `codex` 的 `reset` 会把两边都撤销 |
 
-脚本的 SHA-256 见 `https://cdn.evolink.ai/cli/SHA256SUMS`，与本仓库 `dist/` 下的文件一致。全部选项见 `evolink --help`。
+脚本的 SHA-256 见 `https://cdn.evolink.ai/cli/SHA256SUMS`，与本仓库 `dist/` 下的文件一致。全部选项见 `~/.evolink/bin/evolink-config --help`。
 
 引导脚本（`setup.sh` / `setup.ps1`）会做三件事：
 1. 找 Node.js 18+。找不到时，macOS 提示用 Homebrew 装，Windows 提示用 winget 装，其他情况给出 npmmirror 下载地址。
-2. 把 CLI 存到 `~/.evolink/cli/`，并建一个启动器 `~/.evolink/bin/evolink`。
-3. 运行 `evolink setup`。
+2. 把工具存到 `~/.evolink/cli/`，并建一个启动器 `~/.evolink/bin/evolink-config`。0.4.0 留下的旧启动器 `~/.evolink/bin/evolink` 会被删掉（只删本工具自己写的那个）。
+3. 运行 `evolink-config setup`。
 
-它**不改 PATH，也不改 shell 配置文件**。CLI 源码直接内嵌在脚本里，运行前会校验 SHA-256。
+它**不改 PATH，也不改 shell 配置文件**。工具源码直接内嵌在脚本里，运行前会校验 SHA-256。
 
 ## 它会改什么
 
@@ -48,7 +48,8 @@
 | 同上 | `ANTHROPIC_DEFAULT_SONNET_MODEL=<这把 Key 能用的最新 Sonnet>`（现在是 `claude-sonnet-5-5`） | Claude Code 换默认 Sonnet 时，EvoLink 可能晚一两天才有：2.1.284 起 `/model` 里的 Sonnet 和 `--model sonnet` 都指向 `claude-sonnet-5-5`，EvoLink 09-30 才接入，这期间选了就报"模型不存在"（09-29 实测）。钉住后 `sonnet` / `sonnet[1m]` 都走这把 Key 能用的最新 Sonnet；你自己设过可用的值就不动；加 `--no-pin-sonnet` 不写；`reset` 会还原 |
 | 同上（仅加 `--max-output-tokens 32000` 时） | `CLAUDE_CODE_MAX_OUTPUT_TOKENS=32000` | 默认不设，跟随 Claude Code 自己的输出上限（Sonnet 5 为 64K，Opus 5.5 为 128K）。余额少时加这个参数，Opus 5.5 单次预扣从约 $2.5 降到约 $0.7 |
 | 同上（仅加 `--disable-nonessential-traffic` 时） | `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1` | 默认不设。设了会减少非必要请求，**副作用是关掉自动更新** |
-| `~/.claude/settings.json` 顶层 | `"disableAutoMode": "disable"` | 先关掉 Claude Code 2.1.283 起默认开启的 auto mode。EvoLink 网关暂不支持它的审核请求：开着的话需要审核的命令会被拦下，而且每条命令会白白计费 4 次审核请求（09-28 线上实测）。加 `--auto-mode` 可以不关；网关修好后重跑 `setup --auto-mode` 即可恢复，`reset` 也会还原 |
+| `~/.claude/settings.json` 顶层 | `"disableAutoMode": "disable"` | 关掉 Claude Code 2.1.283 起默认开启的 auto mode，Claude Code 执行命令前会先问你。原因是费用：auto mode 开着时，每条要审核的命令 Claude Code 都会多发一次审核请求（发给 `claude-sonnet-5`，约 4.7 万个输入 token），按 token 计在这把 Key 上；读到缓存时约 0.6 积分，读不到时约 7 积分（11-12 线上实测）。想开就加 `--auto-mode`；`reset` 会还原 |
+| 同上（仅加 `--auto-mode` 时） | 不写 `disableAutoMode`（以前写过的会去掉），并在 `env` 里写 `CLAUDE_CODE_AUTO_MODE_SERVER=0` | 保留 auto mode。那个变量让 Claude Code 直接用自己的审核请求，不再弹出一条会卡住第一条命令的英文提示；审核请求和费用不变（11-12 线上实测）。Claude Code 的文档说这个变量是临时的，以后的版本可能取消，取消后只是提示会回来 |
 | 同上（仅在需要时） | 删除这把 Key 用不了的模型覆盖项（`ANTHROPIC_DEFAULT_*_MODEL`、`model` 等）以及 `CLAUDE_CODE_USE_BEDROCK/VERTEX/FOUNDRY` | 从其他平台切换过来时常见的残留；不处理会报"模型不存在"，或者根本不走 EvoLink |
 | 同上（仅在需要时） | shell / 注册表里的上述残留变量，在这里置为 `""` | 配置文件里的值优先于 shell，写空值就能压住 |
 | `~/.claude.json` | `hasCompletedOnboarding: true`（只改这一个键；文件读不了就跳过，不覆盖） | 跳过首次启动的主题页和引导页 |
@@ -58,7 +59,7 @@
 
 **不写**：`.zshrc` 等 shell 配置文件、Windows 系统环境变量、hosts 文件。
 
-## Codex（`evolink setup codex`）
+## Codex（`evolink-config setup codex`）
 
 | 文件 | 内容 | 为什么 |
 |---|---|---|
@@ -73,10 +74,10 @@
 - **启动提示**：带 `-p` 时 Codex 总会提示 "Running without the shared background server"，这是正常的。
 - **没装 Codex**：默认用 npm 安装（`npm install -g @openai/codex`，自动选官方源或 npmmirror）；`--no-install` 跳过。
 - **费用提醒**：Codex 每轮都带很长的系统提示和工具说明，一句简单的话也要约 9 千个输入 token。
-- **撤销**：`evolink reset codex` 删除配置档（先备份），连同 Codex 后来写进去的信任记录等一起删掉；setup 之前就有的同名文件会还原；已经被整个换成别的内容的文件保持不动。
+- **撤销**：`evolink-config reset codex` 删除配置档（先备份），连同 Codex 后来写进去的信任记录等一起删掉；setup 之前就有的同名文件会还原；已经被整个换成别的内容的文件保持不动。
 - **VS Code 里的 Codex 扩展不认独立配置档**：要让扩展也走 EvoLink，用下一节的 `setup codex --vscode`。`setup codex` 结尾检测到扩展时会提示。
 
-## VS Code 里的 Codex 扩展（`evolink setup codex --vscode`）
+## VS Code 里的 Codex 扩展（`evolink-config setup codex --vscode`）
 
 Codex 扩展（`openai.chatgpt`）运行的是它自带的 `codex app-server`，只读主配置 `config.toml`，不认独立配置档。所以这个模式直接改 `config.toml`：扩展和终端里直接运行的 `codex` 都会走 EvoLink。
 
@@ -93,10 +94,10 @@ Codex 扩展（`openai.chatgpt`）运行的是它自带的 `codex app-server`，
 - **装好之后**：VS Code 已经开着的话，运行 "Developer: Reload Window" 或重启 VS Code；打开 Codex 面板直接对话，不需要登录。在扩展的模型菜单里换模型。
 - **Remote-SSH**：在远端的终端里运行这条命令。扩展在远端运行，读的是远端的配置；远端终端里的 `code` 也会把扩展装到远端。
 - **写不了的情况**：`config.toml` 格式有误，或者已经用别的写法（点号键、内联表）定义了 `model_providers.evolink-cli`。这时 setup 会停下并指出行号，什么都不写。
-- **撤销**：`evolink reset codex` 逐项还原 setup 改过的设置，删掉 `[model_providers.evolink-cli]`，恢复原来的文件权限。setup 之后被你或 Codex 改过的项（例如换了模型）保持不动并列出来；Codex 后来写入的信任记录等也保留。如果文件是 setup 新建的，撤销后又没有别的内容，就删掉。
+- **撤销**：`evolink-config reset codex` 逐项还原 setup 改过的设置，删掉 `[model_providers.evolink-cli]`，恢复原来的文件权限。setup 之后被你或 Codex 改过的项（例如换了模型）保持不动并列出来；Codex 后来写入的信任记录等也保留。如果文件是 setup 新建的，撤销后又没有别的内容，就删掉。
 - **和命令行配置档可以同时用**：`codex -p evolink` 用配置档，扩展和直接运行的 `codex` 用 `config.toml`；`reset codex` 两边一起撤销。
 
-## VS Code 内置的 Chat（`evolink setup copilot`）
+## VS Code 内置的 Chat（`evolink-config setup copilot`）
 
 VS Code 自带的 Chat（Copilot Chat）支持"自定义端点"：在 VS Code 的 `chatLanguageModels.json` 里加一组模型就能用，**不需要登录 GitHub，也不需要 Copilot 订阅**（10-01 用 VS Code 1.140 实测）。
 
@@ -113,8 +114,8 @@ VS Code 自带的 Chat（Copilot Chat）支持"自定义端点"：在 VS Code �
 - **费用提醒**：Agent 模式每轮都带很长的系统提示和工具说明，一句简单的话约 2 万个输入 token；只聊天可以切到 Ask 模式。
 - **Remote-SSH**：Chat 的模型配置在你本机的 VS Code 里，要在本机运行这条命令（在远端运行会提示你）。
 - **只写默认 Profile**：用了别的 VS Code Profile 的话，要在那个 Profile 里另外添加。
-- **撤销**：`evolink reset copilot` 去掉 EvoLink 这一组（setup 之前就有同名组的话还原成原来的样子），其他提供方不动；文件是 setup 新建的、撤销后为空就删掉。VS Code 钥匙串里存的 Key 不会跟着删，要删的话先在 VS Code 的 Language Models 页面里删掉这一组。
-- **自检**：`evolink doctor copilot` 检查文件、模型地址、有没有在 VS Code 里粘贴过 Key（只看引用，看不到 Key 本身）。
+- **撤销**：`evolink-config reset copilot` 去掉 EvoLink 这一组（setup 之前就有同名组的话还原成原来的样子），其他提供方不动；文件是 setup 新建的、撤销后为空就删掉。VS Code 钥匙串里存的 Key 不会跟着删，要删的话先在 VS Code 的 Language Models 页面里删掉这一组。
+- **自检**：`evolink-config doctor copilot` 检查文件、模型地址、有没有在 VS Code 里粘贴过 Key（只看引用，看不到 Key 本身）。
 
 **Windows 额外处理**：如果 npm 装的 `claude.ps1` 会被执行策略拦下，工具会在征得同意后，把当前用户的执行策略改为 `RemoteSigned`；也可以改用 `claude.cmd`。
 
@@ -123,6 +124,7 @@ VS Code 自带的 Chat（Copilot Chat）支持"自定义端点"：在 VS Code �
 - **Key 的输入**：只从隐藏输入、环境变量 `EVOLINK_API_KEY` 或 `--key-stdin` 读取，不接受命令行参数（会留在 shell 历史里）。
 - **Key 的输出与存储**：所有输出只显示 `sk-前4位…后4位`；状态文件里只存哈希，不存 Key。
 - **写入之前**：先校验 Key（`GET /v1/models`、`GET /v1/credits`，都不扣费）；校验失败时不改任何文件。
+- **校验被限流（429）**：网关对同一个账户每分钟查模型列表的次数有上限（11-13 实测是 5 次）。短时间内连着运行多次会遇到 429，提示里会写出要等多少秒（取自网关返回的 `Retry-After`），什么都不写。
 - **写入方式**：先备份到 `~/.evolink/backups/<时间>/`，再原子写入（临时文件 + rename），`settings.json` 的权限设为 0600。
 - **目标文件已损坏**：默认停止，不覆盖；加 `--replace-invalid`（或在交互中确认）才会备份后重建。
 - **撤销**：`reset` 只还原"写入后没被改过"的项，用户后来自己改过的保持不动。
@@ -140,15 +142,15 @@ GitHub Actions 在每次推送到 main、每个 PR，以及每天 09:00（北京
 |---|---|
 | Ubuntu（Node 22 和 18） | 自动化测试、伪终端交互（Claude Code 和 Codex，各自直接运行和 `setup.sh` 管道运行）、`dist/` 与源码一致；Node 22 另用当天最新的 Claude Code 实测配置生效和首启画面，用当天最新的 Codex 实测配置档和 VS Code 扩展模式都生效（扩展模式还会像扩展那样启动 `codex app-server`，确认不需要登录并发一轮消息） |
 | macOS（Node 22） | 同上，含最新 Claude Code 和 Codex 实测 |
-| Windows（Node 22） | 自动化测试（62 项，另 11 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑：带参数运行、`irm \| iex`、启动器 doctor / reset、被篡改的脚本必须被拦下 |
+| Windows（Node 22） | 自动化测试（只适用于 macOS / Linux 的项在 Windows 上跳过）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑：带参数运行、`irm \| iex`、启动器 doctor / reset、被篡改的脚本必须被拦下、0.4.0 留下的旧启动器 `evolink.cmd` 被删掉而别人的同名文件不动 |
 
 每天定时跑一次，是为了及时发现 Claude Code 和 Codex 新版本带来的变化。手动验证记录：
 
 | 平台 | 已验证 |
 |---|---|
-| Ubuntu 24.04（Node 22） | **v0.4.0（10-01）**：自动化测试 73/73；伪终端交互 6 种共 52 项；**编辑器界面实测**（测试云主机上的桌面版 VS Code 1.140，真实网关）：Codex 扩展 26.928 在 `setup codex --vscode` 之前显示 ChatGPT 登录页，之后不再显示，发一句话回复 OK；Claude Code 扩展 2.1.286 没配置时显示登录页，只要有 `setup` 写的 `~/.claude/settings.json`（编辑器设置里没有 `disableLoginPrompt`）就不再显示，回复 OK；**VS Code 内置 Chat 线上实测**：`setup copilot` 写入推荐的 14 个模型，三种接口各一条测试请求通过，文件里没有 Key；在 VS Code 里粘贴一次 Key 后，Claude Haiku 4.5、GPT-6 Luna、DeepSeek V4 Pro / Flash、Kimi K3、GLM 5.3、Qwen3.8 Max、Grok 4.7、Doubao Seed 2.0 Code 共 9 个模型在 Chat 里回复 OK；`doctor copilot` 能看出粘贴前后的区别；`reset copilot` 删掉 setup 新建的文件，临时家目录里（备份目录除外）搜不到 Key。**v0.3.0（10-01）**：自动化测试 68/68；伪终端交互 6 种共 52 项；真实 Codex 0.159.3 连模拟网关 17/17，把 `app-server` 换成扩展内置的 codex 0.159.2 同样 17/17；真实 Claude Code 2.1.286 8/8 + 首启画面；**扩展模式线上实测**：真实网关上 `setup codex --vscode`（原来的 `config.toml` 带注释、MCP 服务器、信任记录和自动审批审核），之后直接运行 `codex exec` 返回 OK，扩展内置的 `app-server` 回报不需要登录并返回 OK（各约 1 万 token），`doctor codex --test` 没有问题；`reset codex` 后 `config.toml` 与 setup 之前逐字节一致，权限改回 644，临时家目录里（备份目录除外）搜不到 Key。**v0.2.0（09-30）**：自动化测试 58/58；伪终端交互 4 种共 30 项；真实 Codex 0.159.2 连模拟网关 8/8；真实 Claude Code 2.1.285 8/8 + 首启画面；**Codex 线上实测**：真实网关上 `setup codex`、`codex exec -p evolink` 返回 OK（gpt-6.1-sol，一句话约 1 万 token）、`doctor codex --test`、`reset codex` 后临时家目录外搜不到 Key；真实 Codex 界面里答完信任提示，Codex 往配置档写了 `[tui]`、`[projects."…"]`，`reset codex` 照样能删掉。**更早（v0.1.4）**：自动化测试 43/43；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 / 2.1.284 读取配置并请求模拟网关（含 `--model sonnet` 跟随钉档）；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行；**Sonnet 钉档线上实测（09-29，v0.1.4）**：Claude Code 2.1.284 的 `--model sonnet` / `sonnet[1m]` 经真实网关都返回 OK，删掉钉档后同一命令报 "There's an issue with the selected model (claude-sonnet-5-5)" |
-| macOS 26（Node 24） | v0.4.0：自动化测试 73/73、伪终端交互 6 种共 52 项（临时目录 + 模拟网关）；v0.3.0：68/68；v0.2.0：58/58；更早的版本：真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
-| Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | v0.4.0：自动化测试 62 项（另 11 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
+| Ubuntu 24.04（Node 22） | **v0.5.0（11-13）**：自动化测试 84/84；伪终端交互 6 种共 62 项；变异检查 25 个全部被测试抓到；真实 Claude Code 2.1.323 连模拟网关 8/8 + 首启画面，真实 Codex 0.169.0 连模拟网关 17/17；**线上实测**（真实网关；新构建由本机 127.0.0.1 的网页服务提供，运行方式和从 CDN 下载一样）：一行命令的预览和写入、四个模型别名、旧 Key、已有配置的保留和撤销、错 Key、Codex 两种模式、从 0.4.0 升级（旧启动器被删，0.4.0 写的配置能撤销）共 54 项，53 项通过，没过的 1 项是当时 `claude-fable-5-2` 自己被限流（随后单独重试 3 次都是 429，和工具无关）；在伪终端里手动粘贴 Key 26/26（菜单列出的正是四个系列当天最新的型号，测试请求用的是最新的 Haiku）；电脑上没装客户端时由工具代装 10/10；自动模式 10/10：默认配置下 Claude Code 弹确认框、不发审核请求；`--auto-mode` 下命令直接执行、没有那条英文提示、每条命令 1 次 `claude-sonnet-5` 审核请求（约 4.7 万输入 token）。另外测得网关对 `GET /v1/models` 的限流是每个账户每分钟 5 次。**v0.4.0（10-01）**：自动化测试 73/73；伪终端交互 6 种共 52 项；**编辑器界面实测**（测试云主机上的桌面版 VS Code 1.140，真实网关）：Codex 扩展 26.928 在 `setup codex --vscode` 之前显示 ChatGPT 登录页，之后不再显示，发一句话回复 OK；Claude Code 扩展 2.1.286 没配置时显示登录页，只要有 `setup` 写的 `~/.claude/settings.json`（编辑器设置里没有 `disableLoginPrompt`）就不再显示，回复 OK；**VS Code 内置 Chat 线上实测**：`setup copilot` 写入推荐的 14 个模型，三种接口各一条测试请求通过，文件里没有 Key；在 VS Code 里粘贴一次 Key 后，Claude Haiku 4.5、GPT-6 Luna、DeepSeek V4 Pro / Flash、Kimi K3、GLM 5.3、Qwen3.8 Max、Grok 4.7、Doubao Seed 2.0 Code 共 9 个模型在 Chat 里回复 OK；`doctor copilot` 能看出粘贴前后的区别；`reset copilot` 删掉 setup 新建的文件，临时家目录里（备份目录除外）搜不到 Key。**v0.3.0（10-01）**：自动化测试 68/68；伪终端交互 6 种共 52 项；真实 Codex 0.159.3 连模拟网关 17/17，把 `app-server` 换成扩展内置的 codex 0.159.2 同样 17/17；真实 Claude Code 2.1.286 8/8 + 首启画面；**扩展模式线上实测**：真实网关上 `setup codex --vscode`（原来的 `config.toml` 带注释、MCP 服务器、信任记录和自动审批审核），之后直接运行 `codex exec` 返回 OK，扩展内置的 `app-server` 回报不需要登录并返回 OK（各约 1 万 token），`doctor codex --test` 没有问题；`reset codex` 后 `config.toml` 与 setup 之前逐字节一致，权限改回 644，临时家目录里（备份目录除外）搜不到 Key。**v0.2.0（09-30）**：自动化测试 58/58；伪终端交互 4 种共 30 项；真实 Codex 0.159.2 连模拟网关 8/8；真实 Claude Code 2.1.285 8/8 + 首启画面；**Codex 线上实测**：真实网关上 `setup codex`、`codex exec -p evolink` 返回 OK（gpt-6.1-sol，一句话约 1 万 token）、`doctor codex --test`、`reset codex` 后临时家目录外搜不到 Key；真实 Codex 界面里答完信任提示，Codex 往配置档写了 `[tui]`、`[projects."…"]`，`reset codex` 照样能删掉。**更早（v0.1.4）**：自动化测试 43/43；伪终端交互（直接运行、`cat setup.sh \| bash`）各 7/7；真实 Claude Code 2.1.283 / 2.1.284 读取配置并请求模拟网关（含 `--model sonnet` 跟随钉档）；**真实网关**：CDN 一行命令配置、doctor 测试请求、Claude Code 用 claude-sonnet-5 和 claude-opus-5-5 都正常；**auto mode 线上实测（09-28）**：不写设置 / `CLAUDE_CODE_AUTO_MODE_SERVER=0` 都被拦并计费，`disableAutoMode` / `permissions.defaultMode=default` 正常弹确认框并执行，模拟网关修好后两种 auto mode 配置都能正常执行；**Sonnet 钉档线上实测（09-29，v0.1.4）**：Claude Code 2.1.284 的 `--model sonnet` / `sonnet[1m]` 经真实网关都返回 OK，删掉钉档后同一命令报 "There's an issue with the selected model (claude-sonnet-5-5)" |
+| macOS 26（Node 24） | v0.5.0：还没有跑（推送后由 GitHub Actions 的 macOS 机器跑）；v0.4.0：自动化测试 73/73、伪终端交互 6 种共 52 项（临时目录 + 模拟网关）；v0.3.0：68/68；v0.2.0：58/58；更早的版本：真实 Claude Code 2.1.260 / 2.1.282 / 2.1.283 |
+| Windows（GitHub Actions 的 Windows Server 虚拟机，Node 22） | v0.5.0：还没有跑（推送后由 GitHub Actions 跑；`setup.ps1` 的改动只在那里能验证）；v0.4.0：自动化测试 62 项（另 11 项只适用于 macOS / Linux）；`setup.ps1` 在 PowerShell 5.1 和 7 下实跑 18/18。还没有在 Windows 10 / 11 桌面实机和编辑器扩展里用过 |
 
 ## 开发
 
@@ -161,7 +163,8 @@ npm run build             # 生成 dist/setup.sh、dist/setup.ps1、dist/evolink
 ```
 
 - **不要在自己的工作电脑上用真实家目录跑 `setup`**：它会立刻接管这台电脑上所有的 Claude Code，包括编辑器里已经打开的会话。手动试用请用临时家目录（工具会标明"测试模式"，并给出带 `HOME=…` 的命令），或者用单独的测试机。
-- 改版本号：改 `bin/evolink.mjs` 里的 `VERSION`、`package.json`，以及本文开头"测试阶段"那一行，然后重新 build。
-- 推荐模型列表：在 `bin/evolink.mjs` 的 `RECOMMENDED_MODELS`（Claude Code）和 `RECOMMENDED_CODEX_MODELS`（Codex）里维护，会按 Key 实际可用的模型过滤。
+- 改版本号：改 `bin/evolink.mjs` 里的 `VERSION`、`package.json`，以及本文开头"当前版本"那一行，然后重新 build。
+- 推荐模型列表：Claude Code 的菜单按系列列出（`bin/evolink.mjs` 的 `RECOMMENDED_MODELS`：Sonnet、Opus、Fable、Haiku），每个系列自动取这把 Key 能用的最新型号，出了新型号不用改代码；Codex 的在 `RECOMMENDED_CODEX_MODELS` 里按型号维护，会按 Key 实际可用的模型过滤。
+- 命令名：统一写 `evolink-config`（源码里的 `TOOL_NAME`）。不要在提示里写成 `evolink`，那是 npm 上另一个工具的命令。
 - 模拟网关：`node test/mock-server.mjs <端口> <Key>`，返回格式与 EvoLink 网关一致。
 - 发布脚本：`npm run build` 之后，把 `dist/setup.sh`、`dist/setup.ps1`、`dist/SHA256SUMS` 上传到 `cdn.evolink.ai/cli/`。

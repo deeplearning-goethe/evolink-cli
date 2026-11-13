@@ -1,5 +1,5 @@
 // Runs the real, locally installed Claude Code against the mock gateway, in a throwaway HOME,
-// with the settings written by `evolink setup`. Confirms Claude Code picks the config up.
+// with the settings written by `evolink-config setup`. Confirms Claude Code picks the config up.
 //
 //   node test/real_claude_check.mjs [path-to-claude]
 //
@@ -31,7 +31,9 @@ function run(cmd, args, env, timeoutMs = 90000) {
   });
 }
 
-const gw = await startMockGateway({ keys: { [KEY.slice(3)]: {} } });
+// This key has no claude-sonnet-5-5, which is what Claude Code itself sends for the "sonnet" alias: the alias check
+// below only proves something when the pin differs from that.
+const gw = await startMockGateway({ keys: { [KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001', 'claude-haiku-5-5', 'gpt-6-luna'] } } });
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'evolink-real-claude-'));
 const baseEnv = { HOME: home, PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`, LANG: 'en_US.UTF-8', TERM: 'xterm-256color' };
 
@@ -41,7 +43,7 @@ const setup = await run(process.execPath, [CLI, 'setup', '--yes', '--no-install'
   EVOLINK_API_KEY: KEY,
   EVOLINK_BASE_URL: gw.url,
 });
-console.log(`evolink setup exit=${setup.code}`);
+console.log(`evolink-config setup exit=${setup.code}`);
 
 const before = gw.requests.length;
 // Stale key in the shell environment, as left behind by an old tutorial or another vendor.

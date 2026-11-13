@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// EvoLink CLI: one-command setup for Claude Code and Codex on EvoLink.
+// evolink-config: one-command API setup for Claude Code and Codex on EvoLink.
 // Zero dependencies. Requires Node.js >= 18. macOS / Linux / Windows.
+// (The `evolink` command is a different tool: the media CLI published on npm as @evolinkai/cli.)
 //
-//   evolink setup [codex]    configure Claude Code (default) or the Codex CLI
-//   evolink doctor [codex]   read-only diagnostics plus a redacted report for support
-//   evolink reset [codex]    undo the changes made by `evolink setup`
+//   evolink-config setup [codex]    configure Claude Code (default) or the Codex CLI
+//   evolink-config doctor [codex]   read-only diagnostics plus a redacted report for support
+//   evolink-config reset [codex]    undo the changes made by `evolink-config setup`
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,11 @@ import readline from 'node:readline';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-export const VERSION = '0.4.0';
+export const VERSION = '0.5.0';
+// The command name shown in help and messages, and the name of the launcher that setup.sh / setup.ps1 install.
+export const TOOL_NAME = 'evolink-config';
+// Written into files this tool creates, so a reader can find out what made them.
+const DOCS_URL = 'https://evolink.ai/docs/en/integration-guide/quick-setup';
 export const DEFAULT_BASE_URL = 'https://direct.evolink.ai';
 export const DEFAULT_MAX_OUTPUT_TOKENS = 0; // 0 = leave unset (Claude Code's own default); --max-output-tokens 32000 lowers the per-request hold
 const LOW_BALANCE_CREDITS = 50;
@@ -23,12 +28,14 @@ const REGISTRIES = { npmjs: 'https://registry.npmjs.org', npmmirror: 'https://re
 const DASHBOARD_KEYS_URL = 'https://evolink.ai/dashboard/keys';
 const EVOLINK_HOSTS = /(^|\.)evolink\.ai$/i;
 
-// Models offered in the interactive picker, filtered by what the key can use.
+// Model families offered in the interactive picker. The picker lists the newest model of each family that the key can
+// use (see recommendedModels), so a new release shows up without a change here. `id` is only what is listed when the
+// key's model list is unknown (--skip-checks).
 export const RECOMMENDED_MODELS = [
-  { id: 'claude-sonnet-5', zh: '性价比高，适合日常编程', en: 'best value for everyday coding' },
-  { id: 'claude-opus-5-5', zh: '更强，单价和单次预扣都更高', en: 'stronger; higher price and per-request hold' },
-  { id: 'claude-fable-5-1', zh: '推理最强，价格最高', en: 'strongest reasoning; most expensive' },
-  { id: 'claude-haiku-4-5-20251001', zh: '最便宜、最快，适合轻量任务', en: 'cheapest and fastest' },
+  { family: 'sonnet', id: 'claude-sonnet-5-5', zh: '性价比高，适合日常编程', en: 'best value for everyday coding' },
+  { family: 'opus', id: 'claude-opus-5-5', zh: '更强，单价和单次预扣都更高', en: 'stronger; higher price and per-request hold' },
+  { family: 'fable', id: 'claude-fable-5-2', zh: '推理最强，价格最高', en: 'strongest reasoning; most expensive' },
+  { family: 'haiku', id: 'claude-haiku-5-5', zh: '最便宜、最快，适合轻量任务', en: 'cheapest and fastest' },
 ];
 
 // Variables that pick models; a value the key cannot use breaks every request of that tier.
@@ -260,14 +267,34 @@ export function suggestModel(input, ids) {
 export function pickTestModel(preferred, ids) {
   if (preferred && ids.has(preferred)) return preferred;
   const claude = [...ids].filter((i) => i.startsWith('claude-'));
-  return claude.find((i) => i.includes('haiku')) || claude.find((i) => i.includes('sonnet')) || claude[0] || null;
+  // The newest Haiku is the cheapest request there is; any other Haiku still beats a pricier family.
+  return pickNewestClaude('haiku', ids) || claude.find((i) => i.includes('haiku')) || pickNewestClaude('sonnet', ids) || claude.find((i) => i.includes('sonnet')) || claude[0] || null;
 }
 
 // Newest "claude-sonnet-*" the key can use: 5-5 > 5 > 4-6 > 4-5-20250929 > 4-20250514; null when there is none.
 export function pickSonnetPin(ids) {
+  return pickNewestClaude('sonnet', ids);
+}
+
+// What the interactive picker offers: for each family, the newest model the key can use. When the key's models are
+// unknown (ids empty or missing) the ids listed in RECOMMENDED_MODELS are offered as they are.
+export function recommendedModels(ids) {
+  const known = !!ids && ids.size > 0;
+  const out = [];
+  for (const m of RECOMMENDED_MODELS) {
+    const id = known ? pickNewestClaude(m.family, ids) : m.id;
+    if (id) out.push({ id, zh: m.zh, en: m.en });
+  }
+  return out;
+}
+
+// Newest "claude-<family>-*" id in the set, by version number; null when there is none. Only plain ids count
+// (claude-<family>-<major>[-<minor>][-<date>]), so previews and variants with a word suffix are never picked.
+export function pickNewestClaude(family, ids) {
+  const re = new RegExp(`^claude-${family}-(\\d+)((?:-\\d+)*)$`);
   let best = null;
   for (const id of ids) {
-    const m = /^claude-sonnet-(\d+)((?:-\d+)*)$/.exec(id);
+    const m = re.exec(id);
     if (!m) continue;
     const rest = m[2].split('-').filter(Boolean);
     const minor = rest.length && rest[0].length <= 2 ? Number(rest[0]) : 0; // a 6+ digit segment is a date, not a minor version
@@ -941,7 +968,7 @@ function conflictText(hit, level) {
 // EvoLink API
 
 async function http(method, url, { key, body, timeout = 15000, headers = {} } = {}) {
-  const h = { 'user-agent': `evolink-cli/${VERSION}`, ...headers };
+  const h = { 'user-agent': `${TOOL_NAME}/${VERSION}`, ...headers };
   if (key) h.authorization = `Bearer ${key}`;
   if (body !== undefined) h['content-type'] = 'application/json';
   const started = Date.now();
@@ -958,7 +985,7 @@ async function http(method, url, { key, body, timeout = 15000, headers = {} } = 
     try {
       json = JSON.parse(text);
     } catch {}
-    return { status: res.status, ok: res.status >= 200 && res.status < 300, json, text, ms: Date.now() - started };
+    return { status: res.status, ok: res.status >= 200 && res.status < 300, json, text, ms: Date.now() - started, retryAfter: res.headers.get('retry-after') };
   } catch (error) {
     return { status: 0, ok: false, error, ms: Date.now() - started };
   }
@@ -1001,7 +1028,12 @@ export function describeFailure(r) {
   if (r.status === 402 || /insufficient|余额不足|预扣|pre-?consume|quota/i.test(message)) return { kind: 'balance', status: r.status, message };
   if (r.status === 403) return { kind: 'forbidden', status: 403, message };
   if (r.status === 404) return { kind: /model/i.test(message) ? 'model' : 'not_found', status: 404, message };
-  if (r.status === 429) return { kind: 'rate', status: 429, message };
+  if (r.status === 429) {
+    // The gateway allows a few key checks per minute (11-13 live test: GET /v1/models, 5 a minute) and says how long
+    // to wait, in the Retry-After header and in the message. "Try again shortly" sends people straight into the next 429.
+    const said = /^\d+$/.test(String(r.retryAfter ?? '').trim()) ? Number(r.retryAfter) : Number(/retry after (\d+) seconds?/i.exec(message)?.[1]);
+    return { kind: 'rate', status: 429, message, ...(said >= 1 && said <= 3600 ? { retryAfter: said } : {}) };
+  }
   if (r.status >= 500) return { kind: 'server', status: r.status, message };
   return { kind: 'http', status: r.status, message };
 }
@@ -1035,7 +1067,7 @@ function failureLines(f, base) {
     case 'model':
       return [L(`模型不可用（${f.message}）。`, `Model not available (${f.message}).`)];
     case 'rate':
-      return [L('请求太频繁（429），稍后再试。', 'Rate limited (429); try again shortly.')];
+      return [f.retryAfter ? L(`请求太频繁（429），请等 ${f.retryAfter} 秒后再试。`, `Rate limited (429); try again in ${f.retryAfter} seconds.`) : L('请求太频繁（429），稍后再试。', 'Rate limited (429); try again shortly.')];
     case 'server':
       return [L(`服务端暂时出错（${f.status}），稍后再试。`, `Server error (${f.status}); try again shortly.`)];
     case 'timeout':
@@ -1226,10 +1258,10 @@ function commandHint(sandbox) {
   const untilde = (s) => (sandbox && /^~(?=\/|$)/.test(s) ? os.homedir() + s.slice(1) : s);
   if (process.env.EVOLINK_CMD) return untilde(process.env.EVOLINK_CMD);
   const self = process.argv[1] || '';
-  if (/[\\/]_npx[\\/]/.test(self)) return 'npx -y @evolinkai/cli';
-  if (which('evolink').length) return 'evolink';
+  // Never the bare `evolink`: on PATH that name belongs to the media CLI from npm (@evolinkai/cli), a different tool.
+  if (which(TOOL_NAME).length) return TOOL_NAME;
   // Started through the launcher that setup.sh installed: point at the launcher, not the file behind it.
-  const launcher = path.join(evolinkHome(), 'bin', 'evolink');
+  const launcher = path.join(evolinkHome(), 'bin', TOOL_NAME);
   if (process.platform !== 'win32' && realpathOr(self) === realpathOr(path.join(evolinkHome(), 'cli', 'evolink.mjs')) && isFile(launcher)) {
     return sandbox ? launcher : tildify(launcher);
   }
@@ -1383,7 +1415,7 @@ async function cmdSetup(opts) {
     }
   }
   result.ok = !result.test || result.test.ok;
-  printNextSteps({ plan, claude, editors: plan.vscode.length ? editors : [], trusted: trustDirs.length > 0, sandbox });
+  printNextSteps({ plan, claude, editors: plan.vscode.length ? editors : [], trusted: trustDirs.length > 0, sandbox, autoMode: opts.autoMode === true });
   return finish(result, opts, result.ok ? EXIT.OK : EXIT.AUTH);
 }
 
@@ -1611,8 +1643,8 @@ async function decideModel(opts, interactive, settings, ids, shellModel) {
     note: L('一般是最新的 Opus：最强，但单价和单次预扣最高', 'usually the latest Opus: strongest, highest price and hold'),
     value: { action: current ? 'default' : 'keep' },
   });
-  for (const m of RECOMMENDED_MODELS) {
-    if ((known && !ids.has(m.id)) || m.id === current) continue;
+  for (const m of recommendedModels(ids)) {
+    if (m.id === current) continue;
     options.push({ label: m.id, note: L(m.zh, m.en), value: { action: 'set', model: m.id } });
   }
   options.push({ label: L('手动输入模型 ID', 'Type a model ID'), value: { action: 'input' } });
@@ -1677,6 +1709,11 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
   const maxOut = Number(opts.maxOutputTokens);
   if (maxOut > 0) set.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(maxOut);
   if (opts.disableNonessentialTraffic === true) set.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = '1';
+  // With auto mode on, Claude Code first asks the server to review each command. Through a gateway that gives no
+  // result, so it falls back to review requests of its own and shows a notice that holds the first reviewed command.
+  // "0" skips the asking: no notice, the same review requests at the same cost (11-12 live test). Claude Code documents
+  // the variable as temporary; if a later release drops it, only the notice comes back.
+  if (opts.autoMode === true) set.CLAUDE_CODE_AUTO_MODE_SERVER = '0';
   const remove = [];
   if (decision.action === 'set') set.ANTHROPIC_MODEL = decision.model;
   if (decision.action === 'default') remove.push('ANTHROPIC_MODEL');
@@ -1705,10 +1742,15 @@ function buildPlan({ opts, base, key, ids, decision, conflicts, settingsRead, pa
   if (hasOwn(settings, 'model') && known && !modelAvailable(settings.model, ids)) {
     topChanges.push({ key: 'model', before: settings.model, after: undefined, changed: true });
   }
-  // Claude Code 2.1.283+ starts in auto mode, whose review requests EvoLink cannot serve yet (09-28 live test:
-  // every reviewed action is blocked after 4 billed retries). Keep users in the classic prompt mode until the gateway is fixed.
+  // Claude Code 2.1.283+ starts in auto mode. Through a gateway its server-side review is not available, so Claude Code
+  // sends a review request of its own for every reviewed command, on Sonnet 5, billed to the key (11-12 live test: about
+  // 47K input tokens each). Off by default so that nobody pays for requests they did not ask for; --auto-mode leaves it on.
   if (opts.autoMode !== true && settings.disableAutoMode !== 'disable') {
     topChanges.push({ key: 'disableAutoMode', before: settings.disableAutoMode, after: 'disable', changed: true });
+  }
+  // --auto-mode also takes back the switch an earlier run wrote, or auto mode would stay off.
+  if (opts.autoMode === true && settings.disableAutoMode === 'disable') {
+    topChanges.push({ key: 'disableAutoMode', before: 'disable', after: undefined, changed: true });
   }
 
   const globalRead = readJson(paths.globalConfig);
@@ -1769,7 +1811,12 @@ const WHY = {
   CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: ['减少非必要请求（与文档一致；也会关掉自动更新）', 'fewer background requests (also turns off auto-update)'],
   ANTHROPIC_MODEL: ['默认模型', 'default model'],
   ANTHROPIC_DEFAULT_SONNET_MODEL: ['/model 里的 Sonnet 用它：这把 Key 能用的最新 Sonnet，Claude Code 以后换默认 Sonnet 也不会选到 EvoLink 还没有的模型', 'used for the Sonnet alias: the newest Sonnet this key can use, so a later Claude Code default EvoLink lacks cannot break it'],
-  disableAutoMode: ['先关掉 auto mode：EvoLink 暂不支持它的审核请求，开着会被拦并计费；网关修好后重跑 setup --auto-mode 即可恢复', 'auto mode off for now: EvoLink cannot serve its review requests yet (actions get blocked and billed); re-run setup --auto-mode once the gateway supports it'],
+  CLAUDE_CODE_AUTO_MODE_SERVER: ['auto mode 直接用 Claude Code 自己的审核请求，不再弹"此会话不符合条件"的英文提示；费用不变', 'auto mode goes straight to Claude Code\'s own review requests, without the "this session isn\'t eligible" notice; same cost'],
+  disableAutoMode: ['关闭 auto mode：开着时每条要审核的命令都会多发一次审核请求，按 token 计费；想开就重跑 setup --auto-mode', 'auto mode off: with it on, every reviewed command sends one more review request, billed by tokens; re-run setup --auto-mode to turn it on'],
+};
+// For the one top-level key that --auto-mode takes away again.
+const WHY_REMOVED = {
+  disableAutoMode: ['恢复 auto mode（--auto-mode）：每条要审核的命令会多发一次审核请求，按 token 计费', 'auto mode back on (--auto-mode): every reviewed command sends one more review request, billed by tokens'],
 };
 
 function printPlan(plan) {
@@ -1786,7 +1833,10 @@ function printPlan(plan) {
   }
   for (const c of s.topChanges) {
     if (c.key === 'model') ui.print(`    model  ${c.before} → ${L('（删除：这把 Key 用不了）', '(removed: not usable with this key)')}`);
-    else ui.print(`    ${c.key}  ${displayValue('', c.before)} → ${displayValue('', c.after)}${WHY[c.key] ? ui.dim(`  ${L(...WHY[c.key])}`) : ''}`);
+    else {
+      const why = c.after === undefined ? WHY_REMOVED[c.key] : WHY[c.key];
+      ui.print(`    ${c.key}  ${displayValue('', c.before)} → ${displayValue('', c.after)}${why ? ui.dim(`  ${L(...why)}`) : ''}`);
+    }
   }
   if (changed.length) ui.print(ui.dim(`    ${L('其余配置保持不变', 'everything else is kept')}`));
   if (plan.global.changes.length || plan.global.skipped) {
@@ -1903,7 +1953,7 @@ async function fixExecutionPolicy(interactive) {
   ui.info(L('不改也可以：在 PowerShell 里用 claude.cmd 代替 claude，或者在 CMD 里运行 claude。', 'Alternatively run claude.cmd instead of claude in PowerShell, or use CMD.'));
 }
 
-function printNextSteps({ plan, claude, editors, trusted, sandbox }) {
+function printNextSteps({ plan, claude, editors, trusted, sandbox, autoMode = false }) {
   const cmd = sandboxPrefix(sandbox) + commandHint(sandbox);
   ui.print('');
   ui.title(`${ui.mark('ok')} ${L('配置完成', 'All set')}`);
@@ -1939,6 +1989,14 @@ function printNextSteps({ plan, claude, editors, trusted, sandbox }) {
     ui.print(`  ${ui.mark('dot')} ${L(`想在 ${missing.join(' / ')} 里用 Claude Code：在编辑器里打开 ${link} 安装扩展，或重新运行 setup 并加 --install-extension`, `To use Claude Code in ${missing.join(' / ')}: open ${link} in the editor to install the extension, or re-run setup with --install-extension`)}`);
   }
   if (claude.installed && claude.version) ui.print(`  ${ui.mark('dot')} ${L('用 claude update 可以手动更新 Claude Code。', 'Update Claude Code any time with: claude update')}`);
+  if (!autoMode) {
+    ui.print(
+      `  ${ui.mark('dot')} ${L(
+        `auto mode 已关闭：Claude Code 执行命令前会先问你。想让它自动执行（每条要审核的命令会多发一次计费的审核请求）：${cmd} setup --auto-mode`,
+        `Auto mode is off: Claude Code asks before it runs a command. To let it run on its own (every reviewed command then sends one more billed review request): ${cmd} setup --auto-mode`,
+      )}`,
+    );
+  }
   ui.print('');
   ui.print(`  ${L('撤销本次配置：', 'Undo these changes: ')}${cmd} reset`);
   ui.print(`  ${L('遇到问题：运行 ', 'Having trouble? Run ')}${cmd} doctor${L('，把输出发给客服（Key 会自动隐去）', ' and send the output to support (your key is hidden)')}`);
@@ -2258,12 +2316,13 @@ export function upsertTomlTable(text, name, entries, comment = null) {
 
 // Replaces a [table] (header to last key) with exact lines, or removes it with `lines = null`; a comment line equal to
 // `comment` right above the header and one blank line around it go too.
+// `comment`: the marker line written above the table, or several accepted spellings of it; it goes with the table.
 export function replaceTomlTable(text, name, lines, comment = null) {
   const doc = tomlDoc(text);
   const t = tomlFindTable(doc.sts, name);
   if (!t) return String(text ?? '');
   let a = t.start;
-  if (comment && a > 0 && doc.lines[a - 1].t === comment) a--;
+  if (comment && a > 0 && [].concat(comment).includes(doc.lines[a - 1].t)) a--;
   if (lines) {
     tomlSplice(doc, a, t.end, lines);
     return tomlText(doc);
@@ -2291,7 +2350,7 @@ export function tomlTableConflicts(text, name) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex CLI: `evolink setup codex` writes a separate profile, so `codex -p evolink` goes through EvoLink while a
+// Codex CLI: `evolink-config setup codex` writes a separate profile, so `codex -p evolink` goes through EvoLink while a
 // plain `codex` keeps the user's own setup. The main config.toml is never touched in this mode.
 
 const CODEX_PKG = '@openai/codex';
@@ -2349,8 +2408,8 @@ const CODEX_PROVIDER_TABLE = `model_providers.${CODEX_PROVIDER}`;
 // Written in one piece: setup's keys and provider table, then whatever else the file held (`kept`, from splitCodexProfile).
 export function renderCodexProfile({ base, key, model, reviewer = null, kept = { top: '', tables: '' } }) {
   const lines = [
-    '# EvoLink profile for Codex, written by `evolink setup codex` (https://github.com/deeplearning-goethe/evolink-cli).',
-    `# Start Codex with:  codex -p ${CODEX_PROFILE}        Undo:  evolink reset codex`,
+    `# EvoLink profile for Codex, written by \`evolink-config setup codex\` (${DOCS_URL}).`,
+    `# Start Codex with:  codex -p ${CODEX_PROFILE}        Undo:  evolink-config reset codex`,
     '# Your own config.toml is not changed. This file holds your EvoLink key: keep it private.',
     `model = ${tomlString(model)}`,
     `model_provider = ${tomlString(CODEX_PROVIDER)}`,
@@ -2585,13 +2644,15 @@ function applyCodexPlan(plan) {
 }
 
 // ---------------------------------------------------------------------------
-// Codex in VS Code: `evolink setup codex --vscode`. The extension (openai.chatgpt) runs its bundled `codex app-server`,
+// Codex in VS Code: `evolink-config setup codex --vscode`. The extension (openai.chatgpt) runs its bundled `codex app-server`,
 // which reads only the main config.toml, never a profile, so EvoLink becomes the model provider there. A custom
 // provider needs no OpenAI sign-in: app-server answers account/read with requiresOpenaiAuth = false and the extension
 // skips its login page (Codex 0.159.2 source and live test, 10-01). A plain `codex` then uses EvoLink as well.
 
 const CODEX_PROVIDER_PATH = ['model_providers', CODEX_PROVIDER];
-const CODEX_VSCODE_MARK = '# EvoLink, added by `evolink setup codex --vscode` (undo: evolink reset codex)';
+const CODEX_VSCODE_MARK = '# EvoLink, added by `evolink-config setup codex --vscode` (undo: evolink-config reset codex)';
+// What versions up to 0.4.0 wrote, when the command was still called `evolink`: reset has to take this line away too.
+const CODEX_VSCODE_MARK_LEGACY = '# EvoLink, added by `evolink setup codex --vscode` (undo: evolink reset codex)';
 const AUTO_REVIEWERS = new Set(['auto_review', 'guardian_subagent']);
 
 // What the VS Code mode looks at in config.toml (null: not set). `error` when the file is not valid TOML.
@@ -2669,7 +2730,7 @@ export function planCodexMainRestore(text, rec) {
   if (rec.table) {
     const cur = readTomlTable(t, CODEX_PROVIDER_PATH);
     if (cur && codexTableSignature(cur.pairs) === rec.table.after) {
-      t = replaceTomlTable(t, CODEX_PROVIDER_PATH, rec.table.existed ? rec.table.before : null, CODEX_VSCODE_MARK);
+      t = replaceTomlTable(t, CODEX_PROVIDER_PATH, rec.table.existed ? rec.table.before : null, [CODEX_VSCODE_MARK, CODEX_VSCODE_MARK_LEGACY]);
       restored.push(`[${CODEX_PROVIDER_TABLE}]`);
       keyRemoved = true;
     } else if (cur) skipped.push(`[${CODEX_PROVIDER_TABLE}]`);
@@ -3148,7 +3209,7 @@ async function resetCodex(opts) {
   const cx = state.codex;
   ui.title(L(`EvoLink 撤销配置 · Codex v${VERSION}`, `EvoLink reset · Codex v${VERSION}`));
   if (!cx || (!Object.keys(cx.files || {}).length && !cx.config)) {
-    ui.info(L('没有找到 evolink setup codex 的改动记录，无需撤销。', 'No changes recorded by evolink setup codex; nothing to undo.'));
+    ui.info(L('没有找到 evolink-config setup codex 的改动记录，无需撤销。', 'No changes recorded by evolink-config setup codex; nothing to undo.'));
     return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   const actions = [];
@@ -3223,7 +3284,7 @@ async function resetCodex(opts) {
 }
 
 // ---------------------------------------------------------------------------
-// VS Code Chat (Copilot) custom endpoint: `evolink setup copilot` adds an "EvoLink" provider group to VS Code's
+// VS Code Chat (Copilot) custom endpoint: `evolink-config setup copilot` adds an "EvoLink" provider group to VS Code's
 // chatLanguageModels.json. VS Code takes the group's key only from its own secret storage: a key written into the file
 // is ignored (VS Code 1.140 source and UI test, 10-01), so the key is pasted once in VS Code ("Update API Key").
 // Needs no GitHub sign-in and no Copilot plan; VS Code picks changes to the file up without a reload.
@@ -3567,7 +3628,7 @@ async function resetCopilot(opts) {
   const cp = state.copilot;
   ui.title(L(`EvoLink 撤销配置 · VS Code Chat v${VERSION}`, `EvoLink reset · VS Code Chat v${VERSION}`));
   if (!cp || !Object.keys(cp.files || {}).length) {
-    ui.info(L('没有找到 evolink setup copilot 的改动记录，无需撤销。', 'No changes recorded by evolink setup copilot; nothing to undo.'));
+    ui.info(L('没有找到 evolink-config setup copilot 的改动记录，无需撤销。', 'No changes recorded by evolink-config setup copilot; nothing to undo.'));
     return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   const actions = [];
@@ -3645,7 +3706,7 @@ async function cmdDoctor(opts) {
   } else problem(L('没有找到 Claude Code', 'Claude Code is not installed'));
   if (process.platform === 'win32' && claude.npmShim) {
     const policy = windowsExecutionPolicy();
-    if (policy && RESTRICTIVE_POLICIES.has(policy)) warn(L(`PowerShell 执行策略是 ${policy}，claude.ps1 会被拦下；可用 claude.cmd 或运行 evolink setup 修复`, `PowerShell policy ${policy} blocks claude.ps1; use claude.cmd or re-run setup`));
+    if (policy && RESTRICTIVE_POLICIES.has(policy)) warn(L(`PowerShell 执行策略是 ${policy}，claude.ps1 会被拦下；可用 claude.cmd 或运行 evolink-config setup 修复`, `PowerShell policy ${policy} blocks claude.ps1; use claude.cmd or re-run setup`));
   }
   report.summary.push(`evolink-doctor ${VERSION} | ${osl} | node ${process.versions.node} | claude ${claude.installed ? claude.version || '?' : 'missing'}${latest ? ` (latest ${latest})` : ''}`);
 
@@ -3679,8 +3740,8 @@ async function cmdDoctor(opts) {
   else ui.info(L('没设 CLAUDE_CODE_MAX_OUTPUT_TOKENS（默认不设）：Opus 等模型单次预扣较高，余额少时可重新运行 setup --max-output-tokens 32000', 'CLAUDE_CODE_MAX_OUTPUT_TOKENS not set (the default); pricey models hold more credits per request, re-run setup --max-output-tokens 32000 if credits are low'));
   if (env.ANTHROPIC_MODEL) ui.info(`ANTHROPIC_MODEL = ${env.ANTHROPIC_MODEL}`);
   const autoModeOff = sr.data?.disableAutoMode === 'disable';
-  if (autoModeOff) ui.ok(L('auto mode 已关闭（EvoLink 暂不支持它的审核请求）', 'auto mode is off (EvoLink cannot serve its review requests yet)'));
-  else warn(L('auto mode 没有关闭：Claude Code 2.1.283 起默认开启，走 EvoLink 时需要审核的命令会被拦下并计费；重新运行 setup 可关闭', 'auto mode is not turned off: Claude Code 2.1.283+ starts in auto mode, and through EvoLink reviewed commands get blocked and billed; re-run setup to turn it off'));
+  if (autoModeOff) ui.ok(L('auto mode 已关闭（开着时每条要审核的命令会多发一次计费的审核请求；重新运行 setup --auto-mode 可开启）', 'auto mode is off (with it on, every reviewed command sends one more billed review request; re-run setup --auto-mode to turn it on)'));
+  else ui.info(L('auto mode 没有关闭（Claude Code 2.1.283 起默认开启）：每条要审核的命令会多发一次审核请求，按 token 计费；不需要的话重新运行 setup 可关闭', 'auto mode is not turned off (Claude Code 2.1.283+ starts in it): every reviewed command sends one more review request, billed by tokens; re-run setup to turn it off'));
   for (const v of PROVIDER_VARS) if (truthy(env[v])) problem(L(`settings.json 里 ${v}=${env[v]}：Claude Code 会改走其他云，EvoLink 不生效`, `settings.json sets ${v}=${env[v]}; EvoLink is bypassed`));
   const credential = token || apiKey || null;
   report.summary.push(`settings: base=${baseUrl || '-'} token=${token ? maskKey(token) : '-'} api_key=${apiKey === '' ? '""' : apiKey ? maskKey(apiKey) : '-'} maxout=${env.CLAUDE_CODE_MAX_OUTPUT_TOKENS || '-'} model=${env.ANTHROPIC_MODEL || '-'} sonnet=${env.ANTHROPIC_DEFAULT_SONNET_MODEL || '-'} automode=${autoModeOff ? 'off' : 'on'}`);
@@ -3814,7 +3875,7 @@ async function resetClaude(opts) {
   const cc = state.claudeCode;
   ui.title(L(`EvoLink 撤销配置 v${VERSION}`, `EvoLink reset v${VERSION}`));
   if (!cc) {
-    ui.info(L('没有找到 evolink setup 的改动记录，无需撤销。', 'No changes recorded by evolink setup; nothing to undo.'));
+    ui.info(L('没有找到 evolink-config setup 的改动记录，无需撤销。', 'No changes recorded by evolink-config setup; nothing to undo.'));
     return { result: { ok: true, changes: [] }, code: EXIT.OK };
   }
   const settingsFile = cc.settingsFile || claudePaths().settings;
@@ -3936,25 +3997,25 @@ export function parseArgs(argv) {
 
 function helpText() {
   return L(
-    `EvoLink 命令行工具 v${VERSION}：一键把 Claude Code / Codex 接到 EvoLink
+    `evolink-config v${VERSION}：一条命令把 Claude Code / Codex 接到 EvoLink 的 API
 
 用法：
-  evolink [setup]      配置 Claude Code（默认命令）
-  evolink setup codex  配置 Codex 命令行：新建独立配置档，用 codex -p evolink 启动，不动你原来的 config.toml
-  evolink setup codex --vscode  配置 VS Code 等编辑器里的 Codex 扩展：修改 config.toml（终端里直接运行 codex 也会走 EvoLink），默认顺便装上扩展
-  evolink setup copilot  在 VS Code 内置的 Chat 里加一组 EvoLink 模型（不需要 GitHub 账号）；Key 要在 VS Code 里粘贴一次
-  evolink doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex、Chat 用 evolink doctor codex / copilot
-  evolink reset        撤销 setup 做的改动（只撤销某一项：evolink reset codex / copilot）
+  evolink-config [setup]      配置 Claude Code（默认命令）
+  evolink-config setup codex  配置 Codex 命令行：新建独立配置档，用 codex -p evolink 启动，不动你原来的 config.toml
+  evolink-config setup codex --vscode  配置 VS Code 等编辑器里的 Codex 扩展：修改 config.toml（终端里直接运行 codex 也会走 EvoLink），默认顺便装上扩展
+  evolink-config setup copilot  在 VS Code 内置的 Chat 里加一组 EvoLink 模型（不需要 GitHub 账号）；Key 要在 VS Code 里粘贴一次
+  evolink-config doctor       诊断当前配置，输出可以直接发给客服（Key 已隐去）；Codex、Chat 用 evolink-config doctor codex / copilot
+  evolink-config reset        撤销 setup 做的改动（只撤销某一项：evolink-config reset codex / copilot）
 
 常用选项：
-  --model <id>         默认模型，如 claude-sonnet-5（Codex 如 gpt-6-sol）；default 表示跟随 Claude Code 默认
+  --model <id>         默认模型，如 claude-sonnet-5-5（Codex 如 gpt-6.1-sol）；default 表示跟随 Claude Code 默认
   --yes, -y            不提问，全部用默认值（Key 从环境变量 EVOLINK_API_KEY 读取）
   --key-stdin          从标准输入读取 Key
   --dry-run            只预览改动，不写文件
   --trust <文件夹>      预先信任这个文件夹，首次启动不再询问（macOS / Linux）
   --max-output-tokens <n>  单次输出上限，默认不设置（跟随 Claude Code）；余额少时建议 32000，可降低单次预扣
   --disable-nonessential-traffic  关闭自动更新、遥测等非必要请求（默认不关）
-  --auto-mode          不关闭 Claude Code 的 auto mode（默认关闭：EvoLink 暂不支持它的审核请求）
+  --auto-mode          保留 Claude Code 的 auto mode（默认关闭：开着时每条要审核的命令都会多发一次审核请求，按 token 计费）
   --no-pin-sonnet      不把 /model 里的 Sonnet 钉到这把 Key 能用的最新 Sonnet（默认钉住：Claude Code 换默认 Sonnet 时，EvoLink 可能晚一两天才有）
   --no-install         没装 Claude Code（或 Codex）时不自动安装
   --install-extension  顺便给 VS Code / Cursor 等编辑器装上 Claude Code 扩展（默认不装：终端里的 claude 用不到它）
@@ -3972,25 +4033,25 @@ function helpText() {
 
 环境变量：EVOLINK_API_KEY、EVOLINK_BASE_URL、CLAUDE_CONFIG_DIR
 所有改动前都会备份到 ~/.evolink/backups/。`,
-    `EvoLink CLI v${VERSION}: connect Claude Code or Codex to EvoLink in one command
+    `evolink-config v${VERSION}: connect Claude Code or Codex to the EvoLink API in one command
 
 Usage:
-  evolink [setup]      configure Claude Code (default)
-  evolink setup codex  configure the Codex CLI: a separate profile, started with codex -p evolink; your config.toml is left alone
-  evolink setup codex --vscode  configure the Codex extension in VS Code and similar editors: changes config.toml (a plain codex then uses EvoLink too) and installs the extension
-  evolink setup copilot  add a group of EvoLink models to VS Code's built-in Chat (no GitHub account needed); paste the key once in VS Code
-  evolink doctor       diagnose the setup; output is safe to send to support (Codex / Chat: evolink doctor codex / copilot)
-  evolink reset        undo what setup changed (one part only: evolink reset codex / copilot)
+  evolink-config [setup]      configure Claude Code (default)
+  evolink-config setup codex  configure the Codex CLI: a separate profile, started with codex -p evolink; your config.toml is left alone
+  evolink-config setup codex --vscode  configure the Codex extension in VS Code and similar editors: changes config.toml (a plain codex then uses EvoLink too) and installs the extension
+  evolink-config setup copilot  add a group of EvoLink models to VS Code's built-in Chat (no GitHub account needed); paste the key once in VS Code
+  evolink-config doctor       diagnose the setup; output is safe to send to support (Codex / Chat: evolink-config doctor codex / copilot)
+  evolink-config reset        undo what setup changed (one part only: evolink-config reset codex / copilot)
 
 Options:
-  --model <id>         default model, e.g. claude-sonnet-5 (Codex: gpt-6-sol); "default" = Claude Code's own default
+  --model <id>         default model, e.g. claude-sonnet-5-5 (Codex: gpt-6.1-sol); "default" = Claude Code's own default
   --yes, -y            no prompts (key from EVOLINK_API_KEY)
   --key-stdin          read the key from stdin
   --dry-run            preview only
   --trust <folder>     pre-trust a folder (macOS / Linux)
   --max-output-tokens <n>  output cap, unset by default (Claude Code's own); 32000 lowers the per-request hold when credits are low
   --disable-nonessential-traffic  turn off auto-update, telemetry and other background traffic (on by default)
-  --auto-mode          keep Claude Code's auto mode on (off by default: EvoLink cannot serve its review requests yet)
+  --auto-mode          keep Claude Code's auto mode on (off by default: with it on, every reviewed command sends one more review request, billed by tokens)
   --no-pin-sonnet      do not pin the Sonnet alias to the newest Sonnet this key can use (pinned by default: when Claude Code moves the alias, EvoLink may lag a day or two)
   --no-install         do not install Claude Code (or Codex) when missing
   --install-extension  also install the Claude Code extension into VS Code, Cursor and similar editors (off by default: the terminal claude does not need it)

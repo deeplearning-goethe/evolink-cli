@@ -7,11 +7,17 @@ import http from 'node:http';
 const rid = () => `2026${Math.random().toString(36).slice(2, 14)}`;
 const authError = (message) => ({ error: { code: 'unauthorized', message: `${message} (request id: ${rid()})`, param: null, type: 'authentication_error' } });
 
+// Like the real list on 2026-11-12: every family has an older and a newer model, and the older one comes first, so
+// "first match in the list" and "newest" are not the same thing.
 export const DEFAULT_MODELS = [
+  'claude-opus-5',
   'claude-opus-5-5',
   'claude-sonnet-5',
+  'claude-sonnet-5-5',
   'claude-haiku-4-5-20251001',
+  'claude-haiku-5-5',
   'claude-fable-5-1',
+  'claude-fable-5-2',
   'claude-opus-4-5-20251101',
   'gpt-6-luna',
   'gemini-3.8-flash',
@@ -62,6 +68,11 @@ export async function startMockGateway({
       if (!k) return send(401, authError('Invalid API key'));
       if (k.status === 'expired') return send(401, authError('This API key has expired'));
       if (k.status === 'disabled') return send(401, authError('This API key has been disabled'));
+      // The gateway's per-path limit on key checks (live answer of 2026-11-13): 429, Retry-After, the wait in the message.
+      if (k.rateLimited) {
+        const message = `Rate limit exceeded for path (${req.method} ${url.pathname}): rpm=5. Retry after ${k.rateLimited} seconds. (request id: ${rid()})`;
+        return send(429, { error: { code: 'rate_limit_exceeded', message, param: null, type: 'rate_limit_error' } }, { 'retry-after': String(k.rateLimited) });
+      }
       const allowed = k.models || models;
       if (url.pathname === '/v1/models' && req.method === 'GET') {
         return send(200, {

@@ -1,14 +1,14 @@
-# EvoLink one-command setup for Claude Code and Codex (Windows PowerShell 5.1+ / PowerShell 7), version __EVOLINK_VERSION__
+# EvoLink one-command API setup for Claude Code and Codex (Windows PowerShell 5.1+ / PowerShell 7): evolink-config, version __EVOLINK_VERSION__
 #
 #   irm https://cdn.evolink.ai/cli/setup.ps1 | iex
-#   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5
+#   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) --model claude-sonnet-5-5
 #   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) codex
 #   & ([scriptblock]::Create((irm https://cdn.evolink.ai/cli/setup.ps1))) doctor
 #
-# What it does: finds Node.js (18+; offers winget if missing), saves the EvoLink CLI to
-# %USERPROFILE%\.evolink\cli, adds %USERPROFILE%\.evolink\bin\evolink.cmd, then runs `evolink setup`.
+# What it does: finds Node.js (18+; offers winget if missing), saves evolink-config to
+# %USERPROFILE%\.evolink\cli, adds %USERPROFILE%\.evolink\bin\evolink-config.cmd, then runs `evolink-config setup`.
 # It does not change PATH. This file is ASCII only; Chinese text is base64 so any download
-# encoding works. The CLI is embedded as base64 and checked against its SHA-256 before it runs.
+# encoding works. The tool is embedded as base64 and checked against its SHA-256 before it runs.
 
 function Invoke-EvoLinkSetup {
     param([Parameter(ValueFromRemainingArguments = $true)][string[]]$CliArgs)
@@ -75,8 +75,14 @@ __EVOLINK_CLI_B64__
         return
     }
     [IO.File]::WriteAllBytes($cliPath, $bytes)
-    $launcher = Join-Path $binDir 'evolink.cmd'
-    $launcherText = "@echo off`r`nrem EvoLink CLI launcher (version $version)`r`n`"$node`" `"$cliPath`" %*`r`n"
+    # Up to 0.4.0 the launcher was called evolink.cmd; "evolink" is now the name of a different tool (the media CLI
+    # on npm). Take that launcher away, but only when it is the one this script wrote.
+    $oldLauncher = Join-Path $binDir 'evolink.cmd'
+    if ((Test-Path $oldLauncher) -and ((Get-Content -Raw -Path $oldLauncher) -match 'EvoLink CLI launcher')) {
+        Remove-Item -Force -Path $oldLauncher
+    }
+    $launcher = Join-Path $binDir 'evolink-config.cmd'
+    $launcherText = "@echo off`r`nrem evolink-config launcher (version $version)`r`n`"$node`" `"$cliPath`" %*`r`n"
     [IO.File]::WriteAllText($launcher, $launcherText, (New-Object Text.UTF8Encoding $false))
 
     # 3. Run it (commands: setup / doctor / reset; setup when omitted)

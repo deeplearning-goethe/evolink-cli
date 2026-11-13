@@ -1,6 +1,6 @@
 // Runs the real, locally installed Codex CLI against the mock gateway, in throwaway HOMEs:
-//   1. with the profile written by `evolink setup codex` (codex exec -p evolink);
-//   2. with config.toml written by `evolink setup codex --vscode`: a plain `codex exec`, then `codex app-server`
+//   1. with the profile written by `evolink-config setup codex` (codex exec -p evolink);
+//   2. with config.toml written by `evolink-config setup codex --vscode`: a plain `codex exec`, then `codex app-server`
 //      started the way the VS Code extension starts it, asked whether it needs a sign-in and sent one turn.
 //
 //   node test/real_codex_check.mjs [path-to-codex] [--app-server <codex binary bundled with the extension>]
@@ -49,7 +49,7 @@ const setup = await run(process.execPath, [CLI, 'setup', 'codex', '--yes', '--no
   EVOLINK_API_KEY: KEY,
   EVOLINK_BASE_URL: gw.url,
 });
-console.log(`evolink setup codex exit=${setup.code}`);
+console.log(`evolink-config setup codex exit=${setup.code}`);
 
 const version = await run(CODEX, ['--version'], baseEnv, 30000);
 console.log(`codex --version: ${(version.out || version.err).trim()}`);
@@ -89,7 +89,7 @@ fs.mkdirSync(path.join(home2, '.codex'));
 // A setting of the user's own, which must survive: a trusted folder.
 fs.writeFileSync(path.join(home2, '.codex', 'config.toml'), '[projects."/work/app"]\ntrust_level = "trusted"\n');
 const setup2 = await run(process.execPath, [CLI, 'setup', 'codex', '--vscode', '--yes', '--no-install-extension', '--no-test'], { ...env2, NO_COLOR: '1', EVOLINK_API_KEY: KEY, EVOLINK_BASE_URL: gw.url });
-console.log(`evolink setup codex --vscode exit=${setup2.code}`);
+console.log(`evolink-config setup codex --vscode exit=${setup2.code}`);
 const before2 = gw.requests.length;
 const plain = await run(CODEX, ['exec', '--skip-git-repo-check', 'Reply with exactly: OK'], { ...env2, OPENAI_API_KEY: 'sk-stale-openai-key-000' });
 console.log(`codex exec (no -p) exit=${plain.code}`);

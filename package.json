@@ -1,8 +1,8 @@
 {
-  "name": "evolink-cli-legacy-workspace",
+  "name": "evolink-config",
   "private": true,
-  "version": "0.4.0",
-  "description": "One-command setup for Claude Code and Codex on EvoLink: checks the key and balance, writes the config safely, and can undo it.",
+  "version": "0.5.0",
+  "description": "evolink-config: one-command API setup for Claude Code and Codex on EvoLink. Checks the key and balance, writes the config safely, and can undo it.",
   "license": "MIT",
   "author": "EvoLink AI <support@evolink.ai>",
   "homepage": "https://github.com/deeplearning-goethe/evolink-cli#readme",

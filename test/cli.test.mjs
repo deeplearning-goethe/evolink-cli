@@ -17,6 +17,7 @@ const OLD_SONNET_KEY = `sk-${'Os4Sn6Et'.repeat(6)}`;
 const NEW_SONNET_KEY = `sk-${'Ns5Sn5Et'.repeat(6)}`;
 const CODEX_KEY = `sk-${'Cx7Gp6Td'.repeat(6)}`;
 const CHAT_KEY = `sk-${'Ch4Tm0Dl'.repeat(6)}`;
+const RATE_KEY = `sk-${'Rt4Lm1Td'.repeat(6)}`;
 let gw;
 
 before(async () => {
@@ -29,6 +30,7 @@ before(async () => {
       [NEW_SONNET_KEY.slice(3)]: { models: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
       [CODEX_KEY.slice(3)]: { models: ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-5.5', 'gpt-6-luna', 'gpt-image-2', 'claude-sonnet-5', 'claude-haiku-4-5-20251001'] },
       [CHAT_KEY.slice(3)]: { models: ['claude-haiku-4-5-20251001', 'gpt-6-luna', 'gpt-image-2', 'deepseek-v4-flash', 'gemini-3.1-flash-lite', 'kimi-k3'] },
+      [RATE_KEY.slice(3)]: { rateLimited: 54 },
     },
   });
 });
@@ -83,6 +85,7 @@ function runCli(args, { home, env = {}, input, cwd } = {}) {
 
 const readJson = (f) => JSON.parse(fs.readFileSync(f, 'utf8'));
 const settingsOf = (home) => readJson(path.join(home, '.claude', 'settings.json'));
+const hasKey = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 const noFullKey = (r, key = KEY) => assert.ok(!r.all.includes(key.slice(3)), 'the full key must never be printed');
 
 test('fresh setup writes settings, onboarding flag and state, then test request passes', async () => {
@@ -96,9 +99,10 @@ test('fresh setup writes settings, onboarding flag and state, then test request 
     ANTHROPIC_BASE_URL: gw.url,
     ANTHROPIC_AUTH_TOKEN: KEY,
     ANTHROPIC_API_KEY: '',
-    ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5', // Claude Code 2.1.284 sends claude-sonnet-5-5 for "sonnet"; EvoLink does not serve it
+    ANTHROPIC_DEFAULT_SONNET_MODEL: 'claude-sonnet-5-5', // the newest Sonnet in the mock's list, which lists the older claude-sonnet-5 first
   });
-  assert.equal(s.disableAutoMode, 'disable', 'auto mode is turned off until the gateway can serve its review requests');
+  assert.equal(s.disableAutoMode, 'disable', 'auto mode is off by default: its review requests are billed to the key');
+  assert.equal(s.env.CLAUDE_CODE_AUTO_MODE_SERVER, undefined, 'only written together with --auto-mode');
   assert.equal(readJson(path.join(home, '.claude.json')).hasCompletedOnboarding, true);
   const state = readJson(path.join(home, '.evolink', 'state.json'));
   assert.ok(!JSON.stringify(state).includes(KEY.slice(3)), 'state file does not hold the key');
@@ -107,7 +111,8 @@ test('fresh setup writes settings, onboarding flag and state, then test request 
   assert.deepEqual(calls, ['GET /v1/models', 'GET /v1/credits', 'POST /v1/messages']);
   const msg = gw.requests.at(-1);
   assert.equal(msg.body.max_tokens, 1);
-  assert.equal(msg.body.model, 'claude-haiku-4-5-20251001');
+  assert.equal(msg.body.model, 'claude-haiku-5-5', 'the newest Haiku, not the first one in the list');
+  assert.match(msg.headers['user-agent'], /^evolink-config\/\d+\.\d+\.\d+$/);
   assert.equal(msg.headers.authorization, `Bearer ${KEY}`);
   assert.match(r.stdout, /Test passed/);
   assert.match(r.stdout, /All set/);
@@ -148,7 +153,7 @@ test('existing config from another vendor is fixed and reset restores it exactly
   assert.equal(s.env.ANTHROPIC_AUTH_TOKEN, KEY);
   assert.equal(s.env.ANTHROPIC_DEFAULT_OPUS_MODEL, undefined, 'unusable model override removed');
   assert.equal(s.env.ANTHROPIC_DEFAULT_HAIKU_MODEL, 'claude-haiku-4-5-20251001', 'usable override kept');
-  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5', 'Sonnet alias pinned to the newest usable Sonnet');
+  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5-5', 'Sonnet alias pinned to the newest usable Sonnet');
   assert.equal(s.env.CLAUDE_CODE_USE_BEDROCK, undefined, 'provider switch removed');
   assert.equal(s.env.API_TIMEOUT_MS, '3000000', 'unrelated env kept');
   assert.equal(s.model, undefined, 'unusable top-level model removed');
@@ -185,7 +190,7 @@ test('stale shell exports are neutralised in settings and reported with file:lin
   });
   assert.equal(r.code, 0, r.all);
   const s = settingsOf(home);
-  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5', 'unusable shell model overridden by the Sonnet pin (settings beat the shell)');
+  assert.equal(s.env.ANTHROPIC_DEFAULT_SONNET_MODEL, 'claude-sonnet-5-5', 'unusable shell model overridden by the Sonnet pin (settings beat the shell)');
   assert.equal(s.env.CLAUDE_CODE_USE_VERTEX, '', 'shell provider switch neutralised');
   assert.equal(s.env.ANTHROPIC_API_KEY, '');
   assert.ok(r.stdout.includes(`${shown}:2 · ANTHROPIC_API_KEY=sk-old-…3456`), r.stdout);
@@ -234,13 +239,64 @@ test('--auto-mode keeps auto mode on; --max-output-tokens and --disable-nonessen
   assert.equal(r.code, 0, r.all);
   const s = settingsOf(home);
   assert.equal(s.disableAutoMode, undefined);
+  // Without this, Claude Code holds the first reviewed command behind a notice about the gateway (11-12 live test).
+  assert.equal(s.env.CLAUDE_CODE_AUTO_MODE_SERVER, '0');
+  assert.match(r.stdout, /CLAUDE_CODE_AUTO_MODE_SERVER\s+\(none\) → 0/);
+  assert.doesNotMatch(r.stdout, /Auto mode is off/, 'the closing hint about turning auto mode on is only for the default');
   assert.equal(s.env.CLAUDE_CODE_MAX_OUTPUT_TOKENS, '32000');
   assert.equal(s.env.CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC, '1');
   const d = await runCli(['doctor'], { home });
   assert.match(d.stdout, /auto mode is not turned off/);
+  assert.match(d.stdout, /automode=on/);
   const rr = await runCli(['reset', '--yes'], { home });
   assert.equal(rr.code, 0, rr.all);
   assert.equal(settingsOf(home).env?.CLAUDE_CODE_MAX_OUTPUT_TOKENS, undefined);
+  assert.equal(settingsOf(home).env?.CLAUDE_CODE_AUTO_MODE_SERVER, undefined);
+});
+
+test('auto mode: off by default with a hint; --auto-mode takes the switch back; reset restores the file either way', async () => {
+  const home = tmpHome();
+  const original = { env: { API_TIMEOUT_MS: '600000' }, permissions: { allow: ['Bash(npm test)'] } };
+  const file = path.join(home, '.claude', 'settings.json');
+  fs.mkdirSync(path.dirname(file));
+  fs.writeFileSync(file, `${JSON.stringify(original, null, 2)}\n`);
+
+  // 1. default: off, and the closing notes say how to turn it on
+  const off = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });
+  assert.equal(off.code, 0, off.all);
+  assert.equal(settingsOf(home).disableAutoMode, 'disable');
+  assert.equal(settingsOf(home).env.CLAUDE_CODE_AUTO_MODE_SERVER, undefined);
+  assert.match(off.stdout, /disableAutoMode\s+\(none\) → disable/);
+  assert.match(off.stdout, /Auto mode is off: Claude Code asks before it runs a command\..* setup --auto-mode/);
+  assert.match((await runCli(['doctor'], { home })).stdout, /auto mode is off .*automode=off/s);
+
+  // 2. --auto-mode on top of that: the switch written in step 1 goes away again
+  const on = await runCli(['setup', '--yes', '--no-install', '--no-test', '--auto-mode'], { home, env: { EVOLINK_API_KEY: KEY } });
+  assert.equal(on.code, 0, on.all);
+  assert.match(on.stdout, /disableAutoMode\s+disable → \(none\).*auto mode back on/);
+  let s = settingsOf(home);
+  assert.equal(hasKey(s, 'disableAutoMode'), false, 'or auto mode would stay off whatever the flag says');
+  assert.equal(s.env.CLAUDE_CODE_AUTO_MODE_SERVER, '0');
+
+  // 3. and back to the default: off again; the leftover variable does nothing while auto mode is off
+  const off2 = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });
+  assert.equal(off2.code, 0, off2.all);
+  assert.equal(settingsOf(home).disableAutoMode, 'disable');
+
+  // 4. reset gives back exactly what was there before the first run
+  const rr = await runCli(['reset', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  assert.deepEqual(settingsOf(home), original);
+
+  // 5. a switch the user set themselves: --auto-mode removes it, reset puts it back
+  fs.writeFileSync(file, `${JSON.stringify({ ...original, disableAutoMode: 'disable' }, null, 2)}\n`);
+  const own = await runCli(['setup', '--yes', '--no-install', '--no-test', '--auto-mode'], { home, env: { EVOLINK_API_KEY: KEY } });
+  assert.equal(own.code, 0, own.all);
+  s = settingsOf(home);
+  assert.equal(hasKey(s, 'disableAutoMode'), false);
+  const rr2 = await runCli(['reset', '--yes'], { home });
+  assert.equal(rr2.code, 0, rr2.all);
+  assert.deepEqual(settingsOf(home), { ...original, disableAutoMode: 'disable' });
 });
 
 test('dry run writes nothing', async () => {
@@ -496,9 +552,131 @@ test('test home: announced as test mode, and every command shown carries the sam
   assert.doesNotMatch(r.stdout, /Open a new terminal/);
 
   // setup.sh passes EVOLINK_CMD="~/…"; after HOME="…" on the same line, ~ would still be the real home.
-  const r2 = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY, EVOLINK_CMD: '~/.evolink/bin/evolink' } });
-  assert.ok(r2.stdout.includes(`HOME=${JSON.stringify(home)} ${home}/.evolink/bin/evolink reset`), r2.stdout);
+  const r2 = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY, EVOLINK_CMD: '~/.evolink/bin/evolink-config' } });
+  assert.ok(r2.stdout.includes(`HOME=${JSON.stringify(home)} ${home}/.evolink/bin/evolink-config reset`), r2.stdout);
   assert.ok(!r2.stdout.includes(`HOME=${JSON.stringify(home)} ~`), 'no ~ after HOME=');
+});
+
+// `evolink` on PATH is the media CLI from npm (@evolinkai/cli), which has its own `setup` and `doctor`: a hint that
+// says "evolink reset" would send the user to the wrong program.
+test('hints never name the bare evolink command, even when one is on PATH', { skip: WIN }, async () => {
+  const home = tmpHome();
+  const other = path.join(home, 'npm-bin');
+  fs.mkdirSync(other);
+  fs.writeFileSync(path.join(other, 'evolink'), '#!/bin/sh\necho "this is the media CLI"\n', { mode: 0o755 });
+  const PATH = `${other}:${path.dirname(process.execPath)}:/usr/bin:/bin`;
+  const r = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY, PATH } });
+  assert.equal(r.code, 0, r.all);
+  const hints = r.stdout.split('\n').filter((l) => /Undo these changes|Having trouble|Auto mode is off/.test(l));
+  assert.equal(hints.length, 3, r.stdout);
+  for (const line of hints) {
+    assert.doesNotMatch(line, /(^|[\s"'/])evolink (reset|doctor|setup)/, line);
+    assert.ok(line.includes(`node ${CLI}`), line);
+  }
+  // With evolink-config itself on PATH, that is the name to show.
+  fs.writeFileSync(path.join(other, 'evolink-config'), `#!/bin/sh\nexec "${process.execPath}" "${CLI}" "$@"\n`, { mode: 0o755 });
+  const r2 = await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY, PATH } });
+  assert.ok(r2.stdout.includes(`HOME=${JSON.stringify(home)} evolink-config reset`), r2.stdout);
+  assert.ok(r2.stdout.includes(`HOME=${JSON.stringify(home)} evolink-config doctor`), r2.stdout);
+});
+
+// The gateway allows five key checks a minute (GET /v1/models). Somebody who runs setup, doctor and setup again in
+// quick succession gets a 429: the message has to say how long to wait, or the next try fails the same way.
+test('a rate-limited key check says how many seconds to wait and writes nothing', async () => {
+  const home = tmpHome();
+  const r = await runCli(['setup', '--yes', '--no-install'], { home, env: { EVOLINK_API_KEY: RATE_KEY } });
+  assert.notEqual(r.code, 0, r.all);
+  noFullKey(r, RATE_KEY);
+  assert.match(r.all, /Rate limited \(429\); try again in 54 seconds\./);
+  assert.ok(!fs.existsSync(path.join(home, '.claude', 'settings.json')), 'nothing is written when the key could not be checked');
+  const zh = await runCli(['setup', '--yes', '--no-install', '--lang', 'zh'], { home, env: { EVOLINK_API_KEY: RATE_KEY } });
+  assert.match(zh.all, /请求太频繁（429），请等 54 秒后再试。/);
+  const codex = await runCli(['setup', 'codex', '--yes', '--no-install'], { home, env: { EVOLINK_API_KEY: RATE_KEY } });
+  assert.notEqual(codex.code, 0, codex.all);
+  assert.match(codex.all, /try again in 54 seconds/);
+});
+
+// dist/setup.sh is what `curl … | bash` runs; it is rebuilt from the source with `npm run build`.
+test('setup.sh installs the launcher as evolink-config and takes an old evolink launcher of ours away', { skip: WIN }, async () => {
+  const script = fileURLToPath(new URL('../dist/setup.sh', import.meta.url));
+  const version = /export const VERSION = '([^']+)'/.exec(fs.readFileSync(CLI, 'utf8'))[1];
+  const sh = (home, args) =>
+    new Promise((resolve) => {
+      const child = spawn('/bin/bash', [script, ...args], { cwd: home, env: { ...homeEnv(home), LANG: 'en_US.UTF-8', NO_COLOR: '1' } });
+      let out = '';
+      child.stdout.on('data', (d) => (out += d));
+      child.stderr.on('data', (d) => (out += d));
+      child.stdin.end();
+      child.on('close', (code) => resolve({ code, out }));
+    });
+  const bin = (home, name) => path.join(home, '.evolink', 'bin', name);
+  const plant = (home, body) => {
+    fs.mkdirSync(path.join(home, '.evolink', 'bin'), { recursive: true });
+    fs.writeFileSync(bin(home, 'evolink'), body, { mode: 0o755 });
+  };
+
+  // 1. A machine that ran 0.4.0: its launcher was called "evolink".
+  const upgraded = tmpHome();
+  plant(upgraded, '#!/bin/sh\n# EvoLink CLI launcher (version 0.4.0)\nexec node "$HOME/.evolink/cli/evolink.mjs" "$@"\n');
+  const r = await sh(upgraded, ['--version']);
+  assert.equal(r.code, 0, r.out);
+  assert.equal(r.out.trim(), version, 'dist/setup.sh is out of date: run `npm run build`');
+  assert.ok(fs.existsSync(bin(upgraded, 'evolink-config')), 'new launcher');
+  assert.equal(fs.statSync(bin(upgraded, 'evolink-config')).mode & 0o777, 0o755);
+  assert.match(fs.readFileSync(bin(upgraded, 'evolink-config'), 'utf8'), new RegExp(`^#!/bin/sh\\n# evolink-config launcher \\(version ${version.replace(/\./g, '\\.')}\\)\\n`));
+  assert.ok(!fs.existsSync(bin(upgraded, 'evolink')), 'the launcher 0.4.0 left behind is removed: `evolink` now means the media CLI');
+  assert.ok(fs.existsSync(path.join(upgraded, '.evolink', 'cli', 'evolink.mjs')));
+
+  // 2. The launcher it installed runs the tool.
+  const viaLauncher = await new Promise((resolve) => {
+    const child = spawn(bin(upgraded, 'evolink-config'), ['--version'], { env: { ...homeEnv(upgraded) } });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.on('close', (code) => resolve({ code, out }));
+  });
+  assert.equal(viaLauncher.code, 0);
+  assert.equal(viaLauncher.out.trim(), version);
+
+  // 3. A file called "evolink" that this tool did not write is somebody else's: left exactly as it is.
+  const foreign = tmpHome();
+  const theirs = '#!/bin/sh\necho "some other tool"\n';
+  plant(foreign, theirs);
+  const r2 = await sh(foreign, ['--version']);
+  assert.equal(r2.code, 0, r2.out);
+  assert.equal(fs.readFileSync(bin(foreign, 'evolink'), 'utf8'), theirs);
+  assert.ok(fs.existsSync(bin(foreign, 'evolink-config')));
+
+  // 4. The commands the tool then shows point at the new launcher (setup.sh hands the path over in EVOLINK_CMD).
+  const fresh = tmpHome();
+  const r3 = await new Promise((resolve) => {
+    const child = spawn('/bin/bash', [script, '--yes', '--no-install', '--no-test'], { cwd: fresh, env: { ...homeEnv(fresh), LANG: 'en_US.UTF-8', NO_COLOR: '1', EVOLINK_BASE_URL: gw.url, EVOLINK_API_KEY: KEY } });
+    let out = '';
+    child.stdout.on('data', (d) => (out += d));
+    child.stderr.on('data', (d) => (out += d));
+    child.stdin.end();
+    child.on('close', (code) => resolve({ code, out }));
+  });
+  assert.equal(r3.code, 0, r3.out);
+  assert.ok(r3.out.includes(`${fresh}/.evolink/bin/evolink-config reset`), r3.out);
+  assert.ok(r3.out.includes(`${fresh}/.evolink/bin/evolink-config doctor`), r3.out);
+  assert.ok(r3.out.includes(`${fresh}/.evolink/bin/evolink-config setup --auto-mode`), r3.out);
+  assert.doesNotMatch(r3.out, /\.evolink\/bin\/evolink (reset|doctor|setup)/);
+  assert.ok(!r3.out.includes(KEY.slice(3)), 'the full key must never be printed');
+});
+
+test('help and version name the tool evolink-config', async () => {
+  const home = tmpHome();
+  const h = await runCli(['--help'], { home });
+  assert.equal(h.code, 0);
+  assert.match(h.stdout, /^evolink-config v\d+\.\d+\.\d+: /);
+  assert.match(h.stdout, /\n {2}evolink-config \[setup\] /);
+  assert.match(h.stdout, /\n {2}evolink-config doctor /);
+  assert.match(h.stdout, /\n {2}evolink-config reset /);
+  assert.doesNotMatch(h.stdout, /(^|[\s`])evolink (setup|doctor|reset|\[setup\])/m, 'the bare name belongs to another tool');
+  assert.doesNotMatch(h.stdout, /EvoLink CLI/);
+  const zh = await runCli(['--help', '--lang', 'zh'], { home });
+  assert.match(zh.stdout, /^evolink-config v\d+\.\d+\.\d+：/);
+  assert.doesNotMatch(zh.stdout, /(^|[\s`，：])evolink (setup|doctor|reset|\[setup\])/m);
 });
 
 test('run through the installed launcher, hints name the launcher', { skip: process.platform === 'win32' }, async () => {
@@ -508,7 +686,7 @@ test('run through the installed launcher, hints name the launcher', { skip: proc
   fs.mkdirSync(cliDir, { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
   fs.copyFileSync(CLI, path.join(cliDir, 'evolink.mjs'));
-  const launcher = path.join(binDir, 'evolink');
+  const launcher = path.join(binDir, 'evolink-config');
   fs.writeFileSync(launcher, `#!/bin/sh\nexec "${process.execPath}" "${path.join(cliDir, 'evolink.mjs')}" "$@"\n`, { mode: 0o755 });
   await runCli(['setup', '--yes', '--no-install', '--no-test'], { home, env: { EVOLINK_API_KEY: KEY } });
   const d = await new Promise((resolve) => {
@@ -706,7 +884,7 @@ test('reset without a target undoes Claude Code and Codex together (one JSON doc
   await runCli(['setup', 'codex', '--yes', '--no-install', '--no-test'], { home: home2, env: { EVOLINK_API_KEY: CODEX_KEY } });
   const r2 = await runCli(['reset', '--yes'], { home: home2 });
   assert.equal(r2.code, 0, r2.all);
-  assert.doesNotMatch(r2.stdout, /No changes recorded by evolink setup;/);
+  assert.doesNotMatch(r2.stdout, /No changes recorded by evolink-config setup;/);
   assert.ok(!fs.existsSync(codexProfile(home2)));
 });
 
@@ -842,7 +1020,7 @@ test('setup codex --vscode: EvoLink goes into config.toml, the rest stays, the e
   assert.match(cfg, /^model_provider = "evolink-cli"$/m);
   assert.match(cfg, /^web_search = "disabled"$/m);
   assert.ok(cfg.indexOf('model_provider = ') < cfg.indexOf('[mcp_servers.docs]'), 'top-level keys stay above the first table');
-  assert.match(cfg, /\n\n# EvoLink, added by `evolink setup codex --vscode` \(undo: evolink reset codex\)\n\[model_providers\.evolink-cli\]\nname = "EvoLink"\nbase_url = "http:\/\/127\.0\.0\.1:\d+\/v1"\nwire_api = "responses"\n/);
+  assert.match(cfg, /\n\n# EvoLink, added by `evolink-config setup codex --vscode` \(undo: evolink-config reset codex\)\n\[model_providers\.evolink-cli\]\nname = "EvoLink"\nbase_url = "http:\/\/127\.0\.0\.1:\d+\/v1"\nwire_api = "responses"\n/);
   assert.ok(cfg.includes(`experimental_bearer_token = "${CODEX_KEY}"`));
   assert.ok(cfg.includes('args = [\n  "-y", "docs-mcp", # [not a table]\n]\n'), 'the multi-line array is untouched');
   assert.ok(cfg.includes('[projects."/work/app"]\ntrust_level = "trusted"\n'));
@@ -871,7 +1049,26 @@ test('setup codex --vscode: EvoLink goes into config.toml, the rest stays, the e
   assert.equal(fs.readFileSync(codexConfig(home), 'utf8'), `${USER_CODEX_CONFIG}\n[projects."/work/other"]\ntrust_level = "trusted"\n`);
   assert.equal(fs.statSync(codexConfig(home)).mode & 0o777, 0o644, 'the old permissions come back with the key gone');
   const rr2 = await runCli(['reset', 'codex', '--yes'], { home });
-  assert.match(rr2.stdout, /No changes recorded by evolink setup codex/);
+  assert.match(rr2.stdout, /No changes recorded by evolink-config setup codex/);
+});
+
+test('reset codex also undoes a config.toml written by 0.4.0, whose marker line names the old command', { skip: WIN }, async () => {
+  const home = tmpHome();
+  fs.mkdirSync(codexDir(home));
+  fs.writeFileSync(codexConfig(home), USER_CODEX_CONFIG, { mode: 0o644 });
+  const editor = fakeEditorCli(home);
+  const r = await runCli(['setup', 'codex', '--vscode', '--yes', '--no-test'], { home, env: { EVOLINK_API_KEY: CODEX_KEY, PATH: editor.PATH } });
+  assert.equal(r.code, 0, r.all);
+  const now = '# EvoLink, added by `evolink-config setup codex --vscode` (undo: evolink-config reset codex)';
+  const was = '# EvoLink, added by `evolink setup codex --vscode` (undo: evolink reset codex)';
+  const cfg = fs.readFileSync(codexConfig(home), 'utf8');
+  assert.ok(cfg.includes(`${now}\n[model_providers.evolink-cli]`), cfg);
+  fs.writeFileSync(codexConfig(home), cfg.replace(now, was));
+  const rr = await runCli(['reset', 'codex', '--yes'], { home });
+  assert.equal(rr.code, 0, rr.all);
+  const back = fs.readFileSync(codexConfig(home), 'utf8');
+  assert.ok(!back.includes('added by `evolink setup codex'), 'the old marker line goes with the table');
+  assert.equal(back, USER_CODEX_CONFIG);
 });
 
 test('setup codex --vscode: dry run and --no-install-extension; a broken or conflicting config.toml stops before writing; Enter means No', { skip: WIN }, async () => {

@@ -22,15 +22,21 @@ const b64 = (s) => Buffer.from(s, 'utf8').toString('base64');
 
 let sh = fs.readFileSync(path.join(root, 'scripts', 'templates', 'setup.sh'), 'utf8');
 // The heredoc writes the body without its final newline plus one newline, i.e. exactly `body`.
-sh = sh.replaceAll('__EVOLINK_VERSION__', version).replace('__EVOLINK_CLI_SHA256__', sha).replace('__EVOLINK_CLI_SOURCE__\n', body);
+// The source goes in through a function: as a plain replacement string, a "$`", "$&" or "$'" in the source would be
+// taken as a replacement pattern and the embedded copy would no longer match its checksum.
+sh = sh.replaceAll('__EVOLINK_VERSION__', version).replace('__EVOLINK_CLI_SHA256__', sha).replace('__EVOLINK_CLI_SOURCE__\n', () => body);
+const inSh = /<<'__EVOLINK_CLI_EOF__'\n([\s\S]*?)__EVOLINK_CLI_EOF__\n/.exec(sh)?.[1];
+if (inSh !== body) throw new Error('setup.sh: the embedded CLI is not bin/evolink.mjs byte for byte');
 
 let ps = fs.readFileSync(path.join(root, 'scripts', 'templates', 'setup.ps1'), 'utf8');
 ps = ps
   .replaceAll('__EVOLINK_VERSION__', version)
   .replace('__EVOLINK_CLI_SHA256__', sha)
-  .replace('__EVOLINK_CLI_B64__', b64(body).match(/.{1,120}/g).join('\n'))
+  .replace('__EVOLINK_CLI_B64__', () => b64(body).match(/.{1,120}/g).join('\n'))
   .replace(/\{\{zh:([^}]*)\}\}/g, (_, text) => b64(text));
 if (/[^\x00-\x7f]/.test(ps)) throw new Error('setup.ps1 must be ASCII only');
+const inPs = /\$cliB64 = @'\n([\s\S]*?)\n'@/.exec(ps)?.[1];
+if (!inPs || Buffer.from(inPs.replace(/\s/g, ''), 'base64').toString('utf8') !== body) throw new Error('setup.ps1: the embedded CLI is not bin/evolink.mjs byte for byte');
 ps = ps.replace(/\r?\n/g, '\r\n');
 
 const dist = path.join(root, 'dist');

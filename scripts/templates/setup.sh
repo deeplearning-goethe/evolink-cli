@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# EvoLink one-command setup for Claude Code and Codex (macOS / Linux), version __EVOLINK_VERSION__
+# EvoLink one-command API setup for Claude Code and Codex (macOS / Linux): evolink-config, version __EVOLINK_VERSION__
 #
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash
-#   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5
+#   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- --model claude-sonnet-5-5
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- codex
 #   curl -fsSL https://cdn.evolink.ai/cli/setup.sh | bash -s -- doctor
 #
-# What it does: finds Node.js (18+), saves the EvoLink CLI to ~/.evolink/cli, adds a launcher at
-# ~/.evolink/bin/evolink, then runs `evolink setup`. It does not change your PATH or shell profile.
-# The CLI source is embedded below and verified against its SHA-256 before it runs.
+# What it does: finds Node.js (18+), saves evolink-config to ~/.evolink/cli, adds a launcher at
+# ~/.evolink/bin/evolink-config, then runs `evolink-config setup`. It does not change your PATH or shell profile.
+# The tool's source is embedded below and verified against its SHA-256 before it runs.
 
 set -u
 
@@ -70,10 +70,14 @@ __EVOLINK_CLI_EOF__
     return 1
   fi
   mv -f "$tmp" "$cli"
-  local launcher="$home_dir/bin/evolink"
+  # Up to 0.4.0 the launcher was called "evolink", which is now the name of a different tool (the media CLI on npm).
+  # Take that launcher away, but only when it is the one this script wrote.
+  local old_launcher="$home_dir/bin/evolink"
+  if [ -f "$old_launcher" ] && grep -q '^# EvoLink CLI launcher' "$old_launcher" 2>/dev/null; then rm -f "$old_launcher"; fi
+  local launcher="$home_dir/bin/evolink-config"
   {
     printf '#!/bin/sh\n'
-    printf '# EvoLink CLI launcher (version %s)\n' "$version"
+    printf '# evolink-config launcher (version %s)\n' "$version"
     printf 'NODE="${EVOLINK_NODE:-$(command -v node 2>/dev/null)}"\n'
     printf '[ -x "$NODE" ] || NODE="%s"\n' "$node"
     printf 'exec "$NODE" "%s" "$@"\n' "$cli"

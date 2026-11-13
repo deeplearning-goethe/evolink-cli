@@ -10,6 +10,10 @@ import {
   suggestModel,
   pickTestModel,
   pickSonnetPin,
+  pickNewestClaude,
+  recommendedModels,
+  RECOMMENDED_MODELS,
+  TOOL_NAME,
   planEnvChanges,
   applyEnvChanges,
   recordChanges,
@@ -254,6 +258,23 @@ test('failure description maps gateway errors', () => {
   assert.equal(describeFailure({ status: 0, error: { name: 'TimeoutError' } }).kind, 'timeout');
 });
 
+test('a 429 says how long to wait when the gateway does', () => {
+  // The real answer of 2026-11-13: header "Retry-After: 54" and this message.
+  const live = 'Rate limit exceeded for path (GET /v1/models): rpm=5. Retry after 54 seconds.';
+  const r = (extra) => ({ status: 429, json: { error: { code: 'rate_limit_exceeded', message: `${live} (request id: 2026)` } }, ...extra });
+  assert.deepEqual(describeFailure(r({ retryAfter: '54' })), { kind: 'rate', status: 429, message: live, retryAfter: 54 });
+  assert.equal(describeFailure(r({ retryAfter: '7' })).retryAfter, 7, 'the header wins over the number in the message');
+  assert.equal(describeFailure(r({ retryAfter: null })).retryAfter, 54, 'no header: the number in the message');
+  assert.equal(describeFailure(r({})).retryAfter, 54);
+  // Nothing usable: no number is made up, and the old wording stays.
+  const bare = (retryAfter, message = 'slow down') => describeFailure({ status: 429, json: { error: { message } }, retryAfter });
+  for (const v of [null, undefined, '', '0', '-5', 'Wed, 21 Oct 2026 07:28:00 GMT', '99999', '1.5']) {
+    assert.deepEqual(bare(v), { kind: 'rate', status: 429, message: 'slow down' }, `Retry-After ${JSON.stringify(v)}`);
+  }
+  assert.equal(bare(null, 'Retry after 0 seconds').retryAfter, undefined);
+  assert.equal(bare(' 12 ').retryAfter, 12);
+});
+
 test('version comparison', () => {
   assert.equal(compareVersions('2.1.260', '2.1.283'), -1);
   assert.equal(compareVersions('2.1.283', '2.1.283'), 0);
@@ -287,6 +308,100 @@ test('sonnet pin picks the newest Sonnet the key can use', () => {
   assert.equal(pickSonnetPin(new Set()), null);
 });
 
+// The Claude models the test key could use on 2026-11-12 (live /v1/models), in the order the gateway listed them.
+const LIVE_CLAUDE_1112 = [
+  'claude-fable-5', 'claude-fable-5-1', 'claude-fable-5-2', 'claude-haiku-4-5-20251001', 'claude-haiku-5-5', 'claude-opus-4-5-20251101', 'claude-opus-4-6',
+  'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-opus-5-5', 'claude-sonnet-4-5-20250929', 'claude-sonnet-4-6', 'claude-sonnet-5', 'claude-sonnet-5-5',
+];
+
+test('model picker: the newest model of each family the key can use', () => {
+  const live = new Set([...LIVE_CLAUDE_1112, 'gpt-6.1-sol', 'gemini-3.8-flash']);
+  assert.deepEqual(recommendedModels(live).map((m) => m.id), ['claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-2', 'claude-haiku-5-5']);
+  for (const m of recommendedModels(live)) assert.ok(m.zh && m.en, 'every entry keeps its description');
+  // What 0.4.0 listed by name (claude-sonnet-5, claude-fable-5-1, claude-haiku-4-5-20251001) is still offered when
+  // nothing newer exists for the key.
+  const older = new Set(['claude-opus-5-5', 'claude-sonnet-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
+  assert.deepEqual(recommendedModels(older).map((m) => m.id), ['claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-haiku-4-5-20251001']);
+  // A family the key lacks is left out; a release that does not exist yet is picked up without a code change.
+  assert.deepEqual(recommendedModels(new Set(['claude-sonnet-6', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'gpt-6-luna'])).map((m) => m.id), ['claude-sonnet-6', 'claude-haiku-5-5']);
+  assert.deepEqual(recommendedModels(new Set(['gpt-6-luna'])), []);
+  // Unknown list (--skip-checks): the ids named in RECOMMENDED_MODELS, which must themselves be the newest of the live list.
+  const listed = RECOMMENDED_MODELS.map((m) => m.id);
+  assert.deepEqual(recommendedModels(new Set()).map((m) => m.id), listed);
+  assert.deepEqual(recommendedModels(null).map((m) => m.id), listed);
+  assert.deepEqual(listed, recommendedModels(live).map((m) => m.id));
+  assert.deepEqual(RECOMMENDED_MODELS.map((m) => m.family), ['sonnet', 'opus', 'fable', 'haiku']);
+});
+
+test('newest of a family: versions compare as numbers; only plain ids count', () => {
+  assert.equal(pickNewestClaude('haiku', new Set(LIVE_CLAUDE_1112)), 'claude-haiku-5-5');
+  assert.equal(pickNewestClaude('fable', new Set(LIVE_CLAUDE_1112)), 'claude-fable-5-2');
+  assert.equal(pickNewestClaude('opus', new Set(LIVE_CLAUDE_1112)), 'claude-opus-5-5');
+  assert.equal(pickNewestClaude('opus', new Set(['claude-opus-4-8', 'claude-opus-4-10', 'claude-opus-4-9'])), 'claude-opus-4-10', '10 is newer than 9');
+  assert.equal(pickNewestClaude('opus', new Set(['claude-opus-5-5', 'claude-opus-10'])), 'claude-opus-10', 'majors compare as numbers too');
+  // Previews, variants and other vendors' look-alikes are never offered by default.
+  const odd = new Set(['claude-sonnet-6-preview', 'claude-sonnet-5-5-thinking', 'claude-sonnet-latest', 'claude-3-5-sonnet-20241022', 'xclaude-sonnet-9', 'claude-sonnet-9x', 'claude-sonnet-5']);
+  assert.equal(pickNewestClaude('sonnet', odd), 'claude-sonnet-5');
+  assert.equal(pickNewestClaude('sonnet', new Set(['claude-sonnet-6-preview'])), null);
+  // The family name is matched whole.
+  assert.equal(pickNewestClaude('opus', new Set(['claude-opusplan-9', 'claude-opus-5'])), 'claude-opus-5');
+  assert.equal(pickNewestClaude('haiku', new Set(['claude-sonnet-5'])), null);
+});
+
+test('newest of a family agrees with a plain sort on random model lists (seeded)', () => {
+  // Small deterministic generator, so a failure can be replayed from the seed in the message.
+  const rng = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 2 ** 32;
+  };
+  const families = ['sonnet', 'opus', 'haiku', 'fable'];
+  for (let seed = 1; seed <= 300; seed++) {
+    const r = rng(seed);
+    const int = (n) => Math.floor(r() * n);
+    const ids = [];
+    const ranks = new Map();
+    const n = 1 + int(12);
+    for (let i = 0; i < n; i++) {
+      const family = families[int(families.length)];
+      const major = 3 + int(9); // 3..11, so two-digit majors are covered
+      const hasMinor = r() < 0.7;
+      const minor = hasMinor ? int(12) : 0; // 0..11
+      const dated = r() < 0.35;
+      const id = `claude-${family}-${major}${hasMinor ? `-${minor}` : ''}${dated ? `-2025${String(1 + int(12)).padStart(2, '0')}${String(1 + int(28)).padStart(2, '0')}` : ''}`;
+      if (ranks.has(id)) continue;
+      ids.push(id);
+      ranks.set(id, { family, key: [major, minor, dated ? 0 : 1] });
+    }
+    // Noise that must never win.
+    ids.push('claude-sonnet-99-preview', 'gpt-99', 'claude-3-5-haiku-20241022');
+    // Shuffle: the answer must not depend on the order of the list.
+    for (let i = ids.length - 1; i > 0; i--) {
+      const j = int(i + 1);
+      [ids[i], ids[j]] = [ids[j], ids[i]];
+    }
+    for (const family of families) {
+      const mine = [...ranks.entries()].filter(([, v]) => v.family === family);
+      mine.sort(([, a], [, b]) => b.key[0] - a.key[0] || b.key[1] - a.key[1] || b.key[2] - a.key[2]);
+      const want = mine.length ? mine[0][1].key : null;
+      const got = pickNewestClaude(family, new Set(ids));
+      // Two ids can share a rank ("claude-opus-5" and "claude-opus-5-0"); either is a right answer.
+      assert.deepEqual(got === null ? null : ranks.get(got)?.key, want, `seed ${seed}, family ${family}, ids ${ids.join(' ')} -> ${got}`);
+      if (got !== null) assert.equal(ranks.get(got).family, family, `seed ${seed}: ${got} is not a ${family} model`);
+    }
+  }
+});
+
+test('test request: the newest Haiku, wherever it sits in the list', () => {
+  assert.equal(pickTestModel(null, new Set(LIVE_CLAUDE_1112)), 'claude-haiku-5-5');
+  assert.equal(pickTestModel(null, new Set([...LIVE_CLAUDE_1112].reverse())), 'claude-haiku-5-5');
+  assert.equal(pickTestModel('claude-opus-5-5', new Set(LIVE_CLAUDE_1112)), 'claude-opus-5-5', 'the model the user picked is the one tested');
+  assert.equal(pickTestModel('claude-opus-9', new Set(LIVE_CLAUDE_1112)), 'claude-haiku-5-5', 'a model the key lacks is not tested');
+  // A Haiku with an old-style name still beats a pricier family; then the newest Sonnet; then anything Claude.
+  assert.equal(pickTestModel(null, new Set(['claude-opus-5-5', 'claude-3-5-haiku-20241022', 'claude-sonnet-5-5'])), 'claude-3-5-haiku-20241022');
+  assert.equal(pickTestModel(null, new Set(['claude-opus-5-5', 'claude-sonnet-5', 'claude-sonnet-5-5'])), 'claude-sonnet-5-5');
+  assert.equal(pickTestModel(null, new Set(['claude-opus-5-5', 'gpt-6-luna'])), 'claude-opus-5-5');
+});
+
 test('Codex models: GPT text models only, image models left out', () => {
   const ids = new Set(['gpt-6-sol', 'gpt-5.5', 'gpt-image-2', 'gpt-4o-image', 'gpt-image-1.5-lite', 'claude-sonnet-5', 'gemini-3.8-flash', 'gpt-6.1-sol']);
   assert.deepEqual(codexModelIds(ids), ['gpt-5.5', 'gpt-6-sol', 'gpt-6.1-sol']);
@@ -302,6 +417,12 @@ test('Codex profile: written whole, read back, strings escaped for TOML', () => 
   assert.match(text, /^base_url = "https:\/\/direct\.evolink\.ai\/v1"$/m);
   assert.match(text, /^wire_api = "responses"$/m);
   assert.doesNotMatch(text, /approvals_reviewer|model_catalog_json/);
+  // The header a user reads when they open the file: the command that wrote it, the docs page, how to undo.
+  const header = text.split('\n').slice(0, 3);
+  assert.equal(header[0], '# EvoLink profile for Codex, written by `evolink-config setup codex` (https://evolink.ai/docs/en/integration-guide/quick-setup).');
+  assert.equal(header[1], '# Start Codex with:  codex -p evolink        Undo:  evolink-config reset codex');
+  assert.doesNotMatch(text, /github\.com/, 'no repository address in a file written on the user\'s machine');
+  assert.doesNotMatch(text, /`evolink setup|evolink reset/, 'the bare name is another tool');
   // Top-level keys must come before the first [table], or TOML puts them inside it.
   const withReviewer = renderCodexProfile({ base: 'https://direct.evolink.ai', key: KEY, model: 'gpt-6.1-sol', reviewer: 'user' });
   assert.ok(withReviewer.indexOf('approvals_reviewer = "user"') < withReviewer.indexOf('[model_providers'));
@@ -457,6 +578,17 @@ test('TOML tables: create, update in place, read back, remove without eating nei
   const replaced = upsertTomlTable(had, PROV, [['name', '"EvoLink"']], MARK);
   assert.equal(replaceTomlTable(replaced, PROV, readTomlTable(had, PROV).lines, MARK), had);
   assert.equal(replaceTomlTable('a = 1\n', PROV, null, MARK), 'a = 1\n', 'no table: unchanged');
+  // Several accepted spellings of the marker (0.4.0 wrote it with the old command name): whichever is there goes.
+  const OLD = '# added by an older version';
+  for (const there of [MARK, OLD]) {
+    const withTable = upsertTomlTable(text, PROV, [['name', '"EvoLink"']], there);
+    assert.ok(withTable.includes(`${there}\n[model_providers.evolink-cli]`), there);
+    assert.equal(replaceTomlTable(withTable, PROV, null, [MARK, OLD]), text, `marker "${there}" removed with the table`);
+  }
+  // A comment that is neither spelling belongs to the user and stays.
+  const theirs = upsertTomlTable(text, PROV, [['name', '"EvoLink"']], '# my own note');
+  assert.ok(replaceTomlTable(theirs, PROV, null, [MARK, OLD]).includes('# my own note'));
+  assert.equal(TOOL_NAME, 'evolink-config');
 });
 
 test('TOML edits undo exactly (the fallback reset path)', () => {

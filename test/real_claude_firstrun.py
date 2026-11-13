@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Which first-run screens does the real Claude Code show after `evolink setup`?
+"""Which first-run screens does the real Claude Code show after `evolink-config setup`?
 
 Starts the interactive `claude` in a pseudo-terminal, in a throwaway HOME, against the local
 mock gateway, and reports the screens it lands on:
-  A. evolink setup as shipped (onboarding flag written), project folder not trusted
+  A. evolink-config setup as shipped (onboarding flag written), project folder not trusted
   B. same settings but a fresh ~/.claude.json (no onboarding flag)
-  C. evolink setup --trust <project>
+  C. evolink-config setup --trust <project>
 
     python3 test/real_claude_firstrun.py [path-to-claude] [--check] [--dump]
 

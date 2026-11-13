@@ -38,7 +38,15 @@ await new Promise((resolve) => srv.listen(0, '127.0.0.1', resolve));
 const url = (name) => `http://127.0.0.1:${srv.address().port}/cli/${name}`;
 
 const newProfile = () => fs.mkdtempSync(path.join(os.tmpdir(), 'evolink-ps-'));
-const launcherOf = (p) => path.join(p, '.evolink', 'bin', 'evolink.cmd');
+const launcherOf = (p) => path.join(p, '.evolink', 'bin', 'evolink-config.cmd');
+// Up to 0.4.0 the launcher was evolink.cmd; that name now belongs to the media CLI from npm.
+const oldLauncherOf = (p) => path.join(p, '.evolink', 'bin', 'evolink.cmd');
+const OLD_LAUNCHER = '@echo off\r\nrem EvoLink CLI launcher (version 0.4.0)\r\n"node" "evolink.mjs" %*\r\n';
+const FOREIGN_LAUNCHER = '@echo off\r\necho some other tool\r\n';
+const plant = (file, body) => {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, body);
+};
 const settingsOf = (p) => path.join(p, '.claude', 'settings.json');
 
 function ps(shell, profile, command) {
@@ -81,12 +89,15 @@ for (const shell of shells) {
 
   // 1. The documented form with arguments.
   const p1 = newProfile();
+  plant(oldLauncherOf(p1), OLD_LAUNCHER);
   const setup = await ps(shell, p1, `& ([scriptblock]::Create((irm '${url('setup.ps1')}'))) --yes --no-install`);
   const settings = fs.existsSync(settingsOf(p1)) ? JSON.parse(fs.readFileSync(settingsOf(p1), 'utf8')) : null;
   check(`${shell}: setup exits 0`, setup.code === 0, setup.out);
   check(`${shell}: settings written with the key`, settings?.env?.ANTHROPIC_AUTH_TOKEN === KEY && settings?.env?.ANTHROPIC_API_KEY === '', setup.out);
   check(`${shell}: test request passed`, /Test passed/.test(setup.out), setup.out);
-  check(`${shell}: launcher installed`, fs.existsSync(launcherOf(p1)));
+  check(`${shell}: launcher installed as evolink-config.cmd`, fs.existsSync(launcherOf(p1)));
+  check(`${shell}: the old evolink.cmd launcher of ours is taken away`, !fs.existsSync(oldLauncherOf(p1)));
+  check(`${shell}: the commands shown name the new launcher`, /\.evolink\\bin\\evolink-config\.cmd" reset/.test(setup.out) && !/bin\\evolink\.cmd/.test(setup.out), setup.out);
   check(`${shell}: key never printed in full`, !setup.out.includes(KEY.slice(3)));
 
   // 2. The launcher it installed: doctor, then reset.
@@ -98,8 +109,10 @@ for (const shell of shells) {
 
   // 3. irm … | iex, no arguments: interactive, so with stdin closed it stops at the first question.
   const p3 = newProfile();
+  plant(oldLauncherOf(p3), FOREIGN_LAUNCHER);
   const iex = await ps(shell, p3, `irm '${url('setup.ps1')}' | iex`);
   check(`${shell}: irm | iex starts setup and stops cleanly without input`, /EvoLink setup/.test(iex.out) && iex.code === 130 && fs.existsSync(launcherOf(p3)), `exit ${iex.code}\n${iex.out}`);
+  check(`${shell}: an evolink.cmd that is not ours is left alone`, fs.existsSync(oldLauncherOf(p3)) && fs.readFileSync(oldLauncherOf(p3), 'utf8') === FOREIGN_LAUNCHER);
 
   // 4. A damaged download must not run and must not write anything.
   const p4 = newProfile();
